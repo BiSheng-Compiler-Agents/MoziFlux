@@ -1,0 +1,4 @@
+latency-case-1: 15866.035
+# raw-op-statistic-case-1: {"ops":[{"op_type":"_softmax_row_fwd_db_kernel","avg_time_us":15866.035},{"op_type":"DSARandomUniform","avg_time_us":151405.765}]}
+# resolved-kernels-case-1: _softmax_row_fwd_db_kernel
+# kernel-source-case-1: metadata+operator

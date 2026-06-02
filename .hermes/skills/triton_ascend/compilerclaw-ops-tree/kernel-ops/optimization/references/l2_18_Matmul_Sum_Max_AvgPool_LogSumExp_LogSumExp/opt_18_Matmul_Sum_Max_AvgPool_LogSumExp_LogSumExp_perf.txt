@@ -1,0 +1,4 @@
+latency-case-1: 33.687
+# raw-op-statistic-case-1: {"ops":[{"op_type":"_rowwise_linear_sum_kernel","avg_time_us":33.687},{"op_type":"DSARandomUniform","avg_time_us":790.936},{"op_type":"ReduceSum","avg_time_us":128.413},{"op_type":"Add","avg_time_us":1.321}]}
+# resolved-kernels-case-1: _fused_linear_sum_kernel,_rowwise_linear_sum_kernel
+# kernel-source-case-1: metadata+operator
