@@ -1,0 +1,11 @@
+name: cannsim-remote
+version: 2.0.0
+description: "Build a Triton test binary on a remote Ascend machine, run cannsim record, generate trace_core0.json via cannsim report, and return the trace for optimization analysis"
+author: "Hermes Agent & Shayan"
+requires_env:
+  - CANNSIM_REMOTE_HOST
+  - CANNSIM_REMOTE_USER
+  - CANNSIM_REMOTE_PASS
+  - CANNSIM_REMOTE_PORT
+provides_tools:
+  - cannsim_remote_run

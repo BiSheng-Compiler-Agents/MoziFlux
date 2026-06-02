@@ -1,0 +1,8 @@
+**/.vscode/
+**/.idea/
+**/__pycache__/
+**/.venv/
+**/logs/
+**/outputs/
+**/.env/
+**/datasets/

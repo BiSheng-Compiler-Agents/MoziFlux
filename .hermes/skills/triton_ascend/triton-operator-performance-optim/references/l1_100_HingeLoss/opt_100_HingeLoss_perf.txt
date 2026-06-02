@@ -1,0 +1,4 @@
+latency-case-1: 1.1
+# raw-op-statistic-case-1: {"ops":[{"op_type":"_hinge_loss_partial_kernel","avg_time_us":3.29},{"op_type":"_hinge_loss_sum_kernel","avg_time_us":1.1}]}
+# resolved-kernels-case-1: _hinge_loss_sum_kernel
+# kernel-source-case-1: metadata

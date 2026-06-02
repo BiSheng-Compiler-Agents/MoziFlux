@@ -1,0 +1,4 @@
+latency-case-1: NA
+# latency-error-case-1: No op_statistic_*.csv found under /tmp/triton-agent-msprof-bkn3kh86
+# resolved-kernels-case-1: _gelu_fwd_kernel
+# kernel-source-case-1: metadata+operator

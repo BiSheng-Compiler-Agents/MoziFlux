@@ -1,0 +1,4 @@
+latency-case-1: 10858.532
+# raw-op-statistic-case-1: {"ops":[{"op_type":"_relu_kernel","avg_time_us":10858.532},{"op_type":"DSARandomNormal","avg_time_us":151477.226}]}
+# resolved-kernels-case-1: _relu_kernel
+# kernel-source-case-1: metadata+operator

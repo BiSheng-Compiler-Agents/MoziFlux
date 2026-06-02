@@ -1,0 +1,4 @@
+latency-case-1: 5.344
+# raw-op-statistic-case-1: {"ops":[{"op_type":"Transpose","avg_time_us":12974.019},{"op_type":"DSARandomNormal","avg_time_us":177449.885},{"op_type":"Cast","avg_time_us":9242.505},{"op_type":"_rmsnorm_nchw_kernel","avg_time_us":5.344}]}
+# resolved-kernels-case-1: _rmsnorm_nchw_kernel
+# kernel-source-case-1: metadata+operator

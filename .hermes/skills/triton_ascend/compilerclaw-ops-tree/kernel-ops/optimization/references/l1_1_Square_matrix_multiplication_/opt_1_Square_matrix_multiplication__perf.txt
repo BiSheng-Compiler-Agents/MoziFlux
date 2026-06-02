@@ -1,0 +1,4 @@
+latency-case-1: 2830.934
+# raw-op-statistic-case-1: {"ops":[{"op_type":"_matmul_kernel_exact","avg_time_us":2830.934},{"op_type":"DSARandomUniform","avg_time_us":1578.972}]}
+# resolved-kernels-case-1: _matmul_kernel,_matmul_kernel_exact
+# kernel-source-case-1: metadata+operator

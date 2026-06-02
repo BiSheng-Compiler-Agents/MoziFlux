@@ -1,0 +1,12 @@
+latency-case-1: 1010916.878
+# raw-op-statistic-case-1: {"ops":[{"op_type":"_fused_linear_sub_mul_relu_kernel","avg_time_us":1010916.878},{"op_type":"DSARandomNormal","avg_time_us":794.376},{"op_type":"Cast","avg_time_us":52.441}]}
+# resolved-kernels-case-1: _fused_linear_sub_mul_relu_kernel
+# kernel-source-case-1: metadata+operator
+latency-case-2: 130359.198
+# raw-op-statistic-case-2: {"ops":[{"op_type":"_fused_linear_sub_mul_relu_kernel","avg_time_us":130359.198},{"op_type":"DSARandomNormal","avg_time_us":200.324},{"op_type":"Cast","avg_time_us":18.061}]}
+# resolved-kernels-case-2: _fused_linear_sub_mul_relu_kernel
+# kernel-source-case-2: metadata+operator
+latency-case-3: 17693.732
+# raw-op-statistic-case-3: {"ops":[{"op_type":"_fused_linear_sub_mul_relu_kernel","avg_time_us":17693.732},{"op_type":"DSARandomNormal","avg_time_us":51.601},{"op_type":"Cast","avg_time_us":12.2}]}
+# resolved-kernels-case-3: _fused_linear_sub_mul_relu_kernel
+# kernel-source-case-3: metadata+operator
