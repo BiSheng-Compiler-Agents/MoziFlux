@@ -1,5 +1,8 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
 
 @triton.autotune(
     configs=[
@@ -61,3 +64,57 @@ def _matmul_kernel(
 
     c_ptrs = c_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
     tl.store(c_ptrs, acc, mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs a single matrix multiplication (C = A * B) with a large K dimension
+    """
+    def __init__(self):
+        super(ModelNew, self).__init__()
+    
+    def forward(self, A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+        """
+        Performs matrix multiplication of A and B.
+
+        Args:
+            A: Input tensor of shape (M, K)
+            B: Input tensor of shape (K, N)
+
+        Returns:
+            Output tensor of shape (M, N)
+        """
+        if A.ndim != 2 or B.ndim != 2:
+            raise ValueError("ModelNew expects 2D input tensors")
+        if A.shape[1] != B.shape[0]:
+            raise ValueError("Inner dimensions must match for matmul")
+        if A.dtype != torch.float32 or B.dtype != torch.float32:
+            raise TypeError("ModelNew only supports float32 inputs")
+        if A.device != B.device:
+            raise ValueError("Input tensors must be on the same device")
+        if A.device.type != "npu":
+            raise ValueError("ModelNew requires Ascend NPU tensors")
+
+        M, K = A.shape
+        _, N = B.shape
+        C = torch.empty((M, N), device=A.device, dtype=A.dtype)
+        grid = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]), triton.cdiv(N, meta["BLOCK_N"]))
+
+        _matmul_kernel[grid](
+            A, B, C,
+            M, N, K,
+            A.stride(0), A.stride(1),
+            B.stride(0), B.stride(1),
+            C.stride(0), C.stride(1),
+        )
+        return C
+M = 256
+N = 256
+K = 131072 * 4
+
+def get_inputs():
+    A = torch.rand(M, K)
+    B = torch.rand(K, N)
+    return [A, B]
+def get_init_inputs():
+    return []  # No special initialization inputs needed

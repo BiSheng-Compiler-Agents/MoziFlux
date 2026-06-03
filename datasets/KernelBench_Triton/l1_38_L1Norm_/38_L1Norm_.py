@@ -1,5 +1,8 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def _l1norm_row_kernel(
@@ -81,3 +84,64 @@ def _l1norm_row_kernel(
         tl.store(y_row_ptr + offs3 * stride_yn, x3 * inv, mask=mask3, eviction_policy="evict_last")
 
         start += 4 * BLOCK_SIZE
+
+
+class ModelNew(nn.Module):
+    """
+    Performs row-wise L1 normalization with a Triton kernel on Ascend NPU.
+    """
+    def __init__(self):
+        super(ModelNew, self).__init__()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.device.type != "npu":
+            raise ValueError("ModelNew expects an Ascend NPU tensor")
+        if x.ndim != 2:
+            raise ValueError("ModelNew expects a 2D tensor")
+        if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
+            raise TypeError("ModelNew supports float16, bfloat16, and float32 inputs")
+
+        B, N = x.shape
+        x_contig = x.contiguous()
+        y = torch.empty_like(x_contig)
+
+        stride_xm, stride_xn = x_contig.stride()
+        stride_ym, stride_yn = y.stride()
+
+        if N >= 16384:
+            BLOCK_SIZE = 4096
+        elif N >= 8192:
+            BLOCK_SIZE = 2048
+        elif N >= 2048:
+            BLOCK_SIZE = 1024
+        else:
+            BLOCK_SIZE = max(64, (1 << (N.bit_length() - 1)) if N > 0 else 1)
+
+        if BLOCK_SIZE >= 2048:
+            num_warps = 8
+            num_stages = 6
+        elif BLOCK_SIZE >= 1024:
+            num_warps = 4
+            num_stages = 5
+        else:
+            num_warps = 2 if BLOCK_SIZE < 512 else 4
+            num_stages = 4
+
+        _l1norm_row_kernel[(B,)](
+            x_contig, y,
+            B, N,
+            stride_xm, stride_xn,
+            stride_ym, stride_yn,
+            BLOCK_SIZE=BLOCK_SIZE,
+            num_warps=num_warps,
+            num_stages=num_stages,
+        )
+        return y
+batch_size = 32768
+dim = 65535
+
+def get_inputs():
+    x = torch.rand(batch_size, dim)
+    return [x]
+def get_init_inputs():
+    return []

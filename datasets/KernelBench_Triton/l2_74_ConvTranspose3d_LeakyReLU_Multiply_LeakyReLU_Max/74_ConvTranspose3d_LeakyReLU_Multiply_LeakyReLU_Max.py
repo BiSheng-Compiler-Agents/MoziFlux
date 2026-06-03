@@ -1,5 +1,17 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
+
+DEFAULT_IN_CHANNELS = 16
+DEFAULT_OUT_CHANNELS = 32
+DEFAULT_KERNEL_SIZE = 3
+DEFAULT_STRIDE = 2
+DEFAULT_PADDING = 1
+DEFAULT_OUTPUT_PADDING = 1
+DEFAULT_MULTIPLIER_SHAPE = (out_channels, 1, 1, 1)
+
 
 @triton.jit
 def _fused_leaky_mul_maxpool3d_2x2x2(
@@ -112,3 +124,68 @@ def _fused_leaky_mul_maxpool3d_2x2x2(
     # Store result
     out_base = n * y_sN + c * y_sC + pid_d * y_sD + ho * y_sH
     tl.store(y_ptr + out_base + wo * y_sW, vout, mask=mask_wo)
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a 3D transposed convolution, applies LeakyReLU, multiplies by a learnable parameter, 
+    applies LeakyReLU again, and performs a max pooling operation.
+    """
+    def __init__(
+        self,
+        in_channels=DEFAULT_IN_CHANNELS,
+        out_channels=DEFAULT_OUT_CHANNELS,
+        kernel_size=DEFAULT_KERNEL_SIZE,
+        stride=DEFAULT_STRIDE,
+        padding=DEFAULT_PADDING,
+        output_padding=DEFAULT_OUTPUT_PADDING,
+        multiplier_shape=DEFAULT_MULTIPLIER_SHAPE,
+    ):
+        super(ModelNew, self).__init__()
+        self.conv_transpose = nn.ConvTranspose3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, output_padding=output_padding)
+        self.multiplier = nn.Parameter(torch.randn(multiplier_shape))
+        self.leaky_relu = nn.LeakyReLU(negative_slope=0.2)
+        self.max_pool = nn.MaxPool3d(kernel_size=2)
+
+    def forward(self, x):
+        x = self.conv_transpose(x)
+        if x.device.type != "npu" or self.multiplier.device.type != "npu":
+            raise RuntimeError("ModelNew expects NPU tensors so the Triton kernel path is exercised.")
+
+        N, C, D, H, W = x.shape
+        oD, oH, oW = D // 2, H // 2, W // 2
+        y = torch.empty((N, C, oD, oH, oW), device=x.device, dtype=x.dtype)
+
+        BLOCK_W = 128 if oW >= 128 else (64 if oW >= 64 else 32)
+        w_tiles = triton.cdiv(oW, BLOCK_W)
+        grid = (N * C, oD, oH * w_tiles)
+        num_warps = 4 if BLOCK_W >= 64 else 2
+
+        _fused_leaky_mul_maxpool3d_2x2x2[grid](
+            x, self.multiplier, y,
+            N, C, D, H, W,
+            *x.stride(),
+            self.multiplier.stride()[0],
+            oD, oH, oW,
+            *y.stride(),
+            w_tiles=w_tiles,
+            NEG_SLOPE=self.leaky_relu.negative_slope,
+            BLOCK_W=BLOCK_W,
+            num_warps=num_warps,
+            num_stages=3,
+        )
+        return y
+batch_size = 16
+in_channels = 16
+out_channels = 32
+depth, height, width = 16, 32, 32
+kernel_size = 3
+stride = 2
+padding = 1
+output_padding = 1
+multiplier_shape = (out_channels, 1, 1, 1)
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, depth, height, width)]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, multiplier_shape]

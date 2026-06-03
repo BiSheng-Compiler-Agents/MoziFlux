@@ -1,5 +1,10 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
+import torch_npu  # noqa: F401
+
 
 @triton.autotune(
     configs=[
@@ -72,3 +77,58 @@ def _matmul_AT_B_kernel(
     c_ptrs = C_ptr + (offs_m[:, None] * stride_c_m + offs_n[None, :] * stride_c_n)
     c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
     tl.store(c_ptrs, acc, mask=c_mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs a single matrix multiplication (C = A * B)
+    Optimized using a Triton kernel to compute C = (A.T) @ B where:
+      - A has shape (K, M)
+      - B has shape (K, N)
+      - Output C has shape (M, N)
+    """
+    def __init__(self):
+        super(ModelNew, self).__init__()
+
+    def forward(self, A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+        assert A.dim() == 2 and B.dim() == 2, "A and B must be 2D tensors"
+        if A.device.type != "npu" or B.device.type != "npu":
+            raise ValueError("ModelNew expects A and B on Ascend NPU")
+        if A.device != B.device:
+            raise ValueError("A and B must be on the same device")
+        K_a, M = A.shape
+        K_b, N = B.shape
+        assert K_a == K_b, "Inner dimensions must match: A.shape[0] == B.shape[0]"
+        K = K_a
+
+        Ac = A.contiguous()
+        Bc = B.contiguous()
+
+        C = torch.empty((M, N), device=Ac.device, dtype=torch.float32)
+
+        # Strides (in elements)
+        stride_a_k, stride_a_m = Ac.stride()  # A: (K, M)
+        stride_b_k, stride_b_n = Bc.stride()  # B: (K, N)
+        stride_c_m, stride_c_n = C.stride()   # C: (M, N)
+
+        def grid(meta):
+            return (triton.cdiv(M, meta["BLOCK_M"]), triton.cdiv(N, meta["BLOCK_N"]))
+
+        _matmul_AT_B_kernel[grid](
+            Ac, Bc, C,
+            M, N, K,
+            stride_a_k, stride_a_m,
+            stride_b_k, stride_b_n,
+            stride_c_m, stride_c_n,
+        )
+        return C
+M = 1024 * 2
+K = 4096 * 2
+N = 2048 * 2
+
+def get_inputs():
+    A = torch.rand(K, M)
+    B = torch.rand(K, N)
+    return [A, B]
+def get_init_inputs():
+    return []  # No special initialization inputs needed

@@ -1,5 +1,9 @@
+import torch
+import torch.nn as nn
+import math
 import triton
 import triton.language as tl
+from triton.language.extra import libdevice
 
 @triton.jit
 def _gelu_tanh_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -24,3 +28,36 @@ def _gelu_tanh_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
     y = y_f32.to(x.dtype)
 
     tl.store(y_ptr + offs, y, mask=mask)
+
+
+def _gelu_tanh_triton(x: torch.Tensor) -> torch.Tensor:
+    x_contig = x.contiguous()
+    y = torch.empty_like(x_contig)
+    n_elements = x_contig.numel()
+    if n_elements == 0:
+        return y.view_as(x)
+    BLOCK_SIZE = 4096
+    grid = lambda META: (triton.cdiv(n_elements, META['BLOCK_SIZE']),)
+    _gelu_tanh_kernel[grid](x_contig, y, n_elements, BLOCK_SIZE=BLOCK_SIZE, num_warps=8)
+    return y.view_as(x)
+
+
+class ModelNew(nn.Module):
+    """
+    Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT).
+    Reference: Gaussian Error Linear Units (GELU) paper: https://arxiv.org/abs/1606.08415
+    """
+    def __init__(self):
+        super(ModelNew, self).__init__()
+    
+    def forward(self, x):
+        if x.device.type != "npu":
+            raise RuntimeError("ModelNew expects input tensors on Ascend NPU.")
+        return _gelu_tanh_triton(x)
+batch_size = 8192
+dim = 8192
+
+def get_inputs():
+    return [torch.rand(batch_size, dim)]
+def get_init_inputs():
+    return []

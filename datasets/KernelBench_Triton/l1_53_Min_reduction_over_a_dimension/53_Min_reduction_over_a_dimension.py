@@ -1,5 +1,9 @@
+import torch
+import torch.nn as nn
+
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def _min_reduce_last_kernel(
@@ -46,6 +50,7 @@ def _min_reduce_last_kernel(
     out_off = b * out_stride_b + m * out_stride_m
     tl.store(out_ptr + out_off, acc)
 
+
 @triton.jit
 def _min_reduce_mid_kernel(
     x_ptr, out_ptr,
@@ -90,6 +95,7 @@ def _min_reduce_mid_kernel(
     out_off = b * out_stride_b + n * out_stride_n
     tl.store(out_ptr + out_off, acc)
 
+
 @triton.jit
 def _min_reduce_first_kernel(
     x_ptr, out_ptr,
@@ -133,3 +139,121 @@ def _min_reduce_first_kernel(
 
     out_off = m * out_stride_m + n * out_stride_n
     tl.store(out_ptr + out_off, acc)
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs min reduction over a specific dimension.
+    Accelerated with Triton on Ascend NPU for 3D inputs.
+    """
+    def __init__(self, dim: int):
+        """
+        Initializes the model with the dimension to reduce over.
+
+        Args:
+            dim (int): The dimension to reduce over.
+        """
+        super(ModelNew, self).__init__()
+        self.dim = dim
+
+    def _choose_block_and_warps(self, K: int):
+        # Favor larger tiles for contiguous last-dim to minimize loop count
+        if K >= 256:
+            return 256, 8
+        elif K >= 128:
+            return 128, 4
+        elif K >= 64:
+            return 64, 2
+        else:
+            return 32, 1
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Applies min reduction over the specified dimension to the input tensor.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            torch.Tensor: Output tensor after min reduction over the specified dimension.
+        """
+        if x.ndim != 3:
+            raise ValueError(f"ModelNew expects a 3D tensor, got shape {tuple(x.shape)}")
+        if not hasattr(torch, "npu") or x.device.type != "npu":
+            raise ValueError("ModelNew requires an Ascend NPU tensor input")
+
+        dim = self.dim
+        if dim < 0:
+            dim += x.ndim
+        if dim not in (0, 1, 2):
+            raise ValueError(f"Unsupported reduction dim {self.dim} for 3D input")
+
+        B, M, N = x.shape
+        sb, sm, sn = x.stride()
+
+        if B == 0 or M == 0 or N == 0:
+            raise ValueError("Zero-sized reductions are not supported")
+
+        if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
+            raise TypeError(f"Unsupported dtype for Triton reduction: {x.dtype}")
+
+        if dim == 2 and sn == 1:
+            # reduce over last dim -> output [B, M]
+            out = torch.empty((B, M), device=x.device, dtype=x.dtype)
+            ob, om = out.stride()
+            grid = (B * M,)
+            BK, NW = self._choose_block_and_warps(N)
+            _min_reduce_last_kernel[grid](
+                x, out,
+                B, M, N,
+                sb, sm, sn,
+                ob, om,
+                BLOCK_K=BK,
+                num_warps=NW, num_stages=4,
+            )
+            return out
+        elif dim == 1:
+            out = torch.empty((B, N), device=x.device, dtype=x.dtype)
+            ob, on = out.stride()
+            grid = (B * N,)
+            BK, NW = self._choose_block_and_warps(M)
+            _min_reduce_mid_kernel[grid](
+                x, out,
+                B, M, N,
+                sb, sm, sn,
+                ob, on,
+                BLOCK_K=BK,
+                num_warps=NW, num_stages=4,
+            )
+            return out
+        elif dim == 0:
+            out = torch.empty((M, N), device=x.device, dtype=x.dtype)
+            om, on = out.stride()
+            grid = (M * N,)
+            BK, NW = self._choose_block_and_warps(B)
+            _min_reduce_first_kernel[grid](
+                x, out,
+                B, M, N,
+                sb, sm, sn,
+                om, on,
+                BLOCK_K=BK,
+                num_warps=NW, num_stages=4,
+            )
+            return out
+        else:
+            raise ValueError(
+                f"Reduction dim {dim} requires a contiguous reduction axis, got strides {tuple(x.stride())}"
+            )
+
+
+def min_reduce_triton(x: torch.Tensor, dim: int) -> torch.Tensor:
+    return ModelNew(dim)(x)
+batch_size = 128
+dim1 = 4096
+dim2 = 4095
+
+def get_inputs():
+    x = torch.rand(batch_size, dim1, dim2)
+    return [x]
+def get_init_inputs():
+    return [1] # Example, change to desired dimension

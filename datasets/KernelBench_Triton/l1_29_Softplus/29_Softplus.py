@@ -1,5 +1,9 @@
+import torch
+import torch.nn as nn
+import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def _softplus_kernel(
@@ -28,3 +32,51 @@ def _softplus_kernel(
 
     y = y32.to(x.dtype)
     tl.store(y_ptr + offs, y, mask=mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs a Softplus activation using a Triton kernel on Ascend NPU tensors.
+    """
+    def __init__(self):
+        super(ModelNew, self).__init__()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        supported_dtypes = {torch.float16, torch.bfloat16, torch.float32}
+        if x.device.type != "npu":
+            raise RuntimeError("ModelNew expects inputs on Ascend NPU")
+        if x.dtype not in supported_dtypes:
+            raise RuntimeError(f"Unsupported dtype for ModelNew: {x.dtype}")
+        if x.requires_grad:
+            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+
+        x_contig = x.contiguous()
+        n_elements = x_contig.numel()
+        if n_elements == 0:
+            return x_contig
+
+        y = torch.empty_like(x_contig)
+
+        block_size = 4096
+
+        def grid(meta):
+            return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+        _softplus_kernel[grid](
+            x_contig.view(-1),
+            y.view(-1),
+            n_elements,
+            THRESHOLD=20.0,
+            BLOCK_SIZE=block_size,
+            num_warps=8,
+            num_stages=2,
+        )
+        return y
+batch_size = 4096
+dim = 393216
+
+def get_inputs():
+    x = torch.rand(batch_size, dim, device='npu')
+    return [x]
+def get_init_inputs():
+    return []  # No special initialization inputs needed

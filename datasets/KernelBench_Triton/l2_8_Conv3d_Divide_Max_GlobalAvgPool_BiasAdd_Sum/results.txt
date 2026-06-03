@@ -1,0 +1,21 @@
+============================================================
+UNIT TEST — correctness vs torch_ref (pure PyTorch)
+============================================================
+  B=1                     baseline1 [PASS] maxΔ=4.77e-07   baseline2 [PASS] maxΔ=4.77e-07   optimized [PASS] maxΔ=4.77e-07
+  B=4                     baseline1 [PASS] maxΔ=4.77e-07   baseline2 [PASS] maxΔ=4.77e-07   optimized [PASS] maxΔ=4.77e-07
+  B=16                    baseline1 [PASS] maxΔ=4.77e-07   baseline2 [PASS] maxΔ=4.77e-07   optimized [PASS] maxΔ=4.77e-07
+  B=32                    baseline1 [PASS] maxΔ=9.54e-07   baseline2 [PASS] maxΔ=9.54e-07   optimized [PASS] maxΔ=4.77e-07
+  B=64                    baseline1 [PASS] maxΔ=9.54e-07   baseline2 [PASS] maxΔ=9.54e-07   optimized [PASS] maxΔ=4.77e-07
+  B=128                   baseline1 [PASS] maxΔ=9.54e-07   baseline2 [PASS] maxΔ=9.54e-07   optimized [PASS] maxΔ=9.54e-07
+  B=256                   baseline1 [PASS] maxΔ=9.54e-07   baseline2 [PASS] maxΔ=9.54e-07   optimized [PASS] maxΔ=9.54e-07
+
+RESULT: PASS — all kernels match torch_ref.
+conv3d_divide_max_gap_biasadd_sum_perf:
+   label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    B=1       0.131980          0.286878          0.279583          0.416878
+1    B=4       0.129909          0.285427          0.287336          0.420520
+2   B=16       0.340988          0.342230          0.340436          0.623492
+3   B=32       0.631962          0.635039          0.631571          0.933160
+4   B=64       1.198274          1.201293          1.198165          1.513220
+5  B=128       2.341639          2.344958          2.339750          2.659774
+6  B=256       4.605143          4.614336          4.605117          4.937922

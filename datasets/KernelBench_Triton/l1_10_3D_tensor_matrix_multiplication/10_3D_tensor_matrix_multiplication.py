@@ -1,6 +1,12 @@
+import os
+
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
 
+
+# Fixed-tile Batched GEMM: C[(N*M), L] = A[(N*M), K] @ B[K, L]
 @triton.autotune(
     configs=[
         triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'BLOCK_K': 32}, num_warps=8, num_stages=4),
@@ -46,3 +52,90 @@ def _matmul_2d_kernel(
     c_ptrs = C_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
     c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
     tl.store(c_ptrs, acc, mask=c_mask)
+
+
+def _batched_matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    # A: (N, M, K), B: (K, L) -> C: (N, M, L)
+    assert A.ndim == 3 and B.ndim == 2, "Input shapes must be (N,M,K) and (K,L)"
+    N_b, M_a, K_a = A.shape
+    K_b, L_b = B.shape
+    assert K_a == K_b, "Inner dimensions must match"
+    if A.device != B.device:
+        raise ValueError("Inputs must be on the same device.")
+    if A.dtype != B.dtype:
+        raise ValueError("Inputs must have the same dtype.")
+    if A.dtype not in (torch.float16, torch.bfloat16):
+        raise TypeError(f"Unsupported dtype for Triton batched matmul: {A.dtype}.")
+    if not (
+        A.is_cuda
+        or A.device.type == "npu"
+        or os.environ.get("TRITON_INTERPRET") == "1"
+    ):
+        raise RuntimeError(
+            "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1 for Triton interpreter mode."
+        )
+
+    # Ensure contiguous memory
+    A = A.contiguous()
+    B = B.contiguous()
+
+    # Flatten first two dims for a 2D GEMM
+    M_flat = N_b * M_a
+    K = K_a
+    N_out = L_b
+
+    A_2d = A.reshape(M_flat, K)
+
+    # Accumulate in fp32 and later cast to output dtype to match torch.matmul
+    C_2d = torch.empty((M_flat, N_out), device=A.device, dtype=torch.float32)
+
+    # Strides in elements
+    stride_am, stride_ak = A_2d.stride()
+    stride_bk, stride_bn = B.stride()
+    stride_cm, stride_cn = C_2d.stride()
+
+    # Grid for the single autotune config (BLOCK_M=128, BLOCK_N=128)
+    grid = (triton.cdiv(M_flat, 128), triton.cdiv(N_out, 128))
+    _matmul_2d_kernel[grid](
+        A_2d, B, C_2d,
+        M_flat, N_out, K,
+        stride_am, stride_ak,
+        stride_bk, stride_bn,
+        stride_cm, stride_cn,
+    )
+    C = C_2d.view(N_b, M_a, N_out)
+    # Cast to the expected output dtype (same as inputs for f16/bf16)
+    return C.to(A.dtype)
+
+
+class ModelNew(nn.Module):
+    """
+    Performs 3D tensor-matrix multiplication using the Triton kernel.
+    """
+    def __init__(self):
+        super(ModelNew, self).__init__()
+    
+    def forward(self, A, B):
+        """
+        Performs 3D tensor-matrix multiplication.
+
+        Args:
+            A (torch.Tensor): Input 3D tensor of shape (N, M, K).
+            B (torch.Tensor): Input matrix of shape (K, L).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (N, M, L), resulting from the multiplication of A and B along the last dimension of A.
+        """
+        return _batched_matmul_triton(A, B)
+N = 16
+M = 1024
+K = 2048
+L = 768
+
+def get_inputs():
+    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    A = torch.rand(N, M, K, device=device)
+    B = torch.rand(K, L, device=device)
+    return [A, B]
+def get_init_inputs():
+    return []  # No special initialization inputs needed

@@ -1,3 +1,8 @@
+---
+name: plugin-development
+description: Build Hermes Agent plugins — lifecycle hooks, tool registration, slash commands, and context engines. Use when creating or modifying plugins in `~/.hermes/plugins/`.
+---
+
 # Hermes Plugin Development [LEAF NODE]
 
 Build Hermes Agent plugins — lifecycle hooks, tool registration, slash commands, and context engines.
@@ -549,3 +554,6 @@ def register(ctx) -> None:
 - `hermes_constants` caches HERMES_HOME at import time — set env var BEFORE any imports when testing
 - `task_id` is NOT passed to pre/post_llm_call hooks — use `session_id` for span lookup
 - `on_session_start` is NOT fired by CLI — only by gateway; use lazy init in `pre_llm_call`
+- `on_session_end` and `on_session_finalize` are NOT fired by `AIAgent.run_conversation()`
+  in embedder/library mode. The entrypoint must invoke them manually via `invoke_hook`
+  if any plugin depends on them. See the "Library / embedder usage" section above.

@@ -5,4 +5,10 @@
 **/logs/
 **/outputs/
 **/.env/
-**/datasets/
+datasets/*
+!datasets/KernelBench_Triton
+
+# Ignore cannsim simulation traces and build artifacts
+datasets/KernelBench_Triton/**/cannsim*/
+datasets/KernelBench_Triton/**/__pycache__/
+datasets/KernelBench_Triton/**/*.bak

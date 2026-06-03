@@ -1,5 +1,22 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
+
+DEFAULT_IN_CHANNELS = 3
+DEFAULT_OUT_CHANNELS = 64
+DEFAULT_KERNEL_SIZE = (3, 5, 7)
+DEFAULT_STRIDE = (1, 1, 1)
+DEFAULT_PADDING = (0, 0, 0)
+DEFAULT_DILATION = (1, 1, 1)
+DEFAULT_GROUPS = 1
+DEFAULT_BIAS = False
+
+
+def _is_npu_tensor(x: torch.Tensor) -> bool:
+    return bool(getattr(x, "is_npu", False))
+
 
 @triton.autotune(
     configs=[
@@ -132,3 +149,143 @@ def _conv3d_implicit_gemm_kernel(
     )
     y_mask = m_mask[:, None] & n_mask[None, :]
     tl.store(y_ptr + y_addr.to(tl.int64), acc, mask=y_mask)
+
+
+def conv3d_triton_implicit_gemm(x: torch.Tensor, weight: torch.Tensor,
+                                stride=(1, 1, 1), padding=(0, 0, 0), dilation=(1, 1, 1)) -> torch.Tensor:
+    # Assumes:
+    # x: [N, Cin, Din, Hin, Win] contiguous, NPU
+    # weight: [Cout, Cin, Kd, Kh, Kw] contiguous, NPU
+    if not _is_npu_tensor(x):
+        raise RuntimeError("conv3d_triton_implicit_gemm expects the input tensor on Ascend NPU")
+    if not _is_npu_tensor(weight):
+        raise RuntimeError("conv3d_triton_implicit_gemm expects the weight tensor on Ascend NPU")
+    x = x.contiguous()
+    weight = weight.contiguous()
+    N, Cin, Din, Hin, Win = x.shape
+    Cout, Cin_w, Kd, Kh, Kw = weight.shape
+    assert Cin == Cin_w, "Input and weight channel mismatch"
+
+    sd, sh, sw = stride
+    pd, ph, pw = padding
+    dd, dh, dw = dilation
+
+    # Output dims per PyTorch formula
+    Dout = (Din + 2 * pd - dd * (Kd - 1) - 1) // sd + 1
+    Hout = (Hin + 2 * ph - dh * (Kh - 1) - 1) // sh + 1
+    Wout = (Win + 2 * pw - dw * (Kw - 1) - 1) // sw + 1
+
+    # Choose compute dtype: prefer fp16 Tensor Cores on Hopper when safe.
+    # Keep exact dtype if already fp16; if fp32, use fp16 compute on sufficiently large problems for speed,
+    # while accumulating in fp32 to preserve accuracy.
+    use_fp16_compute = (
+        (x.dtype == torch.float16 and weight.dtype == torch.float16)
+        or (
+            x.dtype == torch.float32
+            and weight.dtype == torch.float32
+            and (Cin * Kd * Kh * Kw) >= 256
+            and (N * Dout * Hout * Wout) >= 4096
+        )
+    )
+    x_comp = x.to(torch.float16) if use_fp16_compute and x.dtype != torch.float16 else x
+    w_comp = weight.to(torch.float16) if use_fp16_compute and weight.dtype != torch.float16 else weight
+
+    # Accumulator/output kept in fp32 for stability; cast to input dtype later to match PyTorch API
+    y = torch.empty((N, Cout, Dout, Hout, Wout), device=x.device, dtype=torch.float32)
+
+    # Pre-flatten weights to [K, Cout]
+    K = Cin * Kd * Kh * Kw
+    w2d = w_comp.view(Cout, K).transpose(0, 1).contiguous()
+
+    M = N * Dout * Hout * Wout
+
+    # Triton grid: tiles of (M, Cout)
+    def grid(meta):
+        return (triton.cdiv(M, meta["BLOCK_M"]), triton.cdiv(Cout, meta["BLOCK_N"]))
+
+    _conv3d_implicit_gemm_kernel[grid](
+        x_comp, w2d, y,
+        N, Cin, Din, Hin, Win,
+        Cout, Kd, Kh, Kw,
+        Dout, Hout, Wout,
+        sd, sh, sw,
+        pd, ph, pw,
+        dd, dh, dw,
+        M, K,
+    )
+
+    # match original dtype
+    if y.dtype != x.dtype:
+        y = y.to(x.dtype)
+    return y
+
+
+class ModelNew(nn.Module):
+    """
+    Performs a standard 3D convolution operation with asymmetric input and kernel sizes.
+
+    Args:
+        in_channels (int): Number of channels in the input tensor.
+        out_channels (int): Number of channels produced by the convolution.
+        kernel_size (tuple): Size of the convolution kernel in the form (kernel_size_d, kernel_size_h, kernel_size_w).
+        stride (tuple, optional): Stride of the convolution in the form (stride_d, stride_h, stride_w). Defaults to (1, 1, 1).
+        padding (tuple, optional): Padding applied to the input in the form (padding_d, padding_h, padding_w). Defaults to (0, 0, 0).
+        dilation (tuple, optional): Spacing between kernel elements in the form (dilation_d, dilation_h, dilation_w). Defaults to (1, 1, 1).
+        groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
+        bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
+    """
+    def __init__(
+        self,
+        in_channels: int = DEFAULT_IN_CHANNELS,
+        out_channels: int = DEFAULT_OUT_CHANNELS,
+        kernel_size: tuple = DEFAULT_KERNEL_SIZE,
+        stride: tuple = DEFAULT_STRIDE,
+        padding: tuple = DEFAULT_PADDING,
+        dilation: tuple = DEFAULT_DILATION,
+        groups: int = DEFAULT_GROUPS,
+        bias: bool = DEFAULT_BIAS,
+    ):
+        super(ModelNew, self).__init__()
+        self.conv3d = nn.Conv3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Performs the 3D convolution.
+
+        Uses the Triton implicit-GEMM kernel for the delivered implementation.
+        """
+        conv = self.conv3d
+
+        if not _is_npu_tensor(x):
+            raise RuntimeError("ModelNew expects an Ascend NPU tensor input")
+        if conv.groups != 1:
+            raise RuntimeError("ModelNew only supports groups == 1 for the Triton kernel path")
+        if conv.bias is not None:
+            raise RuntimeError("ModelNew only supports bias=False for the Triton kernel path")
+        if x.dtype not in (torch.float16, torch.float32):
+            raise RuntimeError("ModelNew only supports float16 and float32 inputs")
+
+        if conv.weight.device != x.device or conv.weight.dtype != x.dtype:
+            self.conv3d = self.conv3d.to(device=x.device, dtype=x.dtype)
+            conv = self.conv3d
+
+        return conv3d_triton_implicit_gemm(
+            x,
+            conv.weight,
+            stride=tuple(conv.stride),
+            padding=tuple(conv.padding),
+            dilation=tuple(conv.dilation),
+        )
+batch_size = 8
+in_channels = 3
+out_channels = 64
+kernel_size = (3, 5, 7)  # Asymmetric kernel size
+depth = 16
+height = 128
+width = 128
+
+def get_inputs():
+    x = torch.rand(batch_size, in_channels, depth, height, width)
+    return [x]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization

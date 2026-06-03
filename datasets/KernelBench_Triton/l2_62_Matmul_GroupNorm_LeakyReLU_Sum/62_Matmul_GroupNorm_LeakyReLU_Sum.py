@@ -1,5 +1,13 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
+batch_size = 1024
+input_size = 8192
+hidden_size = 8192
+num_groups = 512
+
 
 @triton.jit
 def fused_linear_groupnorm_lrelu_double(
@@ -85,3 +93,77 @@ def fused_linear_groupnorm_lrelu_double(
     # Store
     y_ptrs = y_ptr + (offs_m[:, None] * stride_ym + c_idx[None, :] * stride_yc)
     tl.store(y_ptrs, out, mask=(mask_m[:, None] & mask_n[None, :]))
+
+
+class ModelNew(nn.Module):
+    """
+    A model that performs a matrix multiplication, group normalization, leaky ReLU activation, and element-wise sum.
+    """
+    def __init__(
+        self,
+        input_size=input_size,
+        hidden_size=hidden_size,
+        num_groups=num_groups,
+        eps=1e-5,
+        negative_slope=0.01,
+    ):
+        super(ModelNew, self).__init__()
+        self.fc = nn.Linear(input_size, hidden_size)
+        self.gn = nn.GroupNorm(num_groups=num_groups, num_channels=hidden_size, eps=eps)
+        self.leaky_relu = nn.LeakyReLU(negative_slope=negative_slope)
+
+    def forward(self, x):
+        """
+        Performs the forward pass of the model.
+
+        Args:
+            x: Input tensor of shape (batch_size, input_size).
+
+        Returns:
+            Output tensor of shape (batch_size, hidden_size).
+        """
+        if x.device.type != "npu" or x.dtype not in (torch.float16, torch.float32):
+            raise RuntimeError("ModelNew requires float16 or float32 inputs on Ascend NPU.")
+
+        N, K = x.shape
+        C = self.fc.out_features
+        G = self.gn.num_groups
+        assert C % G == 0, "hidden_size must be divisible by num_groups"
+        group_size = C // G
+
+        w = self.fc.weight
+        b = self.fc.bias
+        gamma = self.gn.weight if getattr(self.gn, "affine", True) else None
+        beta = self.gn.bias if getattr(self.gn, "affine", True) else None
+
+        target_dtype = x.dtype
+        target_device = x.device
+        x_c = x.contiguous()
+        w_c = w.to(device=target_device, dtype=target_dtype).contiguous()
+        b_c = (b if b is not None else torch.zeros(C, device=target_device, dtype=target_dtype)).to(device=target_device, dtype=target_dtype).contiguous()
+        gamma_c = (gamma if gamma is not None else torch.ones(C, device=target_device, dtype=target_dtype)).to(device=target_device, dtype=target_dtype).contiguous()
+        beta_c = (beta if beta is not None else torch.zeros(C, device=target_device, dtype=target_dtype)).to(device=target_device, dtype=target_dtype).contiguous()
+
+        y = torch.empty((N, C), device=x.device, dtype=x.dtype)
+
+        BLOCK_M = 64
+        BLOCK_K = 128
+        grid = (triton.cdiv(N, BLOCK_M), G)
+        fused_linear_groupnorm_lrelu_double[grid](
+            x_c, w_c, b_c, gamma_c, beta_c, y,
+            N, C, K, G, self.gn.eps, self.leaky_relu.negative_slope,
+            x_c.stride(0), x_c.stride(1),
+            w_c.stride(0), w_c.stride(1),
+            y.stride(0), y.stride(1),
+            BLOCK_M=BLOCK_M, BLOCK_N=group_size, BLOCK_K=BLOCK_K,
+        )
+        return y
+batch_size = 1024
+input_size = 8192
+hidden_size = 8192
+num_groups = 512
+
+def get_inputs():
+    return [torch.rand(batch_size, input_size)]
+def get_init_inputs():
+    return [input_size, hidden_size, num_groups]

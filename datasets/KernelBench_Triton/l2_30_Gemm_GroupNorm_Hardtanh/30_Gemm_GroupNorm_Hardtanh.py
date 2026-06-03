@@ -1,5 +1,8 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def _groupnorm_hardtanh_kernel(
@@ -53,3 +56,91 @@ def _groupnorm_hardtanh_kernel(
     y = tl.maximum(tl.minimum(y, maxv), minv)
 
     tl.store(out_ptr + base, y, mask=mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs a GEMM, applies Group Normalization, and then HardTanh.
+    GroupNorm + HardTanh are fused into a single Triton kernel for NPU execution.
+    """
+    def __init__(
+        self,
+        in_features=1024,
+        out_features=512,
+        num_groups=8,
+        hardtanh_min=-2.0,
+        hardtanh_max=2.0,
+    ):
+        super(ModelNew, self).__init__()
+        self.gemm = nn.Linear(in_features, out_features)
+        self.group_norm = nn.GroupNorm(num_groups, out_features)
+        self.hardtanh = nn.Hardtanh(min_val=hardtanh_min, max_val=hardtanh_max)
+
+    def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_features).
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, out_features).
+        """
+        # GEMM via PyTorch linear layer
+        y = self.gemm(x)
+
+        if y.device.type != "npu":
+            raise RuntimeError("ModelNew expects NPU tensors and does not provide a non-NPU fallback.")
+
+        # Triton fused GroupNorm + HardTanh
+        y = y.contiguous()
+        N, C = y.shape
+        G = self.group_norm.num_groups
+        assert C % G == 0, "out_features must be divisible by num_groups"
+        Cg = C // G
+
+        gamma = self.group_norm.weight.contiguous()
+        beta = self.group_norm.bias.contiguous()
+        eps = float(self.group_norm.eps)
+        minv = float(self.hardtanh.min_val)
+        maxv = float(self.hardtanh.max_val)
+
+        out = torch.empty_like(y)
+
+        # Tile size: next power-of-two of Cg for efficient reduction
+        def next_power_of_two(v: int) -> int:
+            return 1 if v <= 1 else 1 << ((v - 1).bit_length())
+        BLOCK_SIZE = next_power_of_two(Cg)
+
+        # Heuristic tuning for Hopper: small pipeline depth helps latency hiding
+        if BLOCK_SIZE >= 256:
+            num_warps = 8
+            num_stages = 2
+        elif BLOCK_SIZE >= 128:
+            num_warps = 4
+            num_stages = 2
+        elif BLOCK_SIZE >= 64:
+            num_warps = 2
+            num_stages = 2
+        else:
+            num_warps = 1
+            num_stages = 1
+
+        grid = (N * G,)
+        _groupnorm_hardtanh_kernel[grid](
+            y, gamma, beta, out,
+            N, C, G, Cg,
+            eps, minv, maxv,
+            BLOCK_SIZE=BLOCK_SIZE,
+            num_warps=num_warps,
+            num_stages=num_stages,
+        )
+        return out
+batch_size = 1024
+in_features = 8192
+out_features = 8192
+num_groups = 16
+hardtanh_min = -2.0
+hardtanh_max = 2.0
+
+def get_inputs():
+    return [torch.rand(batch_size, in_features)]
+def get_init_inputs():
+    return [in_features, out_features, num_groups, hardtanh_min, hardtanh_max]

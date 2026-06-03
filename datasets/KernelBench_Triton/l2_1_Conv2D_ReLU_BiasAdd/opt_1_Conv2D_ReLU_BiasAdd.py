@@ -220,25 +220,15 @@ def _relu_add_bias_triton(x: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
 class ModelNew(nn.Module):
     """Conv2d → ReLU → BiasAdd with optimised Triton kernel for Ascend NPU."""
 
-    def __init__(
-        self,
-        in_channels  = DEFAULT_IN_CHANNELS,
-        out_channels = DEFAULT_OUT_CHANNELS,
-        kernel_size  = DEFAULT_KERNEL_SIZE,
-        bias_shape   = DEFAULT_BIAS_SHAPE,
-    ):
+    def __init__(self):
         super().__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
-        self.bias = nn.Parameter(torch.randn(bias_shape))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects an Ascend NPU tensor")
         if x.requires_grad:
             raise RuntimeError("ModelNew does not support autograd-enabled inputs")
-        x = self.conv(x)
-        x = x.detach()
-        return _relu_add_bias_triton(x, self.bias)
+        return _relu_add_bias_triton(x, bias)
 
 
 _MODEL_CACHE: dict = {}

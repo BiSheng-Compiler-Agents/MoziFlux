@@ -28,6 +28,9 @@ Keywords: code review, static analysis.
 | Hardcoded core count | Literals like `grid = (20,)` | P0 |
 | Core type mismatch | Kernel containing `tl.dot` using `num_vectorcore` | P0 |
 | Matrix multiplication degraded to element-wise | No `tl.dot`, using Vector Core element-wise multiply-add for matmul/GEMV | P0 |
+| Shape-specific kernel branch with no fallback | `if C == 16: fast_kernel` with no else clause — other shapes crash or produce wrong results | P0 |
+| Untested dispatch path | Fast path and generic path exist but only one has unit tests | P0 |
+| New runtime guards not in baseline | `if out_channels > 256: raise` or `if sum_dim != 1: raise` when baseline had no such constraint | P0 |
 | BLOCK_SIZE not `tl.constexpr` | Declaration check | P1 |
 | Matrix operation BLOCK not multiple of 16 | Numeric check | P2 |
 

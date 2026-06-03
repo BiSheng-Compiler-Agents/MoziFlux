@@ -1,5 +1,16 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
+
+DEFAULT_BATCH_SIZE = 128
+DEFAULT_IN_CHANNELS = 16
+DEFAULT_OUT_CHANNELS = 64
+DEFAULT_HEIGHT = 256
+DEFAULT_WIDTH = 256
+DEFAULT_KERNEL_SIZE = 3
+
 
 @triton.jit
 def _min_tanh2_nchw_kernel(
@@ -59,3 +70,57 @@ def _min_tanh2_nchw_kernel(
 
     base_y = pid_n * stride_ny + 0 * stride_cy + h_idx * stride_hy + w_idx * stride_wy
     tl.store(y_ptr + base_y, t2, mask=mask_hw)
+
+
+def _min_tanh2_triton(x: torch.Tensor) -> torch.Tensor:
+    assert x.device.type == "npu", "Triton kernel expects Ascend NPU tensor"
+    assert x.ndim == 4, "Expected NCHW tensor"
+    N, C, H, W = x.shape
+    y = torch.empty((N, 1, H, W), device=x.device, dtype=x.dtype)
+
+    stride_nx, stride_cx, stride_hx, stride_wx = x.stride()
+    stride_ny, stride_cy, stride_hy, stride_wy = y.stride()
+
+    # Tile one full spatial plane per program for common cases like 32x32
+    BLOCK_HW = 1024
+    grid = (N, triton.cdiv(H * W, BLOCK_HW))
+    _min_tanh2_nchw_kernel[grid](
+        x, y,
+        N, C, H, W,
+        stride_nx, stride_cx, stride_hx, stride_wx,
+        stride_ny, stride_cy, stride_hy, stride_wy,
+        BLOCK_HW=BLOCK_HW,
+        num_warps=8,
+        num_stages=4,
+    )
+    return y
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a convolution, applies minimum operation, Tanh, and another Tanh.
+    """
+    def __init__(
+        self,
+        in_channels: int = DEFAULT_IN_CHANNELS,
+        out_channels: int = DEFAULT_OUT_CHANNELS,
+        kernel_size: int = DEFAULT_KERNEL_SIZE,
+    ):
+        super().__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
+
+    def forward(self, x):
+        if x.device.type != "npu":
+            raise RuntimeError("ModelNew only supports Ascend NPU execution")
+        x = self.conv(x)
+        return _min_tanh2_triton(x)
+batch_size = 128
+in_channels = 16
+out_channels = 64
+height = width = 256
+kernel_size = 3
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, height, width)]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size]

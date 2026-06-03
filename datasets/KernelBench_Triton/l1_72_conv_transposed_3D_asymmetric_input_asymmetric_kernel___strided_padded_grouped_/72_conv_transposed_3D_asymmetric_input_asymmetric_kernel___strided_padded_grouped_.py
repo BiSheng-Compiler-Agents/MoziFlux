@@ -1,5 +1,9 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def _upsample3d_scatter_kernel(
@@ -40,3 +44,148 @@ def _upsample3d_scatter_kernel(
     x = tl.load(in_base + w_off * in_stride_w, mask=w_mask, other=0.0)
     out_w_pos = w_off * SW
     tl.store(out_base + out_w_pos * out_stride_w, x, mask=w_mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Performs a 3D transposed convolution operation with asymmetric input and kernel, and optional stride.
+
+    Fast path on Ascend NPU:
+      - Insert zeros (upsample) via a Triton kernel.
+      - Run torch.nn.functional.conv3d with flipped weights and adjusted padding.
+    """
+    def __init__(
+        self,
+        in_channels: int = 32,
+        out_channels: int = 64,
+        kernel_size: tuple = (3, 5, 7),
+        stride: tuple = (2, 2, 2),
+        padding: tuple = (1, 2, 3),
+        output_padding: tuple = (1, 1, 1),
+        groups: int = 4,
+        bias: bool = False,
+    ):
+        super(ModelNew, self).__init__()
+        self.conv_transpose3d = nn.ConvTranspose3d(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride=stride,
+            padding=padding,
+            output_padding=output_padding,
+            groups=groups,
+            bias=bias,
+        )
+
+    @staticmethod
+    def _weight_to_conv3d(weight: torch.Tensor, groups: int) -> torch.Tensor:
+        # Convert ConvTranspose3d weights [Cin, Cout/G, kD, kH, kW]
+        # -> Conv3d weights [Cout, Cin/G, kD, kH, kW] with spatial flip.
+        G = groups
+        Cin, Co_g, kD, kH, kW = weight.shape
+        Ci_g = Cin // G
+        Co = Co_g * G
+        w_flip = weight.flip(dims=(2, 3, 4))  # flip kd,kh,kw
+        w_g = w_flip.view(G, Ci_g, Co_g, kD, kH, kW)  # [G, Ci_g, Co_g, kD, kH, kW]
+        w_conv = w_g.permute(0, 2, 1, 3, 4, 5).contiguous().view(Co, Ci_g, kD, kH, kW)
+        return w_conv
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Performs the 3D transposed convolution.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_channels, depth, height, width).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, out_channels, depth_out, height_out, width_out).
+        """
+        if not getattr(x, "is_npu", False):
+            raise RuntimeError("ModelNew requires an Ascend NPU tensor input")
+        if any(d != 1 for d in self.conv_transpose3d.dilation):
+            raise RuntimeError("ModelNew only supports dilation=(1, 1, 1)")
+
+        # Read parameters
+        sd, sh, sw = self.conv_transpose3d.stride
+        pd, ph, pw = self.conv_transpose3d.padding
+        od, oh, ow = self.conv_transpose3d.output_padding
+        groups = self.conv_transpose3d.groups
+        weight = self.conv_transpose3d.weight
+        bias = self.conv_transpose3d.bias
+        kD, kH, kW = weight.shape[2], weight.shape[3], weight.shape[4]
+
+        N, Cin, Di, Hi, Wi = x.shape
+
+        # Compute upsampled spatial sizes: s*(L-1) + 1 + output_padding
+        Du = (Di - 1) * sd + 1 + od
+        Hu = (Hi - 1) * sh + 1 + oh
+        Wu = (Wi - 1) * sw + 1 + ow
+
+        # Convert weights and compute conv3d padding: pad' = k - 1 - p
+        pad_d = kD - 1 - pd
+        pad_h = kH - 1 - ph
+        pad_w = kW - 1 - pw
+
+        if (pad_d < 0) or (pad_h < 0) or (pad_w < 0):
+            raise RuntimeError("ModelNew requires kernel_size - 1 >= padding in every spatial dimension")
+
+        w_conv = self._weight_to_conv3d(weight, groups).contiguous()
+
+        # Ascend NPU tensor creation only supports contiguous layout here.
+        x_up = torch.zeros((N, Cin, Du, Hu, Wu), dtype=x.dtype, device=x.device)
+
+        # Launch Triton kernel to scatter x into x_up at strided positions
+        in_strides = x.stride()
+        out_strides = x_up.stride()
+
+        BLOCK_W = 128
+        grid = (N * Cin * Di * Hi, triton.cdiv(Wi, BLOCK_W))
+        _upsample3d_scatter_kernel[grid](
+            x, x_up,
+            N, Cin, Di, Hi, Wi,
+            Du, Hu, Wu,
+            sd, sh, sw,
+            in_strides[0], in_strides[1], in_strides[2], in_strides[3], in_strides[4],
+            out_strides[0], out_strides[1], out_strides[2], out_strides[3], out_strides[4],
+            BLOCK_W=BLOCK_W,
+            num_warps=4,
+            num_stages=2,
+        )
+
+        # Convolution with converted weights; stride=1, dilation=1, groups preserved
+        y = F.conv3d(
+            x_up, w_conv, bias=bias, stride=1,
+            padding=(pad_d, pad_h, pad_w), dilation=1, groups=groups
+        )
+        return y
+
+
+_MODEL_CACHE = {}
+
+
+def run_operator(x: torch.Tensor) -> torch.Tensor:
+    key = (str(x.device), x.dtype)
+    model = _MODEL_CACHE.get(key)
+    if model is None:
+        model = ModelNew().to(device=x.device, dtype=x.dtype)
+        model.eval()
+        _MODEL_CACHE[key] = model
+    with torch.no_grad():
+        return model(x)
+batch_size = 8
+in_channels = 32
+out_channels = 32
+kernel_size = (3, 5, 7)
+depth = 12
+height = 24
+width = 48
+stride = (2, 2, 2)
+padding = (1, 2, 3)
+output_padding = (1, 1, 1)
+groups = 4
+
+def get_inputs():
+    x = torch.rand(batch_size, in_channels, depth, height, width)
+    return [x]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, groups]

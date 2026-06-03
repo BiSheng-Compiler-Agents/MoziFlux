@@ -1,5 +1,13 @@
+import torch
+import torch_npu  # noqa: F401
+import torch.nn as nn
 import triton
 import triton.language as tl
+
+
+def _is_npu_tensor(x: torch.Tensor) -> bool:
+    return bool(getattr(x, "is_npu", False) or x.device.type == "npu")
+
 
 @triton.jit
 def _gelu_gap2d_fused_row_kernel(
@@ -41,3 +49,113 @@ def _gelu_gap2d_fused_row_kernel(
 
     out_off = n * out_stride_n + c * out_stride_c
     tl.store(y_ptr + out_off, mean_val)
+
+
+def gelu_global_avg_pool2d_triton(x: torch.Tensor) -> torch.Tensor:
+    """
+    Fused GELU + global average pooling over H and W using Triton.
+    Input:  x of shape (N, C, H, W)
+    Output: y of shape (N, C)
+    """
+    assert x.dim() == 4
+    if not _is_npu_tensor(x):
+        raise RuntimeError("gelu_global_avg_pool2d_triton expects an Ascend NPU tensor.")
+
+    # Use float32 accumulation for numerical correctness
+    orig_dtype = x.dtype
+    x_fp32 = x if orig_dtype == torch.float32 else x.float()
+    x_fp32 = x_fp32.contiguous()
+
+    N, C, H, W = x_fp32.shape
+    y = torch.empty((N, C), device=x_fp32.device, dtype=torch.float32)
+
+    # Choose BLOCK size to minimize loop iterations and reduction overhead
+    total_hw = H * W
+    if total_hw >= 4096:
+        BLOCK_W = 1024
+        num_warps = 8
+        num_stages = 3
+    elif total_hw >= 1024:
+        BLOCK_W = 1024
+        num_warps = 4
+        num_stages = 2
+    elif total_hw >= 512:
+        BLOCK_W = 512
+        num_warps = 4
+        num_stages = 2
+    elif total_hw >= 256:
+        BLOCK_W = 256
+        num_warps = 2
+        num_stages = 2
+    else:
+        BLOCK_W = 128
+        num_warps = 2
+        num_stages = 1
+
+    grid = (N * C,)
+    _gelu_gap2d_fused_row_kernel[grid](
+        x_fp32,
+        y,
+        C, H, W,
+        x_fp32.stride(0), x_fp32.stride(1), x_fp32.stride(2), x_fp32.stride(3),
+        y.stride(0), y.stride(1),
+        BLOCK_W=BLOCK_W,
+        num_warps=num_warps,
+        num_stages=num_stages,
+    )
+
+    if orig_dtype != torch.float32:
+        y = y.to(orig_dtype)
+    return y
+
+
+def conv2d_gelu_global_avg_pool(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None = None,
+    stride: int | tuple[int, int] = 1,
+    padding: int | tuple[int, int] = 0,
+    dilation: int | tuple[int, int] = 1,
+    groups: int = 1,
+) -> torch.Tensor:
+    if not _is_npu_tensor(x):
+        raise RuntimeError("conv2d_gelu_global_avg_pool expects an Ascend NPU tensor input.")
+    y = torch.nn.functional.conv2d(
+        x,
+        weight,
+        bias=bias,
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        groups=groups,
+    )
+    return gelu_global_avg_pool2d_triton(y)
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs a convolution, applies GELU, and then performs global average pooling.
+    """
+    def __init__(self, in_channels, out_channels, kernel_size):
+        super(ModelNew, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
+
+    def forward(self, x):
+        """
+        Args:
+            x: Input tensor of shape (batch_size, in_channels, height, width)
+        Returns:
+            Output tensor of shape (batch_size, out_channels)
+        """
+        x = self.conv(x)
+        return gelu_global_avg_pool2d_triton(x)
+batch_size = 128
+in_channels = 8
+out_channels = 64
+height, width = 256, 256
+kernel_size = 3
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, height, width)]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size]

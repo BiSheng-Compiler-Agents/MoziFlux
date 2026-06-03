@@ -1,5 +1,9 @@
+import torch
+import torch.nn as nn
+import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def _elu_kernel(x_ptr, y_ptr, N, alpha, BLOCK_SIZE: tl.constexpr):
@@ -22,3 +26,79 @@ def _elu_kernel(x_ptr, y_ptr, N, alpha, BLOCK_SIZE: tl.constexpr):
     y = tl.where(x > 0, x, neg_part)
 
     tl.store(y_ptr + offs, y, mask=mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs an ELU activation.
+    """
+    def __init__(self, alpha: float = 1.0):
+        """
+        Initializes the ELU model.
+
+        Args:
+            alpha (float, optional): The alpha parameter for the ELU function. Defaults to 1.0.
+        """
+        super(ModelNew, self).__init__()
+        self.alpha = float(alpha)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Applies ELU activation to the input tensor.
+
+        Args:
+            x (torch.Tensor): Input tensor of any shape.
+
+        Returns:
+            torch.Tensor: Output tensor with ELU applied, same shape as input.
+        """
+        if x.device.type != "npu":
+            raise ValueError("ModelNew expects an Ascend NPU tensor input")
+        if x.requires_grad:
+            raise ValueError("ModelNew does not support autograd-enabled inputs")
+        if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
+            raise TypeError(
+                "ModelNew supports only float16, bfloat16, and float32 tensors"
+            )
+        if x.numel() == 0:
+            return torch.empty_like(x)
+
+        x_contig = x.contiguous()
+        y = torch.empty_like(x_contig)
+        N = x_contig.numel()
+
+        # Choose a good tile and launch config without autotune overhead
+        if N >= 131072:
+            BLOCK_SIZE = 8192
+            num_warps = 8
+        elif N >= 32768:
+            BLOCK_SIZE = 4096
+            num_warps = 8
+        elif N >= 8192:
+            BLOCK_SIZE = 2048
+            num_warps = 4
+        else:
+            BLOCK_SIZE = 1024
+            num_warps = 4
+
+        def grid(meta):
+            return (triton.cdiv(N, meta['BLOCK_SIZE']),)
+
+        _elu_kernel[grid](
+            x_contig.view(-1),
+            y.view(-1),
+            N,
+            self.alpha,
+            BLOCK_SIZE=BLOCK_SIZE,
+            num_warps=num_warps,
+            num_stages=2,
+        )
+        return y.view_as(x)
+batch_size = 4096
+dim = 393216
+
+def get_inputs():
+    x = torch.rand(batch_size, dim)
+    return [x]
+def get_init_inputs():
+    return [1.0]  # Provide alpha value for initialization

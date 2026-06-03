@@ -1,5 +1,11 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
+DEFAULT_IN_FEATURES = 8192
+DEFAULT_OUT_FEATURES = 8192
+
 
 @triton.jit
 def _rowwise_linear_sum_kernel(
@@ -63,6 +69,7 @@ def _rowwise_linear_sum_kernel(
 
     # Write result
     tl.store(out_ptr + rows * stride_out_b, acc, mask=mask_rows)
+
 
 @triton.jit
 def _fused_linear_sum_kernel(
@@ -136,3 +143,87 @@ def _fused_linear_sum_kernel(
     # Add bias sum and store
     acc += c_acc
     tl.store(out_ptr + rows * stride_out_b, acc, mask=mask_rows)
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a sequence of operations:
+        - Matrix multiplication
+        - Summation
+        - Max
+        - Average pooling
+        - LogSumExp
+        - LogSumExp
+    """
+    def __init__(
+        self,
+        in_features=DEFAULT_IN_FEATURES,
+        out_features=DEFAULT_OUT_FEATURES,
+    ):
+        super(ModelNew, self).__init__()
+        self.linear = nn.Linear(in_features, out_features)
+
+    def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_features).
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, 1).
+        """
+        if x.device.type != "npu":
+            raise RuntimeError("ModelNew expects Ascend NPU tensors.")
+        if x.requires_grad:
+            raise RuntimeError("ModelNew Triton path does not support autograd inputs.")
+
+        if self.linear.weight.device != x.device:
+            self.linear = self.linear.to(device=x.device)
+
+        # Optimized Triton path:
+        # The chain reduces to:
+        # sum_j (x @ W^T + b)_j = x @ (sum_j W_j)^T + sum_j b_j
+        # Fuse the computation of sum_j W_j and sum_j b_j inside the kernel
+        B, I = x.shape
+
+        # Ensure contiguous tensors
+        x_c = x.contiguous()
+        W = self.linear.weight.contiguous()        # (O, I)
+        b = self.linear.bias
+        if b is None:
+            b_c = torch.empty(1, device=x.device, dtype=W.dtype)  # dummy; O_b=0 prevents use
+            O_b = 0
+        else:
+            b_c = b.contiguous()
+            O_b = W.shape[0]
+
+        # Output buffer (B, 1) but we store as (B,) in kernel and then view
+        out = torch.empty((B,), device=x.device, dtype=torch.float32)
+
+        # Launch Triton kernel: process BLOCK_B rows per program
+        BLOCK_B = 256
+        BLOCK_K = 32
+        UNROLL_O = 32
+        grid = (triton.cdiv(B, BLOCK_B),)
+
+        _fused_linear_sum_kernel[grid](
+            x_c, W, b_c, out,
+            B, I, O_b,
+            x_c.stride(0), x_c.stride(1),
+            W.stride(0), W.stride(1),
+            b_c.stride(0),
+            out.stride(0),
+            BLOCK_B=BLOCK_B,
+            BLOCK_K=BLOCK_K,
+            UNROLL_O=UNROLL_O,
+            num_warps=4,
+            num_stages=2,
+        )
+
+        return out.view(B, 1)
+batch_size = 1024
+in_features  = 8192  
+out_features = 8192
+
+def get_inputs():
+    return [torch.rand(batch_size, in_features)]
+def get_init_inputs():
+    return [in_features, out_features]

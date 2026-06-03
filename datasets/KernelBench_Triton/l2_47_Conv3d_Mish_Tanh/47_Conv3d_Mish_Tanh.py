@@ -1,5 +1,11 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
+
+def _is_npu_tensor(x: torch.Tensor) -> bool:
+    return bool(getattr(x, "is_npu", False) or x.device.type == "npu")
 
 @triton.jit
 def _mish_tanh_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -34,3 +40,52 @@ def _mish_tanh_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
     # Downcast and store
     out = out_f32.to(x.dtype)
     tl.store(y_ptr + offs, out, mask=mask)
+
+
+def fused_mish_tanh(x: torch.Tensor) -> torch.Tensor:
+    # Fused activation: y = tanh(mish(x)) with stable softplus
+    if not _is_npu_tensor(x):
+        raise RuntimeError("fused_mish_tanh expects an Ascend NPU tensor")
+    x_contig = x.contiguous()
+    y = torch.empty_like(x_contig)
+    n_elements = x_contig.numel()
+    if n_elements == 0:
+        return y
+    BLOCK_SIZE = 4096
+    grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
+    _mish_tanh_kernel[grid](x_contig, y, n_elements, BLOCK_SIZE=BLOCK_SIZE, num_warps=8, num_stages=2)
+    return y
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a 3D convolution, applies Mish activation, and then applies Tanh activation.
+    """
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
+        super(ModelNew, self).__init__()
+        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+
+    def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_channels, D, H, W).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, out_channels, D', H', W').
+        """
+        if not _is_npu_tensor(x):
+            raise RuntimeError("ModelNew only supports Ascend NPU execution")
+        x = self.conv(x)
+        # Fused Triton kernel for Mish + Tanh
+        x = fused_mish_tanh(x)
+        return x
+batch_size = 16
+in_channels = 32
+out_channels = 64
+D, H, W = 32, 64, 64
+kernel_size = 3
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, D, H, W)]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size]

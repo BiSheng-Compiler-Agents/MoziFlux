@@ -1,5 +1,9 @@
+import math
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def _fused_maxpool2x2_hardtanh_mean_tanh(
@@ -70,3 +74,75 @@ def _fused_maxpool2x2_hardtanh_mean_tanh(
 
     # Store to [B, C, 1, 1]
     tl.store(out_ptr + o_base, out_val)
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a transposed convolution, followed by max pooling, hardtanh activation, mean operation, and tanh activation.
+    Fused Triton kernel is used to compute: maxpool -> hardtanh -> mean (H,W) -> tanh in a single pass.
+    """
+    def __init__(
+        self,
+        in_channels=32,
+        out_channels=64,
+        kernel_size=4,
+        stride=2,
+        padding=1,
+        maxpool_kernel_size=2,
+        maxpool_stride=2,
+        hardtanh_min=-1.0,
+        hardtanh_max=1.0,
+    ):
+        super(ModelNew, self).__init__()
+        self.conv_transpose = nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        self.maxpool = nn.MaxPool2d(kernel_size=maxpool_kernel_size, stride=maxpool_stride)
+        self.hardtanh = nn.Hardtanh(min_val=hardtanh_min, max_val=hardtanh_max)
+
+    def forward(self, x):
+        if x.device.type != "npu":
+            raise ValueError("ModelNew expects Ascend NPU tensors.")
+        x = self.conv_transpose(x)
+        x = x.contiguous()
+        B, C, H, W = x.shape
+        H_OUT = H // 2
+        W_OUT = W // 2
+        TOT = H_OUT * W_OUT
+        if TOT == 0:
+            raise ValueError("ModelNew requires pooled spatial dimensions to stay non-zero.")
+
+        out = torch.empty((B, C, 1, 1), device=x.device, dtype=x.dtype)
+
+        xb, xc, xh, xw = x.stride()
+        ob, oc, _, _ = out.stride()
+
+        def next_pow2(v: int) -> int:
+            return 1 if v <= 1 else 1 << (v - 1).bit_length()
+
+        BLOCK_W = next_pow2(TOT)
+        grid = (B * C,)
+        _fused_maxpool2x2_hardtanh_mean_tanh[grid](
+            x, out,
+            C, H, W,
+            xb, xc, xh, xw,
+            ob, oc,
+            float(self.hardtanh.min_val), float(self.hardtanh.max_val),
+            H_OUT=H_OUT, W_OUT=W_OUT, BLOCK_W=BLOCK_W,
+            num_warps=4, num_stages=3
+        )
+        return out
+batch_size = 128
+in_channels  = 64  
+out_channels = 64  
+height = width = 256  
+kernel_size  = 3
+stride = 1
+padding = 1
+maxpool_kernel_size = 2
+maxpool_stride = 2
+hardtanh_min = -1
+hardtanh_max = 1
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, height, width)]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, stride, padding, maxpool_kernel_size, maxpool_stride, hardtanh_min, hardtanh_max]

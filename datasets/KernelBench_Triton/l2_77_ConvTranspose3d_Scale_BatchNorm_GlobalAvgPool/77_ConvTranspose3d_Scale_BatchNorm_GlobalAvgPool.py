@@ -1,5 +1,9 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import triton
 import triton.language as tl
+
 
 @triton.autotune(
     configs=[
@@ -41,3 +45,127 @@ def _global_avg_pool3d_ncdhw_kernel(x_ptr, y_ptr, M, L: tl.constexpr, BLOCK: tl.
 
     mean = total * (1.0 / L)
     tl.store(y_ptr + pid, mean, mask=valid_pid)
+
+
+def global_avg_pool3d_triton(x: torch.Tensor) -> torch.Tensor:
+    # x is expected to be [N, C, D, H, W] and contiguous in memory (NCDHW)
+    assert x.ndim == 5, "Input must be NCDHW"
+    N, C, D, H, W = x.shape
+    M = N * C
+    L = D * H * W
+
+    # Ensure contiguous for correct linearization over DHW
+    x_contig = x.contiguous()
+    y = torch.empty((N, C, 1, 1, 1), device=x.device, dtype=x.dtype)
+
+    # Flatten views for kernel pointers
+    x_flat = x_contig.view(-1)
+    y_flat = y.view(-1)
+
+    grid = (M,)
+    _global_avg_pool3d_ncdhw_kernel[grid](x_flat, y_flat, M, L=L)
+    return y
+
+
+def _is_npu_tensor(x: torch.Tensor) -> bool:
+    return bool(getattr(x, "is_npu", False) or x.device.type == "npu")
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a 3D transposed convolution, scales the output, applies batch normalization, 
+    and then performs global average pooling. 
+    """
+    def __init__(self, in_channels, out_channels, kernel_size, scale_factor, eps=1e-5, momentum=0.1):
+        super(ModelNew, self).__init__()
+        self.conv_transpose = nn.ConvTranspose3d(in_channels, out_channels, kernel_size)
+        self.scale_factor = scale_factor
+        self.batch_norm = nn.BatchNorm3d(out_channels, eps=eps, momentum=momentum)
+        # Keep for API compatibility; pooling may use Triton kernel on CUDA
+        self.global_avg_pool = nn.AdaptiveAvgPool3d((1, 1, 1))
+
+    def forward(self, x):
+        # Fuse the scalar scaling into the ConvTranspose3d to remove an extra tensor-wide multiply.
+        w = self.conv_transpose.weight * self.scale_factor
+        b = None if self.conv_transpose.bias is None else (self.conv_transpose.bias * self.scale_factor)
+        x = F.conv_transpose3d(
+            x,
+            w,
+            bias=b,
+            stride=self.conv_transpose.stride,
+            padding=self.conv_transpose.padding,
+            output_padding=self.conv_transpose.output_padding,
+            groups=self.conv_transpose.groups,
+            dilation=self.conv_transpose.dilation,
+        )
+
+        # If BatchNorm is in eval mode and tracking running stats, we can safely commute
+        # BN and GlobalAvgPool: Avg(BN(x)) == BN(Avg(x)). This avoids full-tensor BN work.
+        use_commute = (not self.batch_norm.training) and getattr(self.batch_norm, "track_running_stats", True)
+        if use_commute:
+            # Run the Triton kernel on Ascend NPU tensors.
+            if _is_npu_tensor(x):
+                x = global_avg_pool3d_triton(x)
+            else:
+                raise RuntimeError("ModelNew expects Ascend NPU tensors for the Triton pooling path.")
+            # Apply BN using running statistics and affine params on the pooled tensor
+            dtype = x.dtype
+            rm = self.batch_norm.running_mean.to(dtype).view(1, -1, 1, 1, 1)
+            rv = self.batch_norm.running_var.to(dtype).view(1, -1, 1, 1, 1)
+            inv_std = torch.rsqrt(rv + self.batch_norm.eps)
+
+            if self.batch_norm.affine:
+                weight = self.batch_norm.weight.to(dtype).view(1, -1, 1, 1, 1)
+                bias = self.batch_norm.bias.to(dtype).view(1, -1, 1, 1, 1)
+            else:
+                weight = torch.ones(1, x.size(1), 1, 1, 1, device=x.device, dtype=dtype)
+                bias = torch.zeros(1, x.size(1), 1, 1, 1, device=x.device, dtype=dtype)
+
+            x = (x - rm) * (weight * inv_std) + bias
+            return x
+        else:
+            # Training mode or not tracking running stats: follow original ordering
+            x = self.batch_norm(x)
+            if _is_npu_tensor(x):
+                x = global_avg_pool3d_triton(x)
+            else:
+                raise RuntimeError("ModelNew expects Ascend NPU tensors for the Triton pooling path.")
+            return x
+
+
+batch_size = 16
+in_channels = 64
+out_channels = 32
+depth, height, width = 16, 32, 32
+kernel_size = 3
+scale_factor = 2.0
+_MODEL_CACHE = {}
+
+
+def _get_default_model(device: torch.device, dtype: torch.dtype) -> ModelNew:
+    cache_key = (device.type, getattr(device, "index", None), dtype)
+    if cache_key not in _MODEL_CACHE:
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(0)
+            model = ModelNew(*get_init_inputs())
+        model = model.to(device=device, dtype=dtype)
+        model.eval()
+        _MODEL_CACHE[cache_key] = model
+    return _MODEL_CACHE[cache_key]
+
+
+def conv_transpose3d_scale_batch_norm_global_avg_pool(x: torch.Tensor) -> torch.Tensor:
+    model = _get_default_model(x.device, x.dtype)
+    with torch.no_grad():
+        return model(x)
+batch_size = 16
+in_channels = 64
+out_channels = 128
+depth, height, width = 16, 32, 32
+kernel_size = 5
+scale_factor = 2.0
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, depth, height, width)]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, scale_factor]

@@ -1,5 +1,13 @@
+import torch
+import torch.nn as nn
+import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
+
+
+def _is_npu_tensor(x: torch.Tensor) -> bool:
+    return bool(getattr(x, "is_npu", False))
+
 
 @triton.jit
 def _argmin_row_kernel(
@@ -42,3 +50,72 @@ def _argmin_row_kernel(
         k0 += BLOCK_K
 
     tl.store(out_ptr + pid, best_idx)
+
+
+def argmin_over_a_dimension(x: torch.Tensor, dim: int) -> torch.Tensor:
+    if not isinstance(x, torch.Tensor):
+        raise TypeError("argmin_over_a_dimension expects a torch.Tensor input")
+    if not _is_npu_tensor(x):
+        raise RuntimeError("argmin_over_a_dimension expects an Ascend NPU tensor")
+    if x.dim() == 0:
+        raise ValueError("argmin_over_a_dimension expects a tensor with rank at least 1")
+    if x.dtype not in (torch.float16, torch.float32, torch.bfloat16):
+        raise TypeError(
+            "argmin_over_a_dimension supports only float16, float32, and bfloat16 inputs"
+        )
+
+    dim = int(dim)
+    if dim < 0:
+        dim += x.dim()
+    if dim < 0 or dim >= x.dim():
+        raise ValueError(f"invalid reduction dim {dim} for input rank {x.dim()}")
+    if x.shape[dim] == 0:
+        raise ValueError("argmin_over_a_dimension does not support empty reduction axes")
+
+    x_last = x.movedim(dim, -1).contiguous()
+    rows = x_last.numel() // x_last.shape[-1]
+    cols = x_last.shape[-1]
+    x_2d = x_last.view(rows, cols)
+
+    out = torch.empty((rows,), device=x.device, dtype=torch.int64)
+    block_k = 64
+    while block_k < cols and block_k < 1024:
+        block_k *= 2
+
+    grid = (rows,)
+    _argmin_row_kernel[grid](
+        x_2d,
+        out,
+        rows,
+        cols,
+        BLOCK_K=block_k,
+        num_warps=4 if block_k <= 256 else 8,
+        num_stages=2,
+    )
+
+    out_shape = list(x.shape)
+    del out_shape[dim]
+    return out.view(*out_shape)
+
+
+class ModelNew(nn.Module):
+    """
+    Argmin reduction over a specified dimension using Triton on Ascend NPU.
+    """
+
+    def __init__(self, dim: int = 1):
+        super(ModelNew, self).__init__()
+        self.dim = dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return argmin_over_a_dimension(x, self.dim)
+batch_size = 128
+dim1 = 4096
+dim2 = 4095
+dim = 1
+
+def get_inputs():
+    x = torch.rand(batch_size, dim1, dim2)
+    return [x]
+def get_init_inputs():
+    return [dim]

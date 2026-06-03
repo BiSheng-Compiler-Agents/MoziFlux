@@ -70,48 +70,10 @@ PROVIDER = "openrouter"
 # ── Per-kernel task prompt ─────────────────────────────────────────────────────
 TASK_PROMPT = """
 Optimize the Triton kernel in the directory: {kernel_dir}
+The baseline kernel file that you should start optimizing is: {baseline_file}
+write the final optimized kernel in opt_{baseline_filename} in the same directory.
 
-The baseline kernel file is: {baseline_file}
-
-Follow this exact workflow:
-
-1. READ the baseline kernel file carefully. Understand:
-   - Every parameter in the @triton.jit signature (never assume params exist)
-   - What shapes N/C/H/W (or equivalent) the kernel must handle
-   - What the kernel computes
-
-2. PROFILE the baseline with cannsim (-g flag) to get trace_core0.json.
-   Use the cannsim-remote plugin. Test at least:
-   - One small spatial shape
-   - One large spatial shape
-   - One non-power-of-2 dimension if applicable
-
-3. ANALYZE the trace. Identify the top bottlenecks (SCALAR%, SCALARLDST%,
-   WAIT_FLAG stalls, VEC unit usage vs RVECEX, UB overflow, FFTS dispatch
-   overhead from too many programs).
-
-4. WRITE opt_{baseline_filename} in the same directory with:
-   - Optimizations validated by trace data (not guessed)
-   - Coverage of ALL shapes the kernel signature accepts
-   - Correctness verified by cannsim [PASS]
-
-5. WRITE profile_kernels.py in the same directory following the
-   triton-ascend-kernel-profiling skill exactly:
-   - Load kernels via importlib (never copy-paste code)
-   - @triton.testing.perf_report decorator
-   - styles=[("blue", "-"), ("red", "-"), ("green", "-")]
-   - ylabel="Latency (ms)"
-   - do_bench returns seconds — no * 1e3
-   - Grid overflow guard: if N*C*H > 65535, chunk over N
-   - Unit test with atol=1e-2, rtol=1e-2 for fp16
-   - Shapes covering all dispatch paths of the optimized kernel
-
-6. RECORD an episode in kernel-episode-memory with all findings.
-
-The kernel directory is: {kernel_dir}
-The baseline file is: {baseline_file}
-
-Do not modify the baseline file. Write only opt_* and profile_kernels.py.
+Do not modify the baseline file.
 """
 
 # ── State management ───────────────────────────────────────────────────────────
@@ -166,11 +128,12 @@ def get_baseline_file(kernel_dir: Path) -> Path | None:
 
 def kernel_is_complete(kernel_dir: Path) -> tuple[bool, list[str]]:
     """
-    Check whether a kernel directory has all three required files.
-    Returns (is_complete, list_of_missing_files).
+    Coarse pre-run completeness check used by the discovery filter.
+    Returns True only when the two must-have files (opt_*.py and
+    profile_kernels.py) are present. For the strict 5-deliverable check
+    used after a run, use verify_deliverables() instead.
     """
     files    = [f.name for f in kernel_dir.glob("*.py")]
-    baseline = get_baseline_file(kernel_dir)
     missing  = []
 
     has_opt     = any(f.startswith("opt_") for f in files)
@@ -182,6 +145,88 @@ def kernel_is_complete(kernel_dir: Path) -> tuple[bool, list[str]]:
         missing.append("profile_kernels.py")
 
     return len(missing) == 0, missing
+
+
+# ── Required deliverables (per triton-operator/orchestration SKILL.md) ─────
+# Every optimized kernel directory must contain all 5 of these. If any are
+# missing after a run, the orchestrator sends a follow-up prompt asking the
+# agent to produce them (no re-optimization of the kernel itself).
+REQUIRED_DELIVERABLES = (
+    "opt_*.py",                 # Optimized kernel + ModelNew host interface
+    "profile_kernels.py",       # @perf_report benchmark, all dispatch paths, unit test
+    "Optimizations.md",         # Each optimization applied, with code snippets and rationale
+    "performance_report.md",    # cannsim trace tables (baseline vs optimized)
+    "review.md",                # Static P0/P1/P2 review of the optimized kernel
+)
+
+# Max number of follow-up prompts the orchestrator will send asking the
+# agent to deliver missing files. Bounds the retry loop in optimize_kernel().
+MAX_DELIVERY_FOLLOWUPS = 2
+
+
+def verify_deliverables(kernel_dir: Path) -> tuple[bool, list[str], str | None]:
+    """
+    Strict post-run check for all 5 required deliverables in kernel_dir.
+
+    Returns (is_complete, missing_filenames, followup_message_for_agent):
+      - is_complete=True  → every deliverable present, followup_message is None
+      - is_complete=False → missing_filenames lists the absent items using
+        their canonical pattern or filename, and followup_message is a
+        self-contained prompt that can be fed back to the same Hermes
+        agent as a follow-up user_message, asking it to produce ONLY the
+        missing files (no re-optimization).
+
+    The follow-up message tells the agent to inspect kernel_dir first, see
+    what is already on disk, and write only the missing artifacts — so
+    work the previous run already completed is preserved.
+    """
+    py_files = {f.name for f in kernel_dir.glob("*.py")}
+    md_files = {f.name for f in kernel_dir.glob("*.md")}
+
+    missing: list[str] = []
+
+    # 1. opt_<baseline_filename>.py — at least one opt_*.py must exist
+    if not any(f.startswith("opt_") for f in py_files):
+        missing.append("opt_*.py")
+
+    # 2. profile_kernels.py — exact filename
+    if "profile_kernels.py" not in py_files:
+        missing.append("profile_kernels.py")
+
+    # 3-5. Markdown reports — exact filenames
+    for md in ("Optimizations.md", "performance_report.md", "review.md"):
+        if md not in md_files:
+            missing.append(md)
+
+    if not missing:
+        return True, [], None
+
+    baseline       = get_baseline_file(kernel_dir)
+    baseline_name  = baseline.name if baseline else "<baseline>.py"
+    baseline_str   = str(baseline) if baseline else "(not found)"
+
+    followup = (
+        f"Your previous run for kernel '{kernel_dir.name}' did NOT deliver "
+        f"all required files. {len(missing)} of {len(REQUIRED_DELIVERABLES)} "
+        f"deliverables are missing.\n\n"
+        f"  Kernel directory: {kernel_dir}\n"
+        f"  Baseline file:    {baseline_str}  (do NOT modify it)\n\n"
+        f"MISSING:\n"
+        + "\n".join(f"  - {m}" for m in missing)
+        + "\n\n"
+        f"REQUIRED DELIVERABLES (per the triton-operator orchestration skill):\n"
+        f"  1. opt_{baseline_name}    — Optimized kernel + ModelNew host interface\n"
+        f"  2. profile_kernels.py      — @perf_report benchmark, all dispatch paths, unit test\n"
+        f"  3. Optimizations.md        — Each optimization applied, with code snippets and rationale\n"
+        f"  4. performance_report.md   — cannsim trace tables (baseline vs optimized), hardware latency\n"
+        f"  5. review.md               — Static P0/P1/P2 review of the optimized kernel\n\n"
+        f"DO NOT re-run the optimization workflow. The kernel is already "
+        f"optimized in the existing opt_*.py and profile_kernels.py. Start "
+        f"by listing {kernel_dir} to see what is already on disk, then write "
+        f"ONLY the missing files. Each missing file must be self-contained "
+        f"and reference the existing artifacts in {kernel_dir}."
+    )
+    return False, missing, followup
 
 
 # ── Per-kernel optimization via Hermes agent ───────────────────────────────────
@@ -250,25 +295,55 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
         except Exception:
             pass
 
-        # Verify the expected files now exist on disk
-        complete_after, missing_after = kernel_is_complete(kernel_dir)
+        # Verify all 5 required deliverables. If any are missing, send up
+        # to MAX_DELIVERY_FOLLOWUPS follow-up prompts asking the agent to
+        # produce ONLY the missing files (no re-optimization of the kernel).
+        for followup_idx in range(1, MAX_DELIVERY_FOLLOWUPS + 2):  # 1..N+1
+            complete_after, missing_after, followup = verify_deliverables(kernel_dir)
+            if complete_after:
+                break
+            if followup_idx > MAX_DELIVERY_FOLLOWUPS:
+                log.error(
+                    "  ✗ %s still missing %d deliverable(s) after %d follow-ups: %s",
+                    name, len(missing_after), MAX_DELIVERY_FOLLOWUPS, missing_after,
+                )
+                break
+            log.warning(
+                "  ⚠ %s missing %d deliverable(s) — followup %d/%d: %s",
+                name, len(missing_after), followup_idx, MAX_DELIVERY_FOLLOWUPS, missing_after,
+            )
+            try:
+                agent.run_conversation(
+                    user_message=followup,
+                    task_id=f"kernelbench-{name}-followup{followup_idx}",
+                )
+            except Exception as e:
+                log.error("  ✗ %s followup %d failed: %s", name, followup_idx, e)
+                break
+
         elapsed = time.time() - t0
 
+        # Re-verify after the follow-up loop (the agent may have written
+        # only some of the missing files, in which case we still report
+        # incomplete rather than done).
+        complete_after, missing_after, _ = verify_deliverables(kernel_dir)
+        all_files = sorted(f.name for f in kernel_dir.iterdir() if f.is_file())
+
         if complete_after:
-            files = [f.name for f in kernel_dir.glob("*.py")]
-            log.info("  ✓ %s done (%.0fs, %d files)", name, elapsed, len(files))
+            log.info("  ✓ %s done (%.0fs, %d files)", name, elapsed, len(all_files))
             mark_kernel(state, name, "done",
                         detail=f"elapsed {elapsed:.0f}s",
-                        files=files)
+                        files=all_files)
             return {"kernel": name, "status": "done",
                     "detail": f"elapsed {elapsed:.0f}s",
-                    "files": files, "elapsed_s": elapsed}
+                    "files": all_files, "elapsed_s": elapsed}
         else:
             detail = f"agent finished but missing: {missing_after}"
             log.warning("  ⚠ %s incomplete — %s", name, detail)
-            mark_kernel(state, name, "incomplete", detail)
+            mark_kernel(state, name, "incomplete", detail,
+                        files=all_files)
             return {"kernel": name, "status": "incomplete",
-                    "detail": detail, "files": [], "elapsed_s": elapsed}
+                    "detail": detail, "files": all_files, "elapsed_s": elapsed}
 
     except Exception as e:
         elapsed = time.time() - t0

@@ -32,7 +32,8 @@ Trace analysis of v3 (BLOCK_M=4, N=128, C=1000, span=4579 cy):
 
 import triton
 import triton.language as tl
-
+import torch
+import torch.nn as nn
 
 @triton.jit
 def _ce_v4_small(
@@ -119,33 +120,43 @@ def _ce_v4_large(
     tl.store(out_ptr + rows, logsumexp - x_t, mask=rmsk)
 
 
-def cross_entropy_opt_v4(x, t):
+class ModelNew(nn.Module):
     """
-    x: float32 [N, C] contiguous logits
-    t: int64   [N]    target class indices
-    returns float32 [N] per-sample NLL
+    A model that computes Cross Entropy Loss for multi-class classification tasks.
+
+    Parameters:
+        None
     """
-    assert x.is_contiguous()
-    N, C = x.shape
-    out  = x.new_empty((N,))
+    def __init__(self):
+        super(ModelNew, self).__init__()
 
-    # Adaptive BLOCK_M: use largest BLOCK_M s.t. grid >= 32 (all AIV cores active)
-    # and BLOCK_M * BLOCK_C * 4 bytes fits in ~32 KB UB per core.
-    BLOCK_C = min(triton.next_power_of_2(C), 2048)
-    for BLOCK_M in [8, 4, 2, 1]:
-        if triton.cdiv(N, BLOCK_M) >= 32:
-            break
-    grid = (triton.cdiv(N, BLOCK_M),)
+    def forward(self, x, t):
+        """
+        x: float32 [N, C] contiguous logits
+        t: int64   [N]    target class indices
+        returns float32 [N] per-sample NLL
+        """
+        assert x.is_contiguous()
+        N, C = x.shape
+        out  = x.new_empty((N,))
 
-    kw = dict(
-        x_ptr=x, t_ptr=t, out_ptr=out,
-        stride_x_row=x.stride(0), stride_x_col=x.stride(1),
-        N=N, C=C,
-        BLOCK_M=BLOCK_M, BLOCK_C=BLOCK_C,
-        num_warps=4, num_stages=2,
-    )
-    if C <= 2048:
-        _ce_v4_small[grid](**kw)
-    else:
-        _ce_v4_large[grid](**kw)
-    return out
+        # Adaptive BLOCK_M: use largest BLOCK_M s.t. grid >= 32 (all AIV cores active)
+        # and BLOCK_M * BLOCK_C * 4 bytes fits in ~32 KB UB per core.
+        BLOCK_C = min(triton.next_power_of_2(C), 2048)
+        for BLOCK_M in [8, 4, 2, 1]:
+            if triton.cdiv(N, BLOCK_M) >= 32:
+                break
+        grid = (triton.cdiv(N, BLOCK_M),)
+
+        kw = dict(
+            x_ptr=x, t_ptr=t, out_ptr=out,
+            stride_x_row=x.stride(0), stride_x_col=x.stride(1),
+            N=N, C=C,
+            BLOCK_M=BLOCK_M, BLOCK_C=BLOCK_C,
+            num_warps=4, num_stages=2,
+        )
+        if C <= 2048:
+            _ce_v4_small[grid](**kw)
+        else:
+            _ce_v4_large[grid](**kw)
+        return out

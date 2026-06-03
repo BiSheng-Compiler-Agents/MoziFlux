@@ -1,6 +1,6 @@
 ---
 name: triton-operator-dev
-description: Ascend Triton operator full-process development orchestration. Use when developing a Triton operator from scratch, performing an end-to-end development process, or unsure which sub-skill to use. Automatically orchestrates: environment configuration → requirements design → code generation → static review → precision evaluation → performance evaluation → performance optimization. Keywords: full-process, development orchestration, end-to-end, workflow orchestration.
+description: Ascend Triton operator full-process development orchestration. Use when developing a Triton operator from scratch, performing an end-to-end development process, or unsure which sub-skill to use. Automatically orchestrates environment configuration → requirements design → code generation → static review → precision evaluation → performance evaluation → performance optimization. Keywords full-process, development orchestration, end-to-end, workflow orchestration.
 ---
 
 # Triton Operator Full-Process Development
@@ -38,6 +38,7 @@ Building a Triton operator consists of 7 stages (including 1 conditional stage):
 - ❌ Skip stages without updating task status
 - ❌ Only generate code and claim "development complete"
 - ❌ Use "just need code" as excuse to skip validation process
+- ❌ **Write output files anywhere other than the kernel's own directory.** When asked to optimize a kernel in `/path/to/kernel_dir/`, ALL deliverables (`opt_*.py`, `profile_kernels.py`, `Optimizations.md`, `performance_report.md`, `review.md`) must be written ONLY inside that directory. Never write to a separate evaluation harness directory (e.g. `~/KernelGen/`), a dataset directory, or any other location — even if those paths appear to contain related files. The kernel directory given in the user's request is the sole output target.
 
 ## Final Deliverables
 

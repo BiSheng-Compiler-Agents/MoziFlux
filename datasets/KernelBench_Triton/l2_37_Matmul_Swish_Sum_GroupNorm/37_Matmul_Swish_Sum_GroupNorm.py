@@ -1,5 +1,13 @@
+import torch
+import torch.nn as nn
+import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
+
+
+def _is_npu_tensor(x: torch.Tensor) -> bool:
+    return bool(getattr(x, "is_npu", False) or x.device.type == "npu")
+
 
 @triton.jit
 def _swish_bias_groupnorm_kernel(
@@ -58,3 +66,65 @@ def _swish_bias_groupnorm_kernel(
     out = y * scale + shift
 
     tl.store(y_ptrs, out, mask=mask)
+
+
+class ModelNew(nn.Module):
+    """
+    A model that performs a matrix multiplication, applies Swish activation, sums with a bias term, and normalizes with GroupNorm.
+    """
+    def __init__(
+        self,
+        in_features=512,
+        out_features=1024,
+        num_groups=32,
+        bias_shape=None,
+    ):
+        super(ModelNew, self).__init__()
+        if bias_shape is None:
+            bias_shape = (out_features,)
+        self.matmul = nn.Linear(in_features, out_features)
+        self.bias = nn.Parameter(torch.randn(bias_shape))
+        self.group_norm = nn.GroupNorm(num_groups, out_features)
+
+    def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_features).
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, out_features).
+        """
+        z = self.matmul(x)
+
+        if not _is_npu_tensor(z):
+            raise RuntimeError("ModelNew expects NPU tensors and does not support CPU/CUDA fallback")
+
+        B, C = z.shape
+        G = self.group_norm.num_groups
+        assert C % G == 0, "out_features must be divisible by num_groups for GroupNorm"
+
+        # Ensure contiguous memory
+        z = z.contiguous()
+        out = torch.empty_like(z)
+
+        # Kernel launch: one program per (batch, group)
+        grid = (B * G,)
+        # Use a BLOCK_SIZE that provides good occupancy; masked for safety
+        BLOCK_SIZE = 128
+
+        _swish_bias_groupnorm_kernel[grid](
+            z, self.bias, self.group_norm.weight, self.group_norm.bias, out,
+            B, C, G, self.group_norm.eps,
+            BLOCK_SIZE=BLOCK_SIZE,
+            num_warps=4,
+        )
+        return out
+batch_size = 32768
+in_features = 1024
+out_features = 4096
+num_groups = 64
+bias_shape = (out_features,)
+
+def get_inputs():
+    return [torch.rand(batch_size, in_features)]
+def get_init_inputs():
+    return [in_features, out_features, num_groups, bias_shape]

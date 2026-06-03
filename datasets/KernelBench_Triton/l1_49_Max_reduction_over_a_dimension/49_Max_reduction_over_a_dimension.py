@@ -1,5 +1,12 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
+
+def _is_npu_tensor(x: torch.Tensor) -> bool:
+    return bool(getattr(x, "is_npu", False))
+
 
 @triton.jit
 def _max_reduce_dim1_kernel(
@@ -39,6 +46,7 @@ def _max_reduce_dim1_kernel(
 
     tl.store(o_ptrs, acc.to(o_ptr.dtype.element_ty), mask=n_mask)
 
+
 @triton.jit
 def _max_reduce_dim0_kernel(
     x_ptr, o_ptr,
@@ -69,6 +77,7 @@ def _max_reduce_dim0_kernel(
         b_start += BLOCK_B
 
     tl.store(o_ptrs, acc, mask=n_mask)
+
 
 @triton.jit
 def _max_reduce_dim2_kernel(
@@ -103,3 +112,92 @@ def _max_reduce_dim2_kernel(
         n_start += BLOCK_N
 
     tl.store(o_ptrs, acc.to(o_ptr.dtype.element_ty), mask=m_mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs Max reduction over a specific dimension.
+    """
+    def __init__(self, dim: int):
+        """
+        Initializes the model with the dimension to reduce over.
+
+        Args:
+            dim (int): The dimension to reduce over.
+        """
+        super(ModelNew, self).__init__()
+        self.dim = dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return max_reduction_over_a_dimension(x, self.dim)
+
+
+def max_reduction_over_a_dimension(x: torch.Tensor, dim: int) -> torch.Tensor:
+    if not _is_npu_tensor(x):
+        raise RuntimeError("max_reduction_over_a_dimension expects an Ascend NPU tensor")
+    if x.dim() != 3:
+        raise ValueError(f"max_reduction_over_a_dimension expects a 3D tensor, got {x.dim()}D")
+    if x.dtype not in (torch.float16, torch.float32, torch.bfloat16):
+        raise TypeError(f"unsupported dtype for max reduction: {x.dtype}")
+
+    B, M, N = x.shape
+    dim = dim if dim >= 0 else x.dim() + dim
+    if dim not in (0, 1, 2):
+        raise ValueError(f"reduction dim must be one of 0, 1, 2 or a negative alias, got {dim}")
+
+    x_c = x.contiguous()
+    sx0, sx1, sx2 = x_c.stride()
+
+    if dim == 1:
+        out = torch.empty((B, N), device=x.device, dtype=x.dtype)
+        so0, so1 = out.stride()
+        BLOCK_M, BLOCK_N = 8, 128
+        grid = (B, triton.cdiv(N, BLOCK_N))
+        _max_reduce_dim1_kernel[grid](
+            x_c, out,
+            B, M, N,
+            sx0, sx1, sx2,
+            so0, so1,
+            BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N,
+            num_warps=4, num_stages=3
+        )
+        return out
+
+    if dim == 0:
+        out = torch.empty((M, N), device=x.device, dtype=x.dtype)
+        so0, so1 = out.stride()
+        BLOCK_B, BLOCK_N = 16, 128
+        grid = (M, triton.cdiv(N, BLOCK_N))
+        _max_reduce_dim0_kernel[grid](
+            x_c, out,
+            B, M, N,
+            sx0, sx1, sx2,
+            so0, so1,
+            BLOCK_B=BLOCK_B, BLOCK_N=BLOCK_N,
+            num_warps=4, num_stages=4
+        )
+        return out
+
+    out = torch.empty((B, M), device=x.device, dtype=x.dtype)
+    so0, so1 = out.stride()
+    BLOCK_M, BLOCK_N = 128, 128
+    grid = (B, triton.cdiv(M, BLOCK_M))
+    _max_reduce_dim2_kernel[grid](
+        x_c, out,
+        B, M, N,
+        sx0, sx1, sx2,
+        so0, so1,
+        BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N,
+        num_warps=8, num_stages=4
+    )
+    return out
+batch_size = 128
+dim1 = 4096
+dim2 = 4095
+
+def get_inputs():
+    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    x = torch.rand(batch_size, dim1, dim2, device=device)
+    return [x]
+def get_init_inputs():
+    return [1] # Example, change to desired dimension

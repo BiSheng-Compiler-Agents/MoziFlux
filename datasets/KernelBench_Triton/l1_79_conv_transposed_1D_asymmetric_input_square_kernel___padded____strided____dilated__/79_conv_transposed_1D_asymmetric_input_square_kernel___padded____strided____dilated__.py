@@ -1,5 +1,14 @@
+import math
+import torch
+import torch.nn as nn
+
 import triton
 import triton.language as tl
+
+
+def _is_npu_tensor(x: torch.Tensor) -> bool:
+    return bool(getattr(x, "is_npu", False))
+
 
 @triton.jit
 def conv_transpose1d_fwd_kernel(
@@ -72,3 +81,125 @@ def conv_transpose1d_fwd_kernel(
 
     # Store results
     tl.store(y_base + offs_t * stride_yl, acc, mask=mask_t)
+
+
+class ModelNew(nn.Module):
+    """
+    Performs a transposed 1D convolution operation with asymmetric input and square kernel.
+    Supports padding, striding, and dilation.
+
+    Args:
+        in_channels (int): Number of channels in the input tensor.
+        out_channels (int): Number of channels produced by the convolution.
+        kernel_size (int): Size of the square convolution kernel.
+        stride (int, optional): Stride of the convolution. Defaults to 1.
+        padding (int, optional): Padding applied to the input. Defaults to 0.
+        dilation (int, optional): Spacing between kernel elements. Defaults to 1.
+        bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
+    """
+    def __init__(
+        self,
+        in_channels: int = 32,
+        out_channels: int = 64,
+        kernel_size: int = 3,
+        stride: int = 2,
+        padding: int = 1,
+        dilation: int = 2,
+        bias: bool = False,
+    ):
+        super(ModelNew, self).__init__()
+        # Keep a reference nn.ConvTranspose1d module for exact parameter initialization semantics
+        self.conv1d_transpose = nn.ConvTranspose1d(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            bias=bias,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Performs the transposed 1D convolution.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_channels, length).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, out_channels, length_out).
+        """
+        if not _is_npu_tensor(x):
+            raise RuntimeError("ModelNew expects an Ascend NPU input tensor")
+
+        # Extract parameters and ensure contiguity
+        weight = self.conv1d_transpose.weight
+        bias = self.conv1d_transpose.bias
+        stride = self.conv1d_transpose.stride[0] if isinstance(self.conv1d_transpose.stride, tuple) else int(self.conv1d_transpose.stride)
+        padding = self.conv1d_transpose.padding[0] if isinstance(self.conv1d_transpose.padding, tuple) else int(self.conv1d_transpose.padding)
+        dilation = self.conv1d_transpose.dilation[0] if isinstance(self.conv1d_transpose.dilation, tuple) else int(self.conv1d_transpose.dilation)
+        output_padding = 0  # matches the original constructor behavior
+
+        if not _is_npu_tensor(weight):
+            raise RuntimeError("ModelNew expects Ascend NPU weights")
+        if bias is not None and not _is_npu_tensor(bias):
+            raise RuntimeError("ModelNew expects Ascend NPU bias parameters")
+        if x.dim() != 3:
+            raise ValueError(f"expected a 3D input tensor, got shape {tuple(x.shape)}")
+        if x.dtype not in (torch.float16, torch.float32):
+            raise TypeError(f"unsupported input dtype: {x.dtype}")
+        if weight.dtype != x.dtype:
+            raise TypeError(f"weight dtype {weight.dtype} must match input dtype {x.dtype}")
+        if bias is not None and bias.dtype != x.dtype:
+            raise TypeError(f"bias dtype {bias.dtype} must match input dtype {x.dtype}")
+
+        weight = weight.contiguous()
+        x = x.contiguous()
+
+        N, Cin, Lin = x.shape
+        Cin_w, Cout, K = weight.shape
+        assert Cin == Cin_w, "Input channels mismatch"
+        # PyTorch ConvTranspose1d output length formula
+        Lout = (Lin - 1) * stride - 2 * padding + dilation * (K - 1) + output_padding + 1
+
+        y = torch.empty((N, Cout, Lout), device=x.device, dtype=x.dtype)
+
+        # Strides (element-wise) for pointer arithmetic
+        stride_xn, stride_xc, stride_xl = x.stride()
+        stride_wci, stride_wco, stride_wk = weight.stride()
+        stride_yn, stride_yc, stride_yl = y.stride()
+
+        # Grid configuration
+        BLOCK_T = 128
+        grid = (N * Cout, triton.cdiv(Lout, BLOCK_T))
+
+        conv_transpose1d_fwd_kernel[grid](
+            x, weight, bias if bias is not None else y, y,
+            N, Cin, Cout, Lin, Lout,
+            K, stride, padding, dilation,
+            stride_xn, stride_xc, stride_xl,
+            stride_wci, stride_wco, stride_wk,
+            stride_yn, stride_yc, stride_yl,
+            HAS_BIAS=1 if bias is not None else 0,
+            CIN_C=Cin,
+            K_C=K,
+            BLOCK_T=BLOCK_T,
+            num_warps=4,
+            num_stages=2,
+        )
+
+        return y
+batch_size = 16
+in_channels = 32
+out_channels = 64
+kernel_size = 3
+length = 131072
+stride = 2
+padding = 1
+dilation = 2
+
+def get_inputs():
+    x = torch.rand(batch_size, in_channels, length)
+    return [x]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, stride, padding, dilation]

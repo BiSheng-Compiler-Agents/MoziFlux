@@ -1,5 +1,8 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def _fused_min_sum_gelu_add_bias(
@@ -116,3 +119,69 @@ def _fused_min_sum_gelu_add_bias(
     )
     out_tile = gelu_vals[None, :] + bias_vals[:, None]
     tl.store(out_ptrs, out_tile, mask=mask_c[:, None] & mask_w[None, :])
+
+
+class ModelNew(nn.Module):
+    """
+    A model that performs a convolution transpose, minimum operation, sum operation, GELU activation and addition.
+    Fused with a Triton kernel for post-convolution operations.
+    """
+    def __init__(
+        self,
+        in_channels=3,
+        out_channels=16,
+        kernel_size=3,
+        stride=2,
+        padding=1,
+        output_padding=1,
+        bias_shape=(16, 1, 1),
+    ):
+        super(ModelNew, self).__init__()
+        self.conv_transpose = nn.ConvTranspose2d(
+            in_channels, out_channels, kernel_size, stride, padding, output_padding
+        )
+        self.bias = nn.Parameter(torch.randn(bias_shape))
+
+    def forward(self, x):
+        # Conv transpose via PyTorch/cuDNN
+        x = self.conv_transpose(x)  # [N, C, H, W]
+
+        # Allocate output: after ops -> [N, C, 1, W]
+        N, C, H, W = x.shape
+        y = torch.empty((N, C, 1, W), device=x.device, dtype=x.dtype)
+
+        # Ensure contiguous for correct striding
+        x_c = x.contiguous()
+        b_c = self.bias.contiguous()
+
+        # Launch Triton kernel: fuse min over C, sum over H, GELU, and bias add
+        BLOCK_W = 64
+        BLOCK_C = 32
+        grid = (N, triton.cdiv(W, BLOCK_W), triton.cdiv(C, BLOCK_C))
+
+        _fused_min_sum_gelu_add_bias[grid](
+            x_c, b_c, y,
+            N, C, H, W,
+            x_c.stride(0), x_c.stride(1), x_c.stride(2), x_c.stride(3),
+            b_c.stride(0),
+            y.stride(0), y.stride(1), y.stride(2), y.stride(3),
+            BLOCK_W=BLOCK_W,
+            BLOCK_C=BLOCK_C,
+            num_warps=4,
+            num_stages=2,
+        )
+        return y
+batch_size = 16
+in_channels = 64
+out_channels = 128
+height, width = 128, 128
+kernel_size = 3
+stride = 2
+padding = 1
+output_padding = 1
+bias_shape = (1, 1, 1)
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, height, width)]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, bias_shape]

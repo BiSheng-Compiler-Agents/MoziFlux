@@ -1,5 +1,9 @@
+import torch
+import torch.nn as nn
+
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def _fused_tanh_scale_bias_maxpool2d(
@@ -67,3 +71,78 @@ def _fused_tanh_scale_bias_maxpool2d(
     # Store results
     out_ptrs = y_base + oh * O_STRIDE_H + ow * O_STRIDE_W
     tl.store(out_ptrs, acc, mask=mask_hw)
+
+
+class ModelNew(nn.Module):
+    """
+    A model that performs a convolution, applies tanh, scaling, adds a bias term, and then max-pools.
+    Fused Triton kernel computes tanh + scale + bias + max-pooling on CUDA for speed.
+    """
+    def __init__(self, in_channels, out_channels, kernel_size, scaling_factor, bias_shape, pool_kernel_size):
+        super(ModelNew, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
+        self.scaling_factor = float(scaling_factor)
+        self.bias = nn.Parameter(torch.randn(bias_shape))
+        self.max_pool = nn.MaxPool2d(pool_kernel_size)
+        self._pool_k = pool_kernel_size if isinstance(pool_kernel_size, int) else pool_kernel_size[0]
+
+    def forward(self, x):
+        # Convolution
+        x = self.conv(x)
+
+        # CUDA fast path: fused tanh + scale + bias + max-pool
+        if x.is_cuda:
+            B, C, H, W = x.shape
+            K = self._pool_k
+            # Output dims with stride=K, padding=0, ceil_mode=False
+            HPO = H // K
+            WPO = W // K
+
+            y = torch.empty((B, C, HPO, WPO), device=x.device, dtype=x.dtype)
+
+            # Flatten bias to [C]
+            bias_flat = self.bias.view(C).contiguous()
+
+            # Strides in elements
+            sb, sc, sh, sw = x.stride()
+            ob, oc, oh, ow = y.stride()
+
+            # Use square tiles to minimize masked compute on small pooled maps
+            BLOCK_H = 16
+            BLOCK_W = 16
+            grid = (B * C, triton.cdiv(HPO, BLOCK_H), triton.cdiv(WPO, BLOCK_W))
+
+            _fused_tanh_scale_bias_maxpool2d[grid](
+                x, bias_flat, y,
+                B, C, H, W,
+                HPO, WPO,
+                sb, sc, sh, sw,
+                ob, oc, oh, ow,
+                self.scaling_factor,
+                POOL_K=K,
+                BLOCK_H=BLOCK_H,
+                BLOCK_W=BLOCK_W,
+                num_warps=4,
+                num_stages=2,
+            )
+            return y
+        else:
+            # CPU fallback: identical semantics
+            x = torch.tanh(x)
+            x = x * self.scaling_factor
+            x = x + self.bias
+            x = self.max_pool(x)
+            return x
+batch_size = 128
+in_channels = 8
+out_channels = 64
+height, width = 256, 256
+kernel_size = 3
+scaling_factor = 2.0
+bias_shape = (out_channels, 1, 1)
+pool_kernel_size = 4
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, height, width)]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, scaling_factor, bias_shape, pool_kernel_size]

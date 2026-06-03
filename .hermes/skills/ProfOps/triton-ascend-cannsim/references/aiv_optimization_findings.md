@@ -119,6 +119,42 @@ This eliminates the per-program DIV/REM and drops SCALAR+SCALARLDST overhead.
 
 ---
 
+## Per-program SCALARLDST args-struct overhead (fixed cost, all kernels)
+
+**Verified:** l1_19_ReLU, June 2026. Applies to all Triton-Ascend kernels.
+
+Every program pays a fixed startup cost to load the kernel args struct from memory.
+This shows as `SCALARLDST` being the BOTTLENECK in any trace with small tiles.
+
+**Anatomy (calibrated from direct BLOCK_SIZE=256 trace, wall_cycles=2910):**
+
+| Instruction | Pipeline | Count | Total cy | Role |
+|---|---|---|---|---|
+| `DC_PRELOAD_XN_IMM` | SCALAR | 1 | ~493 | Prefetch args struct into icache |
+| `LDP_XI_XJ_XN` | SCALAR | 2 | ~958 | Load pointer pairs (x_ptr, y_ptr) |
+| `LD_XD_XN_IMM` | SCALARLDST | 3 | ~2190 | Load scalar args (n_elements, etc.) |
+| `ST_XD_XN_IMM` | SCALARLDST | 1 | ~731 | Spill (from extra constexpr args) |
+| **Total fixed overhead** | | | **~3641 cy** | Per program, regardless of BLOCK_SIZE |
+
+**Compute work at BLOCK_SIZE=256** (32 fp16 elements): only **22 cy** of RVECEX.
+Overhead:work ratio = 45:1. Efficiency = 0.6%.
+
+**Compute work at BLOCK_SIZE=4096** (4096 fp16 elements): **125 cy** of RVECEX.
+Overhead:work ratio = 29:1. Per-element efficiency: 3327 cy / 4096 = **0.81 cy/elem** — near-optimal.
+
+**Implication for hardware floor:** The ~40ms hardware floor seen for standalone
+Triton elementwise kernels at small N (N=1024–524K) is NOT per-tile SCALAR overhead.
+3641 cy × 4 programs × 0.4 ns = 5.8 µs. The 40ms is the Python/CANN/Triton JIT
+**kernel dispatch stack overhead** (vs ~1–2ms for torch ACL pre-compiled ops).
+No tile-level optimization can close this gap. The only path is kernel fusion.
+
+**Reduce args-struct overhead:** Minimize the number of scalar kernel arguments.
+Every extra `i32`/`i64` arg adds an `LD_XD_XN_IMM`. Use constexprs where possible
+(they are compiled in, not passed at runtime), and avoid passing args that can be
+derived inside the kernel (e.g. use `tl.num_programs(0)` instead of passing `n_programs`).
+
+---
+
 ## Cannsim report command (CANN 9.0.0)
 
 The correct form uses `-e <exp_dir>` (experiment directory from `cannsim record`) — NOT the

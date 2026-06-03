@@ -1,5 +1,29 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
+
+batch_size = 16
+in_channels = 3
+out_channels = in_channels
+kernel_size_h = 3
+kernel_size_w = 5
+width = 256
+height = 128
+stride_h = 1
+stride_w = 1
+padding_h = 0
+padding_w = 0
+dilation_h = 1
+dilation_w = 1
+groups = in_channels
+bias = False
+
+
+def _is_npu_tensor(x: torch.Tensor) -> bool:
+    return bool(getattr(x, "is_npu", False))
+
 
 @triton.jit
 def dwconv2d_fwd_kernel(
@@ -115,3 +139,169 @@ def dwconv2d_fwd_kernel(
         acc += b.to(tl.float32)
 
     tl.store(y_ptr + base_y + offs, acc, mask=mask_o)
+
+
+def _depthwise_conv2d_triton(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None,
+    stride: tuple[int, int],
+    padding: tuple[int, int],
+    dilation: tuple[int, int],
+) -> torch.Tensor:
+    # Expect shapes:
+    # x: [N, C, H, W], weight: [C, 1, K_H, K_W] (depthwise groups=C), bias: [C] or None
+    assert x.ndim == 4 and weight.ndim == 4
+    N, C, H, W = x.shape
+    Cw, one, K_H, K_W = weight.shape
+    assert Cw == C and one == 1, "Weight must be depthwise [C,1,K_H,K_W]"
+    stride_h, stride_w = stride
+    pad_h, pad_w = padding
+    dil_h, dil_w = dilation
+
+    # Output size (PyTorch conv2d formula)
+    H_OUT = (H + 2 * pad_h - dil_h * (K_H - 1) - 1) // stride_h + 1
+    W_OUT = (W + 2 * pad_w - dil_w * (K_W - 1) - 1) // stride_w + 1
+
+    # Ensure contiguity
+    x_c = x.contiguous()
+    w_c = weight.contiguous().view(C, -1)  # [C, K_H*K_W]
+    b_c = bias.contiguous() if bias is not None else None
+
+    y = torch.empty((N, C, H_OUT, W_OUT), device=x.device, dtype=x.dtype)
+
+    # Tiling
+    BLOCK_HW = 128
+    grid = (N * C, triton.cdiv(H_OUT * W_OUT, BLOCK_HW))
+
+    # Use a valid pointer for b_ptr even if BIAS=0 (it won't be accessed)
+    dummy_bptr = x_c.view(-1)
+
+    dwconv2d_fwd_kernel[grid](
+        x_c, w_c.view(-1), (b_c if b_c is not None else dummy_bptr), y,
+        N, C, H, W, H_OUT, W_OUT,
+        BIAS=1 if b_c is not None else 0,
+        K_H=K_H, K_W=K_W,
+        STRIDE_H=stride_h, STRIDE_W=stride_w,
+        PAD_H=pad_h, PAD_W=pad_w,
+        DIL_H=dil_h, DIL_W=dil_w,
+        BLOCK_HW=BLOCK_HW,
+        num_warps=4, num_stages=2,
+    )
+    return y
+
+
+class ModelNew(nn.Module):
+    """
+    Performs a depthwise 2D convolution with asymmetric input and asymmetric kernel.
+
+    Args:
+        in_channels (int): Number of channels in the input tensor.
+        out_channels (int): Number of channels produced by the convolution.
+        kernel_size_h (int): Height of the convolution kernel.
+        kernel_size_w (int): Width of the convolution kernel.
+        stride_h (int, optional): Stride of the convolution in height dimension. Defaults to 1.
+        stride_w (int, optional): Stride of the convolution in width dimension. Defaults to 1.
+        padding_h (int, optional): Padding applied to the input in height dimension. Defaults to 0.
+        padding_w (int, optional): Padding applied to the input in width dimension. Defaults to 0.
+        dilation_h (int, optional): Spacing between kernel elements in height dimension. Defaults to 1.
+        dilation_w (int, optional): Spacing between kernel elements in width dimension. Defaults to 1.
+        groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
+        bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
+    """
+    def __init__(
+        self,
+        in_channels: int = in_channels,
+        out_channels: int = out_channels,
+        kernel_size_h: int = kernel_size_h,
+        kernel_size_w: int = kernel_size_w,
+        stride_h: int = stride_h,
+        stride_w: int = stride_w,
+        padding_h: int = padding_h,
+        padding_w: int = padding_w,
+        dilation_h: int = dilation_h,
+        dilation_w: int = dilation_w,
+        groups: int = groups,
+        bias: bool = bias,
+    ):
+        super(ModelNew, self).__init__()
+        if out_channels != in_channels:
+            raise ValueError("Depthwise convolution requires out_channels == in_channels")
+        if groups != in_channels:
+            raise ValueError("Depthwise convolution requires groups == in_channels")
+        self.conv2d = nn.Conv2d(
+            in_channels, in_channels,
+            (kernel_size_h, kernel_size_w),
+            stride=(stride_h, stride_w),
+            padding=(padding_h, padding_w),
+            dilation=(dilation_h, dilation_w),
+            groups=in_channels,
+            bias=bias
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Performs the depthwise 2D convolution.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_channels, height, width).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, out_channels, height_out, width_out).
+        """
+        if not _is_npu_tensor(x):
+            raise RuntimeError("ModelNew expects an Ascend NPU input tensor")
+        return _depthwise_conv2d_triton(
+            x,
+            self.conv2d.weight,
+            self.conv2d.bias,
+            self.conv2d.stride,
+            self.conv2d.padding,
+            self.conv2d.dilation,
+        )
+
+
+_MODEL_CACHE: dict[tuple[torch.device, torch.dtype], ModelNew] = {}
+
+
+def run_operator(x: torch.Tensor) -> torch.Tensor:
+    key = (x.device, x.dtype)
+    model = _MODEL_CACHE.get(key)
+    if model is None:
+        model = ModelNew(
+            in_channels=x.shape[1],
+            out_channels=x.shape[1],
+            kernel_size_h=int(kernel_size_h),
+            kernel_size_w=int(kernel_size_w),
+            stride_h=int(stride_h),
+            stride_w=int(stride_w),
+            padding_h=int(padding_h),
+            padding_w=int(padding_w),
+            dilation_h=int(dilation_h),
+            dilation_w=int(dilation_w),
+            groups=x.shape[1],
+            bias=bias,
+        ).to(device=x.device, dtype=x.dtype)
+        model.eval()
+        _MODEL_CACHE[key] = model
+    return model(x)
+batch_size = 32
+in_channels = 128
+out_channels = 128
+kernel_size_h = 3
+kernel_size_w = 7
+width = 256
+height = 128
+stride_h = 1
+stride_w = 1
+padding_h = 0
+padding_w = 0
+dilation_h = 1
+dilation_w = 1
+groups = in_channels
+
+def get_inputs():
+    x = torch.rand(batch_size, in_channels, height, width, device='npu')
+    return [x]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size_h, kernel_size_w, stride_h, stride_w, padding_h, padding_w, dilation_h, dilation_w, groups]

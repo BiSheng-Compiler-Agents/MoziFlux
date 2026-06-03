@@ -1,0 +1,19 @@
+============================================================
+UNIT TEST — correctness vs torch.nn.functional.relu + bias
+============================================================
+  N1-C256-14x14             baseline1 [PASS] maxΔ=0.00e+00   baseline2 [PASS] maxΔ=0.00e+00   optimized [PASS] maxΔ=0.00e+00
+  N1-C128-28x28             baseline1 [PASS] maxΔ=0.00e+00   baseline2 [PASS] maxΔ=0.00e+00   optimized [PASS] maxΔ=0.00e+00
+  N8-C64-14x14              baseline1 [PASS] maxΔ=0.00e+00   baseline2 [PASS] maxΔ=0.00e+00   optimized [PASS] maxΔ=0.00e+00
+  N1-C64-56x56              baseline1 [PASS] maxΔ=0.00e+00   baseline2 [PASS] maxΔ=0.00e+00   optimized [PASS] maxΔ=0.00e+00
+  N1-C96-56x56              baseline1 [PASS] maxΔ=0.00e+00   baseline2 [PASS] maxΔ=0.00e+00   optimized [PASS] maxΔ=0.00e+00
+  N1-C32-224x224            baseline1 [PASS] maxΔ=0.00e+00   baseline2 [PASS] maxΔ=0.00e+00   optimized [PASS] maxΔ=0.00e+00
+
+RESULT: PASS — all kernels match torch reference.
+relu_bias_add_perf:
+            label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   N1-C256-14x14       0.005680          0.070826          0.052616          0.050390
+1   N1-C128-28x28       0.005793          0.068226          0.051656          0.050298
+2    N8-C64-14x14       0.005829          0.129263          0.048447          0.049360
+3    N1-C64-56x56       0.006266          0.118975          0.050897          0.047921
+4    N1-C96-56x56       0.006397          0.177495          0.048960          0.045369
+5  N1-C32-224x224       0.012033          0.236633          0.049146          0.048651

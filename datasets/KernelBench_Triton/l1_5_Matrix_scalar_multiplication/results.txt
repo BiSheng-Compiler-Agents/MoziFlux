@@ -1,0 +1,21 @@
+  1x1                       baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=0.00e+00 maxΔ_base2=0.00e+00 maxΔ_opt=0.00e+00
+  16                        baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=0.00e+00 maxΔ_base2=0.00e+00 maxΔ_opt=0.00e+00
+  4095                      baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=0.00e+00 maxΔ_base2=0.00e+00 maxΔ_opt=0.00e+00
+  4096                      baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=0.00e+00 maxΔ_base2=0.00e+00 maxΔ_opt=0.00e+00
+  4097                      baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=0.00e+00 maxΔ_base2=0.00e+00 maxΔ_opt=0.00e+00
+  1024x1024                 baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=0.00e+00 maxΔ_base2=0.00e+00 maxΔ_opt=0.00e+00
+  bench-4096x4096           baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=0.00e+00 maxΔ_base2=0.00e+00 maxΔ_opt=0.00e+00
+  8192x8192                 baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=0.00e+00 maxΔ_base2=0.00e+00 maxΔ_opt=0.00e+00
+  rect-2kx16k               baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=0.00e+00 maxΔ_base2=0.00e+00 maxΔ_opt=0.00e+00
+  persistent-32kx32k        baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=0.00e+00 maxΔ_base2=0.00e+00 maxΔ_opt=0.00e+00
+  empty-tensor                          optimized [PASS]
+All PASS
+l1_5_matrix_scalar_multiplication:
+           label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0     tiny-32x32       0.001808          0.041954          0.037018          0.055922
+1  small-256x256       0.002364          0.034746          0.037320          0.056980
+2   medium-1kx1k       0.009557          0.036786          0.038179          0.056612
+3    bench-4kx4k       0.139892          0.142595          0.139423          0.142524
+4    large-8kx8k       0.432575          0.445228          0.433917          0.484424
+5   huge-32kx32k       5.989952         12.090885          6.089813          6.488729
+6    rect-2kx16k       0.237039          0.251590          0.244752          0.262010

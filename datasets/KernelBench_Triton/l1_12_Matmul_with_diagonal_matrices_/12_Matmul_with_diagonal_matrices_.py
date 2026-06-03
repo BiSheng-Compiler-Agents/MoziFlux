@@ -1,3 +1,5 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
 
@@ -48,3 +50,62 @@ def _row_scale_kernel(
         a_val = tl.load(a_ptr + row, mask=row_in_bounds, other=0, cache_modifier=".ca")
         b = tl.load(b_ptrs, mask=mask, other=0, cache_modifier=".cg")
         tl.store(c_ptrs, b * a_val, mask=mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs a matrix multiplication of a diagonal matrix with another matrix.
+    C = diag(A) * B
+    """
+    def __init__(self):
+        super(ModelNew, self).__init__()
+    
+    def forward(self, A, B):
+        """
+        Performs the matrix multiplication.
+
+        Args:
+            A (torch.Tensor): A 1D tensor representing the diagonal of the diagonal matrix. Shape: (N,).
+            B (torch.Tensor): A 2D tensor representing the second matrix. Shape: (N, M).
+
+        Returns:
+            torch.Tensor: The result of the matrix multiplication. Shape: (N, M).
+        """
+        if A.dim() != 1 or B.dim() != 2:
+            raise ValueError("Expected A to be 1D and B to be 2D.")
+        if A.shape[0] != B.shape[0]:
+            raise ValueError("A and B must have the same leading dimension.")
+        if A.device.type != "npu" or B.device.type != "npu":
+            raise ValueError("ModelNew expects Ascend NPU tensors.")
+
+        N = A.shape[0]
+        M = B.shape[1]
+
+        # Match PyTorch matmul dtype promotion rules
+        out_dtype = torch.result_type(A, B)
+        A_cast = A.contiguous().to(out_dtype)
+        B_cast = B.contiguous().to(out_dtype)
+        C = torch.empty((N, M), device=B_cast.device, dtype=out_dtype)
+
+        # Use a wider column tile for better bandwidth utilization
+        BLOCK_N = 512
+        grid = lambda meta: (N, triton.cdiv(M, meta['BLOCK_N']))
+        _row_scale_kernel[grid](
+            A_cast, B_cast, C,
+            N, M,
+            B_cast.stride(0), B_cast.stride(1),
+            C.stride(0), C.stride(1),
+            BLOCK_N=BLOCK_N,
+            num_warps=8,
+            num_stages=1,
+        )
+        return C
+M = 4096
+N = 4096
+
+def get_inputs():
+    A = torch.rand(N)
+    B = torch.rand(N, M)
+    return [A, B]
+def get_init_inputs():
+    return []  # No special initialization inputs needed

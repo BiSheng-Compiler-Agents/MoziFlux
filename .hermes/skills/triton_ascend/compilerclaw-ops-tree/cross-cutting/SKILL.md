@@ -62,17 +62,26 @@ hermes-plugin-development + kernel-episode-memory + triton-ascend-cannsim + trit
 **Trigger**: "Optimize this kernel / the cannsim trace shows bottleneck X"
 
 **Steps**:
-1. Retrieve past episodes → `kernel-ops/episode-memory/SKILL.md`
+1. Read `triton-operator/orchestration/SKILL.md` — note required deliverables checklist
+2. Retrieve past episodes → `kernel-ops/episode-memory/SKILL.md`
    - `episode_retrieve(query="<bottleneck_type> <kernel_type>", target="ascend950")`
-2. Run cannsim to get baseline trace → `kernel-ops/simulation/SKILL.md`
+3. Run cannsim to get baseline trace → `kernel-ops/simulation/SKILL.md`
    - `cannsim_remote_run(gen_report=True)` → `trace_core0.json`
    - Run `aggregate_trace.py` to get `trace_summary.txt`
-3. Apply optimization → `kernel-ops/optimization/SKILL.md`
+4. Apply optimization → `kernel-ops/optimization/SKILL.md`
    - Identify dominant bottleneck from trace summary
    - Apply matching optimization rule
-4. Re-run cannsim → compare traces → verify improvement
-5. Write episode → `kernel-ops/episode-memory/SKILL.md`
+5. Re-run cannsim → compare traces → verify improvement
+6. Static review of optimized kernel → `triton-operator/code-review/SKILL.md`
+   - Fix all P0 issues; document P1/P2 in `review.md`
+7. Write episode → `kernel-ops/episode-memory/SKILL.md`
    - Record what worked, latency before → after, key insight
+8. Write required output files (all MANDATORY):
+   - `opt_{kernel_name}.py` — optimized kernel + ModelNew host interface
+   - `profile_kernels.py` — `@perf_report` benchmark covering all dispatch paths + unit test
+   - `Optimizations.md` — each optimization applied with code snippets and rationale
+   - `performance_report.md` — cannsim trace tables (baseline vs optimized), hardware latency TBD
+   - `review.md` — static P0/P1/P2 review report of the optimized kernel
 
 **Concrete example** (softmax kernel, `aiv_scalar > 80%`):
 1. `episode_retrieve(query="softmax scalar overhead two-pass single-pass", target="ascend950")`

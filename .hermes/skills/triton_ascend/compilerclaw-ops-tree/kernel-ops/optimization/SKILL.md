@@ -1,3 +1,9 @@
+---
+name: optimization
+description: Optimize Ascend NPU-native Triton operator performance. Use when diagnosing bottlenecks from cannsim traces and applying optimization patterns. Covers UB overflow detection, Cube utilization improvement, tiling strategy design, and pattern application.
+tags: [triton, ascend, optimization, performance]
+---
+
 # Triton Kernel Performance Optimization [LEAF NODE]
 
 Optimize Ascend NPU-native Triton operator performance. Use when diagnosing bottlenecks
@@ -11,6 +17,14 @@ Cube utilization improvement, tiling strategy design, and pattern application.
 
 **Performance Ratio Definition**: `Ratio = torch_npu time / Triton time`. Ratio > 1.0 means Triton is faster.
 **Priority**: Correctness > Generalization > Performance.
+
+### Generalization Rules (mandatory — violations are P0)
+
+- **Never read shapes from benchmark files, perf reports, or other operator files** when writing the optimized kernel. The only source of truth for what shapes must be supported is the original kernel's function signature and the operator's mathematical definition.
+- **Multiple kernel variants dispatched by the host are fine** (e.g. a fast no-mask path for power-of-2 C alongside a general masked path for all other C). What is not allowed is a variant that only handles specific shapes and leaves other shapes broken or unhandled.
+- **Every dispatch path must be correct and tested** — if you write a C=16 fast path and a generic path, both must have unit tests. Never ship an untested code path.
+- **Never add new runtime guards that the baseline did not have** (e.g. `if out_channels > 256: raise`, `if sum_dim != 1: raise`). If the baseline kernel accepted a parameter freely, the optimized kernel must too.
+- **Cover all parameter combinations in unit tests**: small/large/non-power-of-2 sizes for every free dimension in the signature. Never test only the benchmark shape.
 
 ---
 
@@ -37,7 +51,10 @@ episode_retrieve(query="elementwise FFTS dispatch persistent grid", target="asce
 ### Phase 2: Hierarchical Evaluation
 
 1. **Quick Screening**: If real NPU hardware available, measure end-to-end with `time.time()`.
-2. **Precise Diagnosis**: Use `cannsim_remote_run(gen_report=True)` to get `trace_core0.json`. Then run:
+2. **Precise Diagnosis**: Use `cannsim_remote_run(gen_report=True)` with a **sub-kernel host**
+   (grid=1, M=BLOCK_M, K=2×BLOCK_K — see simulation/SKILL.md Rule 1). This makes each
+   cannsim run take seconds instead of minutes/hours while giving identical bottleneck diagnosis.
+   Then run:
    ```bash
    python <tree_root>/kernel-ops/simulation/scripts/aggregate_trace.py \
        /path/to/report/trace_core0.json
@@ -148,7 +165,7 @@ Eliminating intermediate GM round-trips transforms memory-bound → compute-boun
 # After: 1 GM round-trip (load x → relu → softmax → store w)
 x = tl.load(x_ptr + offsets, mask=mask)
 w = tl.softmax(tl.where(x > 0, x, 0.0).to(tl.float32))
-tl.store(w_ptr + offsets, w.to(tl.float16), mask=mask)
+tl.store(y_ptr + offsets, w.to(tl.float16), mask=mask)
 ```
 
 ### Rule 5: Precision Rules
@@ -183,6 +200,69 @@ for sub_start in range(0, BLOCK_SIZE, SUB_BLOCK_SIZE):
     x_chunk = tl.load(x_ptr + offsets, mask=mask)
     tl.store(y_ptr + offsets, process(x_chunk), mask=mask)
 ```
+
+### Rule 8: Two-Path Dispatch for Elementwise Kernels (MANDATORY)
+
+**The trap:** "use a persistent grid" is a common elementwise recommendation
+(see episodes 12, 43, 46, 49). It is **only a win when the natural tile count
+exceeds the FFTS grid cap (65535)**. Below that threshold it is a regression.
+
+| n_tiles (BLOCK=4096) | n_elements | Best path | Why |
+|---|---|---|---|
+| ≤ 65,535 | ≤ 268,431,360 (~256M) | **direct** (one program per tile) | Fastest dispatch; JUMPC overhead has no upside |
+| > 65,535 | > 256M | **persistent** (work-stealing while loop) | Direct would crash (coredim > UINT16_MAX) or saturate FFTS |
+
+**Hardware-validated (l1_19_ReLU, l1_5 matrix-scalar, June 2026):**
+- When `n_tiles ≤ 65535`, the while-loop **adds JUMPC overhead with zero
+  FFTS reduction** — measured **1.35–1.43× SLOWER** than direct dispatch.
+- When `n_tiles > 65535`, persistent gives **~1.42–4× speedup** from
+  amortising the ~1,150 cy/program FFTS dispatch cost.
+
+**Implementation:**
+
+```python
+_MAX_PROGRAMS = 65535  # Ascend FFTS grid cap
+
+class ModelNew(nn.Module):
+    def forward(self, x):
+        n_tiles = triton.cdiv(x.numel(), BLOCK_SIZE)
+        if n_tiles > _MAX_PROGRAMS:
+            # Persistent path — cap grid, each program strides
+            n_programs = _MAX_PROGRAMS
+            _kernel_persistent[(n_programs,)](
+                ..., n_programs=n_programs, BLOCK_SIZE=BLOCK_SIZE)
+        else:
+            # Direct path — one program per tile, no while loop
+            _kernel_direct[(n_tiles,)](
+                ..., BLOCK_SIZE=BLOCK_SIZE)
+```
+
+**Routing threshold — common mistake:** do NOT use `n > SOME_NUMBER`. Use
+`cdiv(n_elements, BLOCK_SIZE) > _MAX_PROGRAMS`. The threshold depends on
+`BLOCK_SIZE`:
+- `BLOCK=4096` → threshold at n = 268,431,360 (~256M)
+- `BLOCK=256`  → threshold at n = 16,776,960 (~16M)
+
+If you use `@triton.autotune` with multiple `BLOCK_SIZE` configs, the routing
+threshold MUST use the **smallest** BLOCK in the configs (per episode 46
+finding — using the largest leads to a runtime `coreDim > UINT16_MAX` crash
+on the first shape that triggers the persistent path). Pattern:
+`threshold = cdiv(n, min_BLOCK) > MAX_PROGRAMS`.
+
+**Episode references for this pattern:**
+- Episode 12 — first formalization of the persistent loop pattern + threshold
+- Episode 43 — confirmed for matrix-scalar-multiplication, sub-kernel trace
+  shows persistent is structurally identical to direct at grid=1 (FFTS benefit
+  invisible)
+- Episode 46 — ReLU: revealed that persistent is harmful at small N,
+  established the routing threshold rule
+- Episode 49 — matrix-scalar: prior opt was unconditionally persistent and
+  was a regression; fixed with two-path dispatch
+
+**Sub-kernel trace is identical for direct vs persistent** at grid=1 — the
+benefit is purely at full-shape FFTS dispatch level. Do not conclude the
+optimization failed from a per-tile cycle delta; verify the kernel works
+correctly and let hardware measurements confirm the dispatch savings.
 
 ---
 
@@ -257,7 +337,7 @@ for block_idx in range(pid, NUM_BLOCKS_M * NUM_BLOCKS_N, tl.num_programs(0)):
 ## Common Bottleneck Quick Reference
 
 | cannsim Metric | Bottleneck | Typical Optimization |
-|---------------|------------|----------------------|
+|---------------|------------|---------------------|
 | aiv_scalar > 80% | Scalar Bound | Check two-pass / per-row loop; change to single-pass `tl.sum(x,1)` |
 | aiv_mte2 > 50% | Memory Bound | Contiguous memory access, expand+contiguous, increase BLOCK |
 | aiv_vec > 50% | Compute Bound | Algorithm optimization, reduce redundant computation |
@@ -296,6 +376,29 @@ NBLOCK up to 8192 is safe.
 
 ---
 
+## al.multibuffer Pitfalls (verified June 2026)
+
+`al.multibuffer(tensor, size=2)` is a **side-effect hint only** — do NOT reassign its return:
+
+```python
+# CORRECT: side-effect call, use original tensor variable
+al.compile_hint(a, "dot_pad_only_k")  # compile_hint BEFORE multibuffer
+al.compile_hint(b, "dot_pad_only_k")
+al.multibuffer(a, size=2)  # side-effect only - no reassignment
+al.multibuffer(b, size=2)
+accumulator = tl.dot(a, b, accumulator)  # use ORIGINAL a, b
+
+# WRONG: reassigning return value (returns None, crashes tl.dot and al.compile_hint)
+a = al.multibuffer(a, size=2)   # a is now None -> CompilationError
+al.compile_hint(a, "dot_pad_only_k")  # AttributeError: NoneType has no .handle'
+```
+
+Rule: `al.compile_hint` must be called **before** `al.multibuffer` on the same tensor.
+UB budget for BLOCK_128x128x32 fp32: 96KB without double-buffering (OK within 65% factor).
+Compiler manages ping-pong UB allocation internally, no manual UB accounting needed.
+
+---
+
 ## Anti-Pattern Checklist (NEVER)
 
 - Make optimization decisions based solely on single-scale data
@@ -310,6 +413,7 @@ NBLOCK up to 8192 is safe.
 - Use broadcast stride to access auxiliary tensors (cos/sin, etc.) inside kernel — change to host-side expand+contiguous
 - Two-pass mode for reduction operators — use single pass, compute everything within UB after one load
 - Not using diagonal scheduling for large matrices (L2 cache thrashing, must enable above BLOCK_THRESHOLD)
+- **ALWAYS gate persistent-grid dispatch on `cdiv(n, BLOCK_SIZE) > 65535` (see Rule 8). Applying persistent grid unconditionally is a regression at the bench shape.**
 
 ## Verification Checklist
 
@@ -321,12 +425,14 @@ NBLOCK up to 8192 is safe.
 - [ ] Reduction upcast to FP32, matrix multiplication BLOCK multiples of 16
 - [ ] Is the reduction operator single-pass? (Required when D ≤ UB)
 - [ ] Diagonal scheduling enabled for large matrices
+- [ ] Elementwise kernel uses two-path dispatch (direct + persistent) — see Rule 8
 
 ## Constraints
 - Always use `episode_retrieve` before applying any optimization pattern
 - Always use `episode_write` after every successful optimization
 - Precision (rtol=1e-3, atol=1e-3) is non-negotiable — roll back if not met
 - Always verify with cannsim before declaring optimization complete
+- For elementwise kernels, ALWAYS implement two-path dispatch (Rule 8) — never apply persistent grid unconditionally
 
 ---
 
@@ -355,6 +461,8 @@ These files are part of this tree and must be consulted for full API details:
   - `l2_18_Matmul_Sum_Max_AvgPool_LogSumExp_LogSumExp/` — complex matmul fusion: baseline + optimized
   - `l2_76_Gemm_Add_ReLU/` — Gemm+Add+ReLU: baseline + optimized
   - Each directory: `{name}.py` (baseline), `opt_{name}.py` (optimized), `{name}_perf.txt`, `opt_{name}_perf.txt`
+
+- **`./references/elementwise_two_path_dispatch.md`** — Detailed two-path dispatch pattern with the full implementation, threshold math, and the per-shape routing table (added June 2026 after the l1_5 matrix-scalar regression).
 
 - **`../../shared/references/triton-api-reference.md`** — Complete Triton-Ascend API reference:
   - Section 4 (AL extension): Full enumerations (CORE, PIPE, MODE, FixpipeDMAMode, SYNC_IN_VF), all ops: `al.copy`, `al.fixpipe`, `al.debug_barrier`, `al.sync_block_set/wait`, `al.scope`, `al.custom`/`@register_custom_op`, math ops (`al.atan2`, `al.isfinited`), auxiliary ops (`al.parallel`, `al.compile_hint`, `al.multibuffer`), vector ops (`al.insert_slice`, `al.extract_slice`, `al.get_element`, `al.sort`, `al.flip`, `al.cast`), memory ops (`al.index_put`, `al.gather_out_to_ub`, `al.scatter_ub_to_out`, `al.index_select_simd`)

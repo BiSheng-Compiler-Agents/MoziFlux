@@ -168,6 +168,11 @@ Wrong (will error or silently misbehave):
 styles=[("#4C72B0", "-o"), ("#DD8452", "-s"), ("#55A868", "-^")]
 ```
 
+**The canonical reference-display name is `"PyTorch / ACL"`** in `line_names`.
+Do NOT use `torch.matmul`, `torch_npu`, `PyTorch cumsum`, or any other
+alias — even in `line_vals[0]` (use `"torch_ref"`) and the `if mode == ...`
+dispatch (use `if mode == "torch_ref":`). 
+
 ### 5. Unit test
 
 Always include a correctness check that compares baseline and optimized
@@ -362,9 +367,87 @@ if __name__ == "__main__":
 
 ## Pitfalls
 
-- **Wrong kernel args** — always read the `@triton.jit` signature directly from
-  the source file. Never assume `BLOCK_ROW` or other params exist; the original
-  baseline for `_relu_add_bias_kernel` takes `N, C, H, W, BLOCK_W` only.
+- **torch_ref weight mismatch (multi-baseline Conv kernels)** — when the kernel
+  wraps a Conv layer (e.g. Conv2D→ReLU, Conv3D→Pool→Reduce) and you have
+  multiple baselines (baseline1, baseline2, optimized), creating a separate
+  `nn.Conv*d` in `_run_torch_ref` can produce different weights than the
+  baselines even with identical seeds. RNG consumption order differs between
+  `torch.nn.init.kaiming_uniform_` (used internally by `nn.Conv*d`) and the
+  baselines' `ModelNew.__init__`. Fix: reuse the baseline's own Conv weights.
+  ```python
+  # _run_torch_ref calls _ensure_models_on_npu(), then:
+  m = _baseline1_model   # reuse baseline1's Conv3d weights + bias
+  x = F.conv3d(x, m.conv.weight / divisor, m.conv.bias / divisor, ...)
+  ```
+  This guarantees identical Conv output — the only difference is the
+  post-conv ops (Triton kernel vs PyTorch), which is what you're testing.
+
+- **Lazy NPU model init** — models created at module load time live on CPU,
+  causing "found cpu and npu" errors when input is NPU. Don't instantiate
+  `ModelNew()` at module scope. Use a lazy init guard:
+  ```python
+  _baseline1_model = None  # module-level, no init
+
+  def _ensure_models_on_npu():
+      global _baseline1_model
+      if _baseline1_model is None:
+          torch.manual_seed(0)
+          _baseline1_model = _baseline1.ModelNew(...).to("npu", dtype=torch.float32).eval()
+
+  def _run_baseline1(x):
+      _ensure_models_on_npu()
+      return _baseline1_model(x)
+  ```
+  This also avoids the import-time side-effect of constructing models on
+  potentially unavailable hardware.
+
+- **Four-line benchmarks (multi-baseline)** — some kernels have two baselines
+  (e.g. a fast-path and generic-path Triton kernel) plus torch_ref and
+  optimized. Support 4 lines in perf_report:
+  ```python
+  line_vals=["torch_ref", "baseline1", "baseline2", "optimized"],
+  line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+  styles=[("blue", "-"), ("red", "-"), ("black", "-"), ("green", "-")],
+  ```
+  torch_ref is always first (blue, `"PyTorch / ACL"`). Unit test compares
+  all baselines and optimized against torch_ref.
+
+- **Wrong kernel args** — always read the `@triton.jit` signature directly from the source file
+- **Baseline has no ModelNew** — if the baseline file only has a bare `@triton.jit` kernel (no ModelNew class), dispatch it manually in `_run_baseline` by calling `_baseline._kernel_name[grid](...)` directly. Don't try to instantiate ModelNew from it. Use `sys.path.insert(0, str(_DIR))` + direct import.
+- **Instantiate ModelNew (or any stateful dispatch object) once, outside the benchmark lambda** — creating `ModelNew()` inside `do_bench`'s `fn` lambda instantiates it on every warmup and rep call. `__init__` is cheap, but across 200+ reps it adds measurable overhead and muddies the latency signal. Correct pattern:
+  ```python
+  # Outside benchmark function — instantiate once at module load
+  _optimized_model = _optimized_mod.ModelNew()
+
+  def _run_optimized(x):
+      return _optimized_model(x)   # reuse the same instance
+  ```
+
+- **Baseline uses `@triton.autotune`** — autotune runs a grid search on the first call and caches the winner. To benchmark the baseline fairly without triggering autotune on every iteration, call the kernel with a specific known-good config directly (e.g. `BLOCK_SIZE=1024`). Alternatively, call the autotuned kernel once before the benchmark to warm up autotune, then let `do_bench` time subsequent calls. Do NOT call the kernel with `BLOCK_SIZE=<value>` AND `num_warps=<value>` together if the autotune decorator uses `num_warps` as a config key — that will cause a config mismatch. Example for a baseline with `@triton.autotune(configs=[Config({'BLOCK_SIZE': ...})], key=['n_elements'])`:
+  ```python
+  def _run_baseline(x):
+      x_flat = x.contiguous().view(-1)
+      y_flat = torch.empty_like(x_flat)
+      n = x_flat.numel()
+      # Trigger autotune on first call (it picks the best BLOCK_SIZE for this n)
+      _baseline._relu_kernel[(triton.cdiv(n, 1024),)](x_flat, y_flat, n, BLOCK_SIZE=1024, IS_FP=1)
+      return y_flat.view_as(x)
+  ```
+- **`_run_baseline` grid cap missing causes UINT16_MAX crash at large N** — when the baseline uses `@triton.autotune`, the grid lambda in `_run_baseline` must cap at 65535, even if the autotune decorator itself does not. Autotune probes all configs including the smallest BLOCK_SIZE. At N=16,777,216 with BLOCK_SIZE=256: `cdiv(16M, 256) = 65536` → runtime crash `coreDim=65536 can't be greater than UINT16_MAX`. The cap must use the *smallest* autotune BLOCK_SIZE as the reference, not the largest. Correct pattern:
+  ```python
+  def _run_baseline(x):
+      x_flat = x.contiguous().view(-1)
+      y_flat = torch.empty_like(x_flat)
+      n = x_flat.numel()
+      def grid(meta):
+          return (min(triton.cdiv(n, meta["BLOCK_SIZE"]), 65535),)  # cap is mandatory
+      _baseline._relu_kernel[grid](x_flat, y_flat, n, IS_FP=1)
+      return y_flat.view_as(x)
+  ```
+  Wrong (will crash for large N):
+  ```python
+  def grid(meta): return (triton.cdiv(n, meta["BLOCK_SIZE"]),)  # no cap → CRASH
+  ```
 
 - **Grid overflow `coredim > UINT16_MAX`** — baseline kernels often use
   `(N*C*H,)` as gridX. For N=128, C=128, H=126 this is 2,064,384 >> 65535.
@@ -380,6 +463,12 @@ if __name__ == "__main__":
   (`"-"`, `"--"`, `"-."`). Hex colours (`"#4C72B0"`) and combined
   marker+linestyle strings (`"-o"`, `"-s"`) are not accepted.
 
+- **Reference name MUST be `"PyTorch / ACL"`** — never `torch.matmul`,
+  `torch_npu`, `PyTorch cumsum`, etc. If you find an alias in
+  an existing file, change `line_names[0]` to `"PyTorch / ACL"` and
+  (for `torch_npu` files) also change `line_vals[0]` to `"torch_ref"`
+  plus the `if mode == ...` dispatch.
+
 - **Shapes must cover ALL dispatch paths — not just the benchmark shape.**
   The user will ask why only the benchmark shape was profiled. For any kernel
   with multiple dispatch paths (e.g. persistent for HW≤1024, loop for HW>1024),
@@ -389,6 +478,8 @@ if __name__ == "__main__":
 - **Load via importlib, never copy-paste** — if you inline the kernel code into
   `profile_kernels.py`, the profile diverges from the file on disk the moment
   you make a fix. Always load from `Path(__file__).parent / "filename.py"`.
+
+- **Autotune key explosion makes the benchmark shape appear catastrophically slow** — if the optimized kernel uses `@triton.autotune(key=["n_elements"])`, then a novel n_elements value (e.g. 1,610,612,736 for a 4096×393216 tensor) causes autotune to run all configs at full tensor size inside do_bench's warmup window. Observed: 0.90s baseline vs 5.69s optimized (6.33×) due entirely to autotune overhead, not kernel performance. Diagnosis: the optimized kernel's first-call latency (via `time.time()`) is 5–10× the steady-state latency. Fix: use a bucketed autotune key — `key=["n_elements_pow2"]` where `n_elements_pow2 = 1 << (n-1).bit_length()`. This is an O(log N) cache, not a per-value cache.
 
 ---
 
@@ -400,13 +491,14 @@ if __name__ == "__main__":
   hoisted zeros, persistent grids, etc.): **triton-ascend-optimization-patterns**
 - Recording what worked per kernel: **kernel-episode-memory**
 
----
+## Reference implementations
 
-## Reference implementation
+### Single-baseline pattern (3 lines: torch_ref, baseline, optimized)
 
-A real, working `profile_kernels.py` for the l2_1 Conv2D→ReLU→BiasAdd kernel
-is stored in `references/l2_1_Conv2D_ReLU_BiasAdd_profile_kernels.py`.
-Load it with:
+`references/l2_1_Conv2D_ReLU_BiasAdd_profile_kernels.py` — Conv2D→ReLU→BiasAdd
+with baseline, optimized, and torch_ref. Demonstrates grid overflow guard,
+importlib loading, perf_report decorator, shape coverage across both
+dispatch paths, and unit test.
 
 ```
 skill_view("triton-ascend-kernel-profiling",

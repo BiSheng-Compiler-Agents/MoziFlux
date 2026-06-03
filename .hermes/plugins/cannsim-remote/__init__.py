@@ -38,6 +38,14 @@ Important lessons:
     build first (outside cannsim scope), then point cannsim at the binary.
   - cannsim.log cycle counts are not actionable. Use trace_core0.json from
     `cannsim report -n 0 --timeline` for optimization decisions.
+  - CANN 9.0.0 cleanup bug: cannsim record exits with code 1 after a successful
+    simulation due to a FileNotFoundError in _cleanup_user_env(os.getcwd()).
+    The plugin detects this pattern and continues to the report step rather than
+    treating it as a failure. Signature: "current_dir = os.getcwd()" +
+    "FileNotFoundError" + "_cleanup_user_env" in stderr, combined with
+    "all tasks are finished!" in stdout confirming the simulation completed.
+  - Default timeout is 1800s. Large GEMM kernels (4096×4096) take ~1500s to
+    simulate. The old 600s default would kill mid-simulation.
 """
 
 from __future__ import annotations
@@ -174,6 +182,28 @@ def _apply_remote_patches(ssh, conda_env: str) -> tuple[bool, str]:
 # Core tool logic
 # ---------------------------------------------------------------------------
 
+def _cannsim_record_completed(log: str) -> bool:
+    """Return True when the simulation ran to completion despite a non-zero exit.
+
+    CANN 9.0.0 cannsim has a Python bug in record.py _cleanup_user_env():
+    after the simulation finishes it calls os.getcwd() on a directory that it
+    already deleted, raising FileNotFoundError and exiting with code 1 even
+    though every kernel program ran successfully and instr.bin / log_ca are
+    fully written.  We detect this by confirming:
+      1. The kernel actually ran:  "all tasks are finished!" appears in the log
+      2. The failure is only the known cleanup bug:
+             current_dir = os.getcwd()
+             FileNotFoundError
+    """
+    has_completion = "all tasks are finished!" in log
+    is_cleanup_bug = (
+        "current_dir = os.getcwd()" in log
+        and "FileNotFoundError" in log
+        and "_cleanup_user_env" in log
+    )
+    return has_completion and is_cleanup_bug
+
+
 def _cannsim_remote_run(
     local_dir: str,
     run_script: str,
@@ -183,7 +213,7 @@ def _cannsim_remote_run(
     soc_version: str | None = None,
     cannsim_output_subdir: str = "output",
     gen_report: bool = True,
-    timeout: int = 600,
+    timeout: int = 1800,
     report_timeout: int = 300,
 ) -> dict[str, Any]:
     """
@@ -326,15 +356,25 @@ def _cannsim_remote_run(
         record_log = (record_out + "\n" + record_err).strip()
 
         if rc != 0:
-            return {
-                "success": False,
-                "error": f"cannsim record failed (exit {rc}):\n{record_log[-3000:]}",
-                "job_name": job_name,
-                "remote_job_dir": remote_job_dir,
-                "patch_log": patch_log,
-                "build_log": build_log,
-                "cannsim_log_tail": record_log[-4000:],
-            }
+            if _cannsim_record_completed(record_log):
+                # CANN 9.0.0 cleanup bug: cannsim exited non-zero after a
+                # successful simulation.  Log a warning and continue — instr.bin
+                # and log_ca are intact so cannsim report will succeed normally.
+                logger.warning(
+                    f"cannsim-remote: cannsim record exited {rc} but simulation "
+                    "completed (CANN 9.0.0 os.getcwd() cleanup bug) — continuing "
+                    "to report step"
+                )
+            else:
+                return {
+                    "success": False,
+                    "error": f"cannsim record failed (exit {rc}):\n{record_log[-3000:]}",
+                    "job_name": job_name,
+                    "remote_job_dir": remote_job_dir,
+                    "patch_log": patch_log,
+                    "build_log": build_log,
+                    "cannsim_log_tail": record_log[-4000:],
+                }
 
         # 8. Run cannsim report to produce trace_core0.json
         #    cannsim record (without -o) creates a `cannsim_<ts>_<binname>/` subdir
@@ -485,7 +525,7 @@ def register(ctx) -> None:
                     },
                     "timeout": {
                         "type": "integer",
-                        "description": "SSH timeout for the cannsim record step in seconds (default: 600).",
+                        "description": "SSH timeout for the cannsim record step in seconds (default: 1800). Large GEMM kernels (e.g. 4096×4096) can take 1500+ seconds to simulate — set this higher if the run is killed mid-simulation.",
                     },
                     "report_timeout": {
                         "type": "integer",

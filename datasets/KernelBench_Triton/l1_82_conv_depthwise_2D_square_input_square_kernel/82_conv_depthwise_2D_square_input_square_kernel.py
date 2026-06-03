@@ -1,5 +1,14 @@
+import math
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
+DEFAULT_IN_CHANNELS = 64
+DEFAULT_KERNEL_SIZE = 3
+DEFAULT_STRIDE = 1
+DEFAULT_PADDING = 0
+
 
 @triton.jit
 def _dwconv2d_kernel(
@@ -91,3 +100,114 @@ def _dwconv2d_kernel(
     # store result
     y_ptrs = y_ptr + y_base + ow * stride_yW
     tl.store(y_ptrs, acc, mask=out_mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Performs a depthwise 2D convolution operation with square input and square kernel.
+
+    Args:
+        in_channels (int): Number of channels in the input tensor.
+        kernel_size (int): Size of the convolution kernel.
+        stride (int, optional): Stride of the convolution. Defaults to 1.
+        padding (int, optional): Padding applied to the input. Defaults to 0.
+        bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
+    """
+    def __init__(
+        self,
+        in_channels: int = DEFAULT_IN_CHANNELS,
+        kernel_size: int = DEFAULT_KERNEL_SIZE,
+        stride: int = DEFAULT_STRIDE,
+        padding: int = DEFAULT_PADDING,
+        bias: bool = False,
+    ):
+        super(ModelNew, self).__init__()
+        # keep parameters & initialization identical to reference
+        self.conv2d = nn.Conv2d(
+            in_channels,
+            in_channels,
+            kernel_size,
+            stride=stride,
+            padding=padding,
+            groups=in_channels,
+            bias=bias,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Performs the depthwise 2D convolution.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_channels, height, width).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, in_channels, height_out, width_out).
+        """
+        if x.device.type != "npu":
+            raise RuntimeError(
+                "ModelNew expects Ascend NPU inputs; the Triton kernel path is the only supported runtime."
+            )
+
+        # Ensure contiguous tensors for predictable strides
+        x = x.contiguous()
+        w = self.conv2d.weight.contiguous()
+        b = self.conv2d.bias
+        if b is not None:
+            b = b.contiguous()
+
+        N, C, H, W = x.shape
+        K = w.shape[-1]  # square kernel
+        # use module stride/padding (square)
+        S = self.conv2d.stride[0]
+        P = self.conv2d.padding[0]
+
+        # output dimensions (match PyTorch conv2d)
+        H_OUT = (H + 2 * P - K) // S + 1
+        W_OUT = (W + 2 * P - K) // S + 1
+
+        y = torch.empty((N, C, H_OUT, W_OUT), device=x.device, dtype=x.dtype)
+
+        # strides in elements
+        stride_xN, stride_xC, stride_xH, stride_xW = x.stride()
+        stride_wC, _, stride_wH, stride_wW = w.stride()
+        stride_yN, stride_yC, stride_yH, stride_yW = y.stride()
+
+        # Grid: (N*C, H_OUT, ceil_div(W_OUT, BLOCK_W))
+        # Keep mapping but optimize inner kernel
+        BLOCK_W = 256
+        grid = (
+            N * C,
+            H_OUT,
+            triton.cdiv(W_OUT, BLOCK_W),
+        )
+
+        # Choose num_warps based on tile width
+        num_warps = 8 if BLOCK_W >= 256 else 4
+
+        _dwconv2d_kernel[grid](
+            x, w, (b if b is not None else y), y,
+            N, C, H, W,
+            H_OUT, W_OUT,
+            S=S, P=P, K=K,
+            stride_xN=stride_xN, stride_xC=stride_xC, stride_xH=stride_xH, stride_xW=stride_xW,
+            stride_wC=stride_wC, stride_wH=stride_wH, stride_wW=stride_wW,
+            stride_yN=stride_yN, stride_yC=stride_yC, stride_yH=stride_yH, stride_yW=stride_yW,
+            HAS_BIAS=(1 if b is not None else 0),
+            BLOCK_W=BLOCK_W,
+            num_warps=num_warps,
+            num_stages=2,  # leaner pipeline for better occupancy on memory-bound kernel
+        )
+        return y
+batch_size = 16
+in_channels = 64
+kernel_size = 3
+width = 512
+height = 512
+stride = 1
+padding = 0
+
+def get_inputs():
+    x = torch.rand(batch_size, in_channels, height, width)
+    return [x]
+def get_init_inputs():
+    return [in_channels, kernel_size, stride, padding]

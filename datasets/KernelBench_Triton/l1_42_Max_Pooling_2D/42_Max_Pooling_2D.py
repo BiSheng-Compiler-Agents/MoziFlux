@@ -1,5 +1,14 @@
+import os
+
+os.environ.setdefault("TRITON_ALL_BLOCKS_PARALLEL", "1")
+
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
+import torch_npu  # noqa: F401
+
 
 @triton.jit
 def _maxpool2d_kernel(
@@ -191,3 +200,104 @@ def _maxpool2d_kernel(
                 max_val = tl.maximum(max_val, val)
 
         tl.store(y_ptr + y_offs, max_val, mask=out_mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Max Pooling 2D implemented with a Triton kernel for Ascend NPU tensors.
+    """
+    def __init__(self, kernel_size: int = 2, stride: int = 2, padding: int = 1, dilation: int = 3):
+        """
+        Initializes the Max Pooling 2D layer.
+
+        Args:
+            kernel_size (int): Size of the pooling window.
+            stride (int): Stride of the pooling window.
+            padding (int): Padding to be applied before pooling.
+            dilation (int): Spacing between kernel elements.
+        """
+        super(ModelNew, self).__init__()
+        # Store parameters for use in custom kernel
+        self.kernel_size = int(kernel_size)
+        self.stride = int(stride)
+        self.padding = int(padding)
+        self.dilation = int(dilation)
+
+    def _output_dim(self, L: int, k: int, s: int, p: int, d: int) -> int:
+        # PyTorch formula with floor (ceil_mode=False)
+        eff_k = (k - 1) * d + 1
+        return max((L + 2 * p - eff_k) // s + 1, 0)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Applies Max Pooling 2D to the input tensor.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, channels, height, width).
+
+        Returns:
+            torch.Tensor: Output tensor after Max Pooling 2D, shape (batch_size, channels, pooled_height, pooled_width).
+        """
+        assert x.dim() == 4, "Input must be 4D NCHW tensor"
+        if x.device.type != "npu":
+            raise ValueError("Max Pooling 2D Triton kernel requires an Ascend NPU tensor")
+        N, C, H, W = x.shape
+
+        KH = KW = self.kernel_size
+        SH = SW = self.stride
+        PH = PW = self.padding
+        DH = DW = self.dilation
+
+        H_out = self._output_dim(H, KH, SH, PH, DH)
+        W_out = self._output_dim(W, KW, SW, PW, DW)
+
+        # Handle degenerate case
+        if H_out == 0 or W_out == 0:
+            return x.new_empty((N, C, H_out, W_out))
+
+        # Ensure contiguous memory for simple address math
+        x_in = x.contiguous()
+        y = torch.empty((N, C, H_out, W_out), device=x.device, dtype=x.dtype)
+
+        # Tile sizes tuned for better width coalescing and occupancy
+        BLOCK_HO = 8
+        BLOCK_WO = 64
+
+        grid_ho = triton.cdiv(H_out, BLOCK_HO)
+        grid_wo = triton.cdiv(W_out, BLOCK_WO)
+        grid = (
+            N * C,
+            grid_ho * grid_wo,
+        )
+
+        # Launch kernel; compute in native dtype to reduce casts
+        _maxpool2d_kernel[grid](
+            x_in, y,
+            N, C, H, W,
+            H_out, W_out,
+            SH, SW, PH, PW, DH, DW, KH, KW,
+            GRID_WO=grid_wo,
+            BLOCK_HO=BLOCK_HO, BLOCK_WO=BLOCK_WO,
+            num_warps=8,
+            num_stages=4,
+        )
+
+        return y
+batch_size = 32
+channels = 64
+height = 512
+width = 512
+kernel_size = 4
+stride = 1
+padding = 1
+dilation = 1
+
+
+def max_pool2d_entry(x: torch.Tensor) -> torch.Tensor:
+    return ModelNew(*get_init_inputs())(x)
+
+def get_inputs():
+    x = torch.rand(batch_size, channels, height, width, device='npu')
+    return [x]
+def get_init_inputs():
+    return [kernel_size, stride, padding, dilation]

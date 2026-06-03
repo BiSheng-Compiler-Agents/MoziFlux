@@ -1,5 +1,14 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
+
+DEFAULT_BATCH_SIZE = 16384
+DEFAULT_IN_FEATURES = 4096
+DEFAULT_OUT_FEATURES = 4096
+DEFAULT_SCALING_FACTOR = 0.5
+
 
 @triton.jit
 def _linear_fused_kernel(
@@ -53,3 +62,87 @@ def _linear_fused_kernel(
     y_ptrs = Y_ptr + (offs_m[:, None] * stride_ym + offs_n[None, :] * stride_yn)
     y_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
     tl.store(y_ptrs, acc, mask=y_mask)
+
+
+class ModelNew(nn.Module):
+    """
+    A model that performs a matrix multiplication, scaling, and residual addition.
+
+    Args:
+        in_features (int): Number of input features.
+        out_features (int): Number of output features.
+        scaling_factor (float): Scaling factor to apply after matrix multiplication.
+    """
+    def __init__(
+        self,
+        in_features=None,
+        out_features=None,
+        scaling_factor=None,
+    ):
+        super(ModelNew, self).__init__()
+        if in_features is None:
+            in_features = DEFAULT_IN_FEATURES
+        if out_features is None:
+            out_features = DEFAULT_OUT_FEATURES
+        if scaling_factor is None:
+            scaling_factor = DEFAULT_SCALING_FACTOR
+        self.matmul = nn.Linear(in_features, out_features)
+        self.scaling_factor = scaling_factor
+
+    def forward(self, x):
+        """
+        Forward pass of the model.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_features).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, out_features).
+        """
+        if x.device.type != "npu":
+            raise RuntimeError("ModelNew expects an Ascend NPU input tensor")
+        if self.matmul.weight.device != x.device:
+            raise RuntimeError("ModelNew parameters must be moved to the same Ascend NPU device as the input")
+
+        A = x.contiguous()  # [M, K]
+        W = self.matmul.weight.contiguous()  # [N, K] row-major; avoid transpose overhead
+        b = self.matmul.bias
+
+        M, K = A.shape
+        N = W.shape[0]
+        if W.shape[1] != K:
+            raise ValueError(f"Input feature mismatch: expected {W.shape[1]}, got {K}")
+
+        if b is None:
+            b_buf = torch.zeros(N, device=x.device, dtype=torch.float32)
+        else:
+            b_buf = b.contiguous().to(torch.float32)
+
+        Y = torch.empty((M, N), device=x.device, dtype=torch.float32)
+
+        def grid(meta):
+            return (
+                triton.cdiv(M, meta["BLOCK_M"]),
+                triton.cdiv(N, meta["BLOCK_N"]),
+            )
+
+        _linear_fused_kernel[grid](
+            A, W, b_buf, Y,
+            M, N, K,
+            A.stride(0), A.stride(1),
+            W.stride(1), W.stride(0),
+            Y.stride(0), Y.stride(1),
+            1.0 + float(self.scaling_factor),
+            BLOCK_M=64, BLOCK_N=64, BLOCK_K=32,
+            num_warps=8, num_stages=3,
+        )
+        return Y
+batch_size = 16384
+in_features = 4096
+out_features = 4096
+scaling_factor = 0.5
+
+def get_inputs():
+    return [torch.rand(batch_size, in_features)]
+def get_init_inputs():
+    return [in_features, out_features, scaling_factor]

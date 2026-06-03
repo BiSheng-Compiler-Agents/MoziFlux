@@ -1,5 +1,20 @@
+import torch
+import torch.nn as nn
+import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
+
+
+DEFAULT_IN_CHANNELS = 32
+DEFAULT_OUT_CHANNELS = 64
+DEFAULT_KERNEL_SIZE = 3
+DEFAULT_STRIDE = 1
+DEFAULT_PADDING = 1
+
+
+def _is_npu_tensor(x: torch.Tensor) -> bool:
+    return bool(getattr(x, "is_npu", False))
+
 
 @triton.jit
 def _pool_lse_relu_stream_kernel(
@@ -98,6 +113,16 @@ def _pool_lse_relu_stream_kernel(
     out = tl.maximum(out, 0.0)
     tl.store(y_ptr + base_y, out, mask=mask)
 
+
+def _pool_lse_relu_triton(x: torch.Tensor) -> torch.Tensor:
+    # x: (N, C, D, H, W)
+    assert x.ndim == 5
+    if not _is_npu_tensor(x):
+        raise ValueError("_pool_lse_relu_triton requires an Ascend NPU tensor input")
+    pooled = torch.nn.functional.max_pool3d(x, kernel_size=2, stride=2)
+    return _lse_relu_triton(pooled)
+
+
 @triton.jit
 def _lse_relu_reduce_c_kernel(
     x_ptr,            # input pointer (N, C, Z, Y, X)
@@ -178,3 +203,78 @@ def _lse_relu_reduce_c_kernel(
 
     # Store to output (same spatial/N index but channel dimension is size=1)
     tl.store(out_ptr + base_out, out_f32, mask=mask)
+
+
+def _lse_relu_triton(x: torch.Tensor) -> torch.Tensor:
+    # x shape: (N, C, Z, Y, X)
+    if not _is_npu_tensor(x):
+        raise ValueError("_lse_relu_triton requires an Ascend NPU tensor")
+
+    orig_dtype = x.dtype
+    if x.dtype != torch.float32:
+        x = x.float()
+    if not x.is_contiguous():
+        x = x.contiguous()
+
+    N, C, Z, Y, X = x.shape
+    out = torch.empty((N, 1, Z, Y, X), device=x.device, dtype=torch.float32)
+
+    # Strides in elements (contiguous guaranteed)
+    sN, sC, sZ, sY, sX = x.stride()
+
+    # Total positions over (N, Z, Y, X)
+    M = N * Z * Y * X
+
+    grid = lambda META: (triton.cdiv(M, META["BLOCK"]),)
+    _lse_relu_reduce_c_kernel[grid](
+        x, out,
+        M, Z, Y, X,
+        sN, sC, sZ, sY, sX,
+        C=C,
+        BLOCK=256,
+    )
+    if orig_dtype != torch.float32:
+        out = out.to(orig_dtype)
+    return out
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a 3D convolution, max pooling, log sum exp, and ReLU activation.
+    The MaxPool3d + LogSumExp(dim=1, keepdim=True) + ReLU are fused into a single Triton kernel on CUDA.
+    """
+    def __init__(
+        self,
+        in_channels=DEFAULT_IN_CHANNELS,
+        out_channels=DEFAULT_OUT_CHANNELS,
+        kernel_size=DEFAULT_KERNEL_SIZE,
+        stride=DEFAULT_STRIDE,
+        padding=DEFAULT_PADDING,
+    ):
+        super(ModelNew, self).__init__()
+        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        self.max_pool = nn.MaxPool3d(kernel_size=2, stride=2)
+
+    def forward(self, x):
+        """
+        Args:
+            x: Input tensor of shape (batch_size, in_channels, depth, height, width)
+        Returns:
+            Output tensor of shape (batch_size, 1, depth', height', width')
+        """
+        x = self.conv(x)
+        if not _is_npu_tensor(x):
+            raise ValueError("ModelNew.forward requires Ascend NPU inputs and weights")
+        return _pool_lse_relu_triton(x)
+batch_size = 4
+in_channels = 32
+out_channels = 64
+depth, height, width = 32, 128, 128
+kernel_size = 3
+stride = 1
+padding = 1
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, depth, height, width)]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, stride, padding]

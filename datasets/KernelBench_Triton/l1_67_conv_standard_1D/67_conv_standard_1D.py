@@ -1,5 +1,8 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def conv1d_fwd_kernel(
@@ -97,3 +100,113 @@ def conv1d_fwd_kernel(
     y_offsets = b * OC * L_OUT + oc_idx[:, None] * L_OUT + t_idx[None, :]
     mask_y = mask_oc[:, None] & mask_t[None, :]
     tl.store(y_ptr + y_offsets, acc, mask=mask_y)
+
+
+def conv1d_triton_fp32(x: torch.Tensor, w: torch.Tensor, stride: int = 1, padding: int = 0, dilation: int = 1) -> torch.Tensor:
+    # x: [B, C, L_IN], w: [OC, C, K]
+    if x.device.type != "npu" or w.device.type != "npu":
+        raise ValueError("conv1d_triton_fp32 requires NPU tensors")
+    if x.dtype != torch.float32 or w.dtype != torch.float32:
+        raise ValueError("conv1d_triton_fp32 supports float32 inputs and weights only")
+    if x.ndim != 3 or w.ndim != 3:
+        raise ValueError("conv1d_triton_fp32 expects x[B, C, L] and w[OC, C, K]")
+
+    B, C, L_IN = x.shape
+    OC, Cw, K = w.shape
+    assert Cw == C
+    # Compute output length per PyTorch formula
+    L_OUT = (L_IN + 2 * padding - dilation * (K - 1) - 1) // stride + 1
+    if L_OUT <= 0:
+        raise ValueError("conv1d_triton_fp32 received parameters that produce a non-positive output length")
+
+    x = x.contiguous()
+    w = w.contiguous()
+    y = torch.empty((B, OC, L_OUT), device=x.device, dtype=torch.float32)
+
+    CK = C * K
+
+    # Heuristic tiling tuned for Hopper (H200)
+    if CK <= 16:
+        BLOCK_P = 16
+        BLOCK_T = 128
+        BLOCK_OC = 64 if OC >= 64 else 32
+        num_warps = 4
+        num_stages = 3
+    elif CK <= 64:
+        BLOCK_P = 32
+        BLOCK_T = 128
+        BLOCK_OC = 64 if OC >= 64 else 32
+        num_warps = 8 if OC >= 128 else 4
+        num_stages = 3
+    else:
+        BLOCK_P = 64
+        BLOCK_T = 128
+        BLOCK_OC = 64 if OC >= 64 else 32
+        num_warps = 8 if OC >= 128 else 4
+        num_stages = 4
+
+    NUM_P_ITERS = (CK + BLOCK_P - 1) // BLOCK_P
+
+    grid = (triton.cdiv(L_OUT, BLOCK_T), triton.cdiv(OC, BLOCK_OC), B)
+    conv1d_fwd_kernel[grid](
+        x, w, y,
+        B, C, L_IN, OC, K,
+        stride, padding, dilation, L_OUT, CK,
+        BLOCK_OC=BLOCK_OC, BLOCK_T=BLOCK_T, BLOCK_P=BLOCK_P, NUM_P_ITERS=NUM_P_ITERS,
+        num_warps=num_warps, num_stages=num_stages,
+    )
+    return y
+
+
+def _conv1d_triton_fp32(x: torch.Tensor, w: torch.Tensor, stride: int, padding: int, dilation: int) -> torch.Tensor:
+    return conv1d_triton_fp32(x, w, stride=stride, padding=padding, dilation=dilation)
+
+
+class ModelNew(nn.Module):
+    """
+    Performs a standard 1D convolution operation.
+
+    Args:
+        in_channels (int): Number of channels in the input tensor.
+        out_channels (int): Number of channels produced by the convolution.
+        kernel_size (int): Size of the convolution kernel.
+        stride (int, optional): Stride of the convolution. Defaults to 1.
+        padding (int, optional): Padding applied to the input. Defaults to 0.
+        dilation (int, optional): Spacing between kernel elements. Defaults to 1.
+        groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
+        bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
+    """
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, stride: int = 1, padding: int = 0, dilation: int = 1, groups: int = 1, bias: bool = False):
+        super(ModelNew, self).__init__()
+        self.conv1d = nn.Conv1d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Performs the 1D convolution.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_channels, length).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, out_channels, length_out).
+        """
+        if self.conv1d.groups != 1:
+            raise NotImplementedError("ModelNew supports groups=1 only")
+        if self.conv1d.bias is not None:
+            raise NotImplementedError("ModelNew supports bias=False only")
+
+        stride = self.conv1d.stride[0] if isinstance(self.conv1d.stride, tuple) else self.conv1d.stride
+        padding = self.conv1d.padding[0] if isinstance(self.conv1d.padding, tuple) else self.conv1d.padding
+        dilation = self.conv1d.dilation[0] if isinstance(self.conv1d.dilation, tuple) else self.conv1d.dilation
+        return conv1d_triton_fp32(x, self.conv1d.weight, stride=stride, padding=padding, dilation=dilation)
+batch_size = 32
+in_channels = 64
+out_channels = 128
+kernel_size = 3
+length = 131072
+
+def get_inputs():
+    x = torch.rand(batch_size, in_channels, length)
+    return [x]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization

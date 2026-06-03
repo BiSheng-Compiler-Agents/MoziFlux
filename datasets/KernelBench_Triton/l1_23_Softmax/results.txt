@@ -1,0 +1,14 @@
+=== Unit Test: l1_23_Softmax ===
+  N=256*256                     baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=1.40e-09 maxDelta_base2=1.40e-09  maxDelta_opt=1.40e-09
+  N=512*512                     baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=6.98e-10 maxDelta_base2=6.98e-10  maxDelta_opt=6.98e-10
+  N=1024*1024                   baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=4.66e-10 maxDelta_base2=3.49e-10  maxDelta_opt=3.49e-10
+  N=60000*2048                  baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=3.49e-10 maxDelta_base2=1.75e-10  maxDelta_opt=1.75e-10
+  N=60000*2048                  baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=2.04e-10 maxDelta_base2=8.73e-11  maxDelta_opt=8.73e-11
+All shapes PASSED
+relu_perf:
+          label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0     N=256*256       0.002899          0.061397          0.061979          0.054497
+1     N=512*512       0.004128          0.057289          0.058027          0.051188
+2   N=1024*1024       0.009711          0.060126          0.056453          0.051325
+3  N=60000*2048       0.736319          6.244977          1.049257          1.049064
+4  N=60000*2048       0.736265          6.237682          1.055492          1.055886

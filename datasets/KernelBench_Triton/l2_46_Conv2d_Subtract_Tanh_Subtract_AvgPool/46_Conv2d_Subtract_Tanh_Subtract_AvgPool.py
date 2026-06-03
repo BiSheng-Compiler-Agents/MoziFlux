@@ -1,6 +1,14 @@
-import triton
-import triton.language as tl
+import torch
+import torch.nn as nn
 
+try:
+    import triton
+    import triton.language as tl
+    _TRITON_AVAILABLE = True
+except Exception:
+    _TRITON_AVAILABLE = False
+
+if _TRITON_AVAILABLE:
     @triton.jit
     def _fused_sub_tanh_sub_kernel(
         x_ptr,
@@ -90,3 +98,83 @@ import triton.language as tl
         inv_area = 1.0 / (K * K)
         out_val = acc * inv_area - subtract2
         tl.store(y_ptr + base_out, out_val, mask=mask_hw)
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a convolution, subtraction, tanh activation, subtraction and average pooling.
+    """
+    def __init__(self, in_channels, out_channels, kernel_size, subtract1_value, subtract2_value, kernel_size_pool):
+        super(ModelNew, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
+        self.subtract1_value = subtract1_value
+        self.subtract2_value = subtract2_value
+        self.avgpool = nn.AvgPool2d(kernel_size_pool)
+        self.kernel_size_pool = kernel_size_pool
+
+    def forward(self, x):
+        x = self.conv(x)
+        if not _TRITON_AVAILABLE:
+            raise RuntimeError("Triton is required for ModelNew forward")
+        if x.device.type != "npu":
+            raise RuntimeError(f"ModelNew expects NPU inputs, got {x.device.type}")
+        if x.dtype != torch.float32:
+            raise RuntimeError(f"ModelNew expects float32 inputs, got {x.dtype}")
+
+        x = x.contiguous()
+        N, C, H, W = x.shape
+        K = int(self.kernel_size_pool)
+        outH = (H - K) // K + 1
+        outW = (W - K) // K + 1
+        y = torch.empty((N, C, outH, outW), device=x.device, dtype=x.dtype)
+
+        BLOCK_HW = 1024
+        grid = lambda meta: (N * C, triton.cdiv(outH * outW, meta["BLOCK_HW"]))
+        _fused_tanh_avgpool_sub2_kernel[grid](
+            x,
+            y,
+            N,
+            C,
+            H,
+            W,
+            outH,
+            outW,
+            float(self.subtract1_value),
+            float(self.subtract2_value),
+            BLOCK_HW=BLOCK_HW,
+            K=K,
+            num_warps=4,
+            num_stages=2,
+        )
+        return y
+
+
+_MODEL_CACHE = {}
+
+
+def conv2d_subtract_tanh_subtract_avgpool(x):
+    if x.device.type != "npu":
+        raise RuntimeError(f"conv2d_subtract_tanh_subtract_avgpool expects NPU input, got {x.device.type}")
+
+    cache_key = (x.device.type, x.dtype)
+    module = _MODEL_CACHE.get(cache_key)
+    if module is None:
+        torch.manual_seed(0)
+        module = ModelNew(*get_init_inputs()).to(device=x.device, dtype=torch.float32).eval()
+        _MODEL_CACHE[cache_key] = module
+
+    with torch.no_grad():
+        return module(x.to(dtype=torch.float32))
+batch_size = 128
+in_channels = 64
+out_channels = 128
+height, width = 128, 128
+kernel_size = 3
+subtract1_value = 0.5
+subtract2_value = 0.2
+kernel_size_pool = 2
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, height, width)]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, subtract1_value, subtract2_value, kernel_size_pool]

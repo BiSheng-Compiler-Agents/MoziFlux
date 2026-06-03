@@ -1,5 +1,9 @@
+import os
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def _linear_gelu_softmax_rowwise(
@@ -111,3 +115,117 @@ def _linear_gelu_softmax_rowwise(
         out = numer * inv_denom
         tl.store(y_row_ptr + j, out, mask=j_mask)
         n_start += BLOCK_N
+
+
+def _next_power_of_two(n: int) -> int:
+    if n <= 1:
+        return 1
+    return 1 << ((n - 1).bit_length())
+
+
+def _require_supported_runtime(tensor: torch.Tensor) -> None:
+    if tensor.is_cuda or tensor.device.type == "npu":
+        return
+    if os.environ.get("TRITON_INTERPRET") == "1":
+        return
+    raise RuntimeError(
+        "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1."
+    )
+
+
+def _validate_inputs(
+    x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if x.ndim != 2 or weight.ndim != 2:
+        raise ValueError("Expected x and weight to be 2D tensors.")
+    if x.shape[1] != weight.shape[1]:
+        raise ValueError(
+            f"Incompatible shapes for fused linear: x={tuple(x.shape)}, weight={tuple(weight.shape)}."
+        )
+    if x.device != weight.device:
+        raise ValueError("x and weight must be on the same device.")
+    if bias is not None:
+        if bias.ndim != 1 or bias.shape[0] != weight.shape[0]:
+            raise ValueError("bias must be a 1D tensor with shape [out_features].")
+        if bias.device != x.device:
+            raise ValueError("bias must be on the same device as x.")
+    if x.dtype != weight.dtype or (bias is not None and bias.dtype != x.dtype):
+        raise ValueError("x, weight, and bias must share the same dtype.")
+    if x.dtype not in {torch.float16, torch.float32}:
+        raise TypeError(f"Unsupported dtype for fused operator: {x.dtype}.")
+    _require_supported_runtime(x)
+
+    x = x.contiguous()
+    weight = weight.contiguous()
+    if bias is None:
+        bias = torch.zeros(weight.shape[0], device=weight.device, dtype=weight.dtype)
+    else:
+        bias = bias.contiguous()
+    return x, weight, bias
+
+
+def matmul_gelu_softmax(
+    x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None = None
+) -> torch.Tensor:
+    x, weight, bias = _validate_inputs(x, weight, bias)
+    batch_size, in_features = x.shape
+    out_features = weight.shape[0]
+    output = torch.empty((batch_size, out_features), device=x.device, dtype=x.dtype)
+
+    block_n = min(128, max(16, _next_power_of_two(out_features)))
+    block_k = min(128, max(32, _next_power_of_two(in_features)))
+    num_n_tiles = triton.cdiv(out_features, block_n)
+    num_k_tiles = triton.cdiv(in_features, block_k)
+    num_warps = 1 if block_n <= 32 else 2
+
+    _linear_gelu_softmax_rowwise[(batch_size,)](
+        x,
+        weight,
+        bias,
+        output,
+        x.stride(0),
+        weight.stride(0),
+        weight.stride(1),
+        output.stride(0),
+        batch_size,
+        in_features,
+        out_features,
+        NUM_N_TILES=num_n_tiles,
+        NUM_K_TILES=num_k_tiles,
+        BLOCK_N=block_n,
+        BLOCK_K=block_k,
+        num_warps=num_warps,
+        num_stages=2,
+    )
+    return output
+
+
+DEFAULT_BATCH_SIZE = 1024
+DEFAULT_IN_FEATURES = 8192
+DEFAULT_OUT_FEATURES = 8192
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs a matrix multiplication, applies GELU, and then applies Softmax.
+    """
+
+    def __init__(self, in_features=None, out_features=None):
+        super(ModelNew, self).__init__()
+        if in_features is None:
+            in_features = DEFAULT_IN_FEATURES
+        if out_features is None:
+            out_features = DEFAULT_OUT_FEATURES
+        self.linear = nn.Linear(in_features, out_features)
+
+    def forward(self, x):
+        return matmul_gelu_softmax(x, self.linear.weight, self.linear.bias)
+batch_size = 1024
+in_features = 8192
+out_features = 8192
+
+def get_inputs():
+    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    return [torch.rand(batch_size, in_features, device=device)]
+def get_init_inputs():
+    return [in_features, out_features]

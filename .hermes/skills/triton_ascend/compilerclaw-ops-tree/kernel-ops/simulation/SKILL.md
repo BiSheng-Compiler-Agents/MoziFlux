@@ -1,10 +1,58 @@
+---
+name: simulation
+description: Run Triton-Ascend kernels without a physical NPU using cannsim. Covers compilation, host C++ launcher, cannsim invocation, and trace analysis.
+tags: [triton, ascend, cannsim, simulation, npu]
+---
+
 # Cannsim Simulation [LEAF NODE]
 
 Run Triton-Ascend kernels without a physical NPU using the CANN cannsim simulator.
 Covers compilation (ttir → ttadapter → npubin), host C++ launcher authoring, and cannsim
 invocation. Tested with triton-ascend==3.2.1 + CANN 9.0.0 + Ascend910_9589 target.
 
-## CRITICAL WORKFLOW RULE: Always use trace files, not cycle counts
+## CRITICAL WORKFLOW RULES
+
+> ⛔ **READ THIS FIRST.** Rule 1 below is non-negotiable. A full-shape cannsim run can
+> take 25+ minutes for a 4096×4096 matmul because simulation time scales linearly with
+> grid_size × loop_iters × instr_per_tile. The sub-kernel pattern (grid=1, M=BLOCK_M,
+> N=BLOCK_N, K=2×BLOCK_K) brings the same run to ~85 seconds and gives identical
+> bottleneck diagnosis. The user has explicitly called out violations of this rule.
+> **If you ever write a cannsim host that runs grid>1 or allocates buffers >1 tile, you
+> are doing it wrong.**
+
+### Rule 1 — Always use a sub-kernel host for cannsim
+
+> **cannsim simulates every instruction cycle-by-cycle. Simulation time scales
+> linearly with instruction count = grid_size × loop_iters × instr_per_tile.
+> A full-shape run is impractical (e.g. 4096×4096 GEMM takes ~1500s).
+> Use a sub-kernel host instead: same .npubin, grid=(1,1,1), minimal loop iters.**
+>
+> Sub-kernel rule:
+> - **grid = (1, 1, 1)** — one block is enough to see the bottleneck
+> - **M = BLOCK_M, N = BLOCK_N** (or equivalent tile size) — one tile of data
+> - **K = 2×BLOCK_K** (or 4× if you want to see steady-state pipelining) — minimum loop iters
+> - **BLOCK_M/BLOCK_N/BLOCK_K constexpr values must NOT change** — they are compiled
+>   into the .npubin and determine the instruction mix. Only runtime shape args change.
+> - Allocate buffers sized for exactly 1 tile (tiny — bytes, not MB)
+>
+> What is preserved: bottleneck pipeline lane (MTE2/RVECEX/SCALAR/CUBE),
+> WAIT_FLAG stall patterns, effect of any code fix, UB overflow symptoms.
+> What is lost: absolute cycle count (irrelevant), multi-block L2 cache effects.
+>
+> **FFTS dispatch savings are invisible at sub-kernel scale.**
+> If the optimization being tested is a persistent/work-stealing grid (reducing
+> program count from N/B → min(N/B, 65535) to amortise per-program FFTS cost),
+> the sub-kernel trace will show IDENTICAL cycles for baseline and optimized —
+> because both run exactly 1 program with 1 loop iteration. The FFTS benefit
+> (~1,150 cy × saved_programs) is purely a dispatch-level effect that requires
+> a full-shape hardware run to measure. Do not conclude the optimization failed
+> from an identical sub-kernel trace. The trace is still useful for verifying
+> the per-tile instruction mix has not regressed.
+>
+> Speedup example: grid 1024→1, K_iters 32→2 = **16384× faster**.
+> A 1500s run becomes ~0.1s.
+
+### Rule 2 — Always use trace files, not cycle counts
 
 > **The user has explicitly stated: "the cycle counts you may get from cannsim.log
 > is worthless — you should base your decision only based on trace files."**
@@ -14,7 +62,8 @@ invocation. Tested with triton-ascend==3.2.1 + CANN 9.0.0 + Ascend910_9589 targe
 > **All optimization decisions must be based on `trace_core0.json`.**
 >
 > Trace-first workflow (using `cannsim_remote_run`):
-> 1. Call `cannsim_remote_run(..., gen_report=True)` — this runs `cannsim record`,
+> 1. Write a **sub-kernel host** (grid=1, M=BLOCK_M, K=2×BLOCK_K — see Rule 1)
+> 2. Call `cannsim_remote_run(..., gen_report=True)` — this runs `cannsim record`,
 >    then automatically runs `cannsim report -e <exp_dir> -o <exp_dir>/report -n 0`,
 >    downloads `trace_core0.json` to a local temp path, and returns it in
 >    `result["trace_local_path"]` and inline in `result["trace_json"]`.
@@ -173,10 +222,37 @@ struct __attribute__((packed)) KernelArgs {
 };
 ```
 
-### Minimal host pattern
+### Sub-kernel host pattern (ALWAYS use this for cannsim)
+
+The host launcher must use sub-kernel dimensions — one tile, one block, minimal loop
+iterations. This makes simulation take seconds instead of hours.
+
+**What to set vs what to keep:**
+- Change: M=BLOCK_M, N=BLOCK_N, K=2*BLOCK_K (or 4* for steady-state pipelining), gridX=1
+- Keep: BLOCK_M/BLOCK_N/BLOCK_K constants (they are compiled into .npubin — do not change)
+- Keep: one kernel launch only (no benchmark loop)
+
+**Persistent / work-stealing kernels**: if the kernel uses a `while tile_id * BLOCK_SIZE < n_elements`
+loop, set `n_elements = BLOCK_SIZE` (exactly one tile) AND `n_programs = 1`. The loop then runs
+exactly one iteration — same per-tile instruction mix, minimal simulation time. Do NOT set
+`n_programs = n_elements` (that leaves `n_programs` at full-shape, which changes nothing for grid=1
+but is semantically misleading).
 
 ```cpp
 #include "runtime/rt.h"
+
+// Sub-kernel dimensions — override full-shape args with one-tile sizes
+// BLOCK_M/N/K are constexpr compiled into the .npubin — do NOT change them.
+// Only the runtime shape arguments (M, N, K) and gridX change.
+const int BLOCK_M = 128, BLOCK_N = 128, BLOCK_K = 64;  // must match kernel constexprs
+const int M = BLOCK_M;           // one tile row
+const int N = BLOCK_N;           // one tile col
+const int K = 2 * BLOCK_K;       // 2 loop iters (use 4 to see steady-state pipelining)
+const int gridX = 1;             // one block — enough to see bottleneck
+
+size_t sizeA = M * K * sizeof(float);
+size_t sizeB = K * N * sizeof(float);
+size_t sizeC = M * N * sizeof(float);
 
 rtSetDevice(0);
 rtStream_t stream;
@@ -196,23 +272,32 @@ rtDevBinaryRegister(&devBin, &binHandle);
 static size_t funcStub = 0;
 rtFunctionRegister(binHandle, &funcStub, "my_kernel", (void*)"my_kernel", 0);
 
-void* xDev;
-rtMalloc(&xDev, dataSize, RT_MEMORY_HBM, 0);
-rtMemcpy(xDev, dataSize, xHost.data(), dataSize, RT_MEMCPY_HOST_TO_DEVICE);
+void *aDev, *bDev, *cDev;
+rtMalloc(&aDev, sizeA, RT_MEMORY_HBM, 0);
+rtMalloc(&bDev, sizeB, RT_MEMORY_HBM, 0);
+rtMalloc(&cDev, sizeC, RT_MEMORY_HBM, 0);
+rtMemcpy(aDev, sizeA, aHost.data(), sizeA, RT_MEMCPY_HOST_TO_DEVICE);
+rtMemcpy(bDev, sizeB, bHost.data(), sizeB, RT_MEMCPY_HOST_TO_DEVICE);
 
-KernelArgs args = { nullptr, nullptr, xDev, ..., N, gridX, 1, 1 };
-rtKernelLaunch(&funcStub, blockNum, &args, sizeof(args), nullptr, stream);
+// One launch only — no warmup/repeat loops (each launch multiplies simulation time)
+KernelArgs args = { nullptr, nullptr, aDev, bDev, cDev, M, N, K, gridX, 1, 1 };
+rtKernelLaunch(&funcStub, gridX, &args, sizeof(args), nullptr, stream);
 rtStreamSynchronize(stream);
 
-rtMemcpy(outHost.data(), dataSize, outDev, dataSize, RT_MEMCPY_DEVICE_TO_HOST);
-rtFree(xDev); rtStreamDestroy(stream); rtDeviceReset(0);
+rtMemcpy(cHost.data(), sizeC, cDev, sizeC, RT_MEMCPY_DEVICE_TO_HOST);
+rtFree(aDev); rtFree(bDev); rtFree(cDev);
+rtStreamDestroy(stream); rtDeviceReset(0);
 ```
+
+> Correctness check: even with M=BLOCK_M, K=2*BLOCK_K you can verify correctness
+> by comparing cHost against a reference computed with the same tiny sub-problem.
+> Use non-zero test data (e.g. random floats) to avoid false PASS from zero output.
 
 ### CMakeLists.txt — link ONLY libruntime.so
 
 ```cmake
 if(NOT "$ENV{ASCEND_HOME_PATH}" STREQUAL "")
-  set(ASCEND_PATH $ENV{ASCEND_HOME_PATH})
+  set(ASCEND_PATH $ENV{ASCEND_HOME_PATH})    # NO closing quote after ASCEND_HOME_PATH
 else()
   set(ASCEND_PATH "/usr/local/Ascend/cann")
 endif()
@@ -221,6 +306,8 @@ include_directories(
   ${ASCEND_PATH}/include
   ${ASCEND_PATH}/x86_64-linux/pkg_inc
   ${ASCEND_PATH}/x86_64-linux/pkg_inc/runtime
+  ${ASCEND_PATH}/x86_64-linux/pkg_inc/profiling    # required: prof_common.h
+  ${ASCEND_PATH}/x86_64-linux/pkg_inc/toolchain    # required: prof_api.h
 )
 
 target_link_libraries(my_target PRIVATE
@@ -228,6 +315,15 @@ target_link_libraries(my_target PRIVATE
   # DO NOT link libascendcl.so
 )
 ```
+
+> **`prof_common.h` build error** — `runtime/base.h` transitively includes
+> `toolchain/prof_api.h` which includes `prof_common.h`. On CANN 9.0.0 (conda install)
+> this header lives at `x86_64-linux/pkg_inc/profiling/prof_common.h`, not in `toolchain/`.
+> Fix: add BOTH `profiling/` and `toolchain/` to `include_directories`.
+> Symptom: `fatal error: prof_common.h: No such file or directory` at compile line with
+> `#include "runtime/rt.h"`.
+> Discovery: `find ~/miniconda3/Ascend/cann-9.0.0/ -name 'prof_common.h'` returns
+> `.../x86_64-linux/pkg_inc/profiling/prof_common.h`.
 
 Build:
 ```bash
@@ -303,10 +399,12 @@ The trace_core0.json file contains a full execution trace — DO NOT read it ful
 Instead, run the aggregation script:
 
 ```bash
-python scripts/aggregate_trace.py /path/to/report/trace_core0.json
+python scripts/aggregate_trace.py /path/to/trace_core0.json
 ```
 
-This outputs `/path/to/report/trace_summary.txt`.
+The script writes its output to `/tmp/trace_summary.txt` (NOT next to the input file — it
+always writes to /tmp regardless of where the input lives). Read /tmp/trace_summary.txt
+after running the script.
 
 The `aggregate_trace.py` script is available at:
 `./scripts/aggregate_trace.py` (tree-internal, relative to this SKILL.md)
@@ -368,10 +466,26 @@ done
 **Fix:**
 ```python
 x_f32 = x.to(tl.float32)
-y_f32 = tl.maximum(x_f32 + b, 0.0)
+y_f32 = tl.maximum(x_f32, 0.0, propagate_nan=tl.PropagateNan.ALL)
 y = y_f32.to(tl.float16)
 ```
-Routes to **RVECEX** which pipelines with MTE2/MTE3. Speedup: 7,132 → 4,838 cycles (1.47×).
+Routes to **RVECEX** which pipelines with MTE2/MTE3.
+
+Also: `propagate_nan=tl.PropagateNan.ALL` collapses the 3-op manual NaN pattern
+(`tl.maximum + x!=x + tl.where`) to a single hardware instruction.
+Confirmed: VCMP_NE and VSEL are completely absent from the fp32 optimized trace (l1_19_ReLU, June 2026).
+
+**l1_19_ReLU sub-kernel trace comparison (BLOCK_SIZE=4096, grid=1):**
+| Metric | Baseline (fp16 max) | Optimized (fp32 max) |
+|--------|---------------------|----------------------|
+| wall_cycles | 3373 | 3319 (-1.6%) |
+| WAIT_FLAG_VEC (MTE3) | 1226 cy | 1151 cy (-6.1%) |
+| WAIT_FLAG_MTE2 (VEC) | 1002 cy | 986 cy |
+| NaN ops (RVECEX) | VCMP_NE+VMAXS+VSEL (×64 each) | absent (propagate_nan=ALL) |
+| New ops | — | RV_VCVT_F2F×128 (fp16↔fp32 casts, 7 cy/op) |
+
+Note: sub-kernel delta understates production gain — FFTS dispatch savings (persistent grid)
+are invisible at grid=1 scale.
 
 ### `tl.zeros` inside `tl.range` loop
 
@@ -398,6 +512,18 @@ BLOCK_HW=4096 causes **silent UB overflow**:
 
 Always use `num_stages=2`. `num_stages=1` causes scalar div-by-zero inside the AIV core at runtime.
 
+### ST_XD_XN_IMM scalar spill — structural cost in triton-ascend
+
+Across baseline (BLOCK=32) and optimized (BLOCK=128) matmul traces, ST_XD_XN_IMM appears
+as the top CRITICAL instruction at ~592 avg_cyc regardless of tile size. This is a structural
+cost of triton-ascend code generation: pointer arithmetic intermediates (especially from
+GROUP_M swizzle: modulo + division on program IDs) get spilled to the scalar register file.
+Total cost: 75 stores × 592 cyc = 44,418 cycles — **exceeds CUBE compute at 4,540 cycles**.
+
+This cost is not reducible from Triton Python. It's a codegen artifact. When you see
+ST_XD_XN_IMM CRITICAL in a trace, don't spend optimization effort there — focus on
+WAIT_FLAG stalls and CUBE utilization instead.
+
 ### Startup cost vs compute cost (small-HW regime)
 
 Per-program AIV startup cost ≈ 1,150 cycles. For HW ≤ ~1024, startup dominates.
@@ -408,6 +534,30 @@ Threshold empirically: HW ≤ 1024 → persistent; HW > 1024 → loop kernel.
 
 ## Pitfalls
 
+**cannsim compile/build setup pitfalls (must get right):**
+- `TRITON_ASCEND_ARCH` for compile: MUST be `Ascend910_9589` (not `Ascend950` — the triton libdevice.py validates this and only accepts Ascend910_xxx values)
+- `soc_version` for cannsim_remote_run: MUST be `Ascend950` (cannsim only supports Ascend950, not Ascend910_9589)
+- Must clear triton cache before compile: `shutil.rmtree(os.path.expanduser("~/.triton/cache"), ignore_errors=True)` before `import triton` — otherwise cache hits bypass `TRITON_KERNEL_DUMP` and no .npubin is written
+- Use PID-unique DUMP_DIR: `_triton_dump_<os.getpid()>` pattern to avoid stale hits across runs
+- Binary must be at job root for cannsim: add `cp "$BUILD_DIR/binary" "$SCRIPT_DIR/binary"` in run_kernel.sh after make
+
+- **`run_kernel.sh` must NOT call `conda activate` — the plugin already runs the script inside the right env.**
+  The `cannsim-remote` plugin invokes `run_kernel.sh` via `conda run -n compilerclaw bash run_kernel.sh build`.
+  If the script also calls `conda activate compilerclaw` (or `source conda.sh && conda activate`), the inner
+  activation silently shadows the outer env and `triton` is not found:
+  ```
+  ModuleNotFoundError: No module named 'triton'
+  ```
+  **Fix: the only conda-related line in `run_kernel.sh` should be sourcing CANN:**
+  ```bash
+  # CORRECT — only source CANN, do NOT conda activate:
+  source "$HOME/miniconda3/Ascend/cann/bin/setenv.bash"
+
+  # WRONG — do not add these lines:
+  # source "$HOME/miniconda3/etc/profile.d/conda.sh"
+  # conda activate compilerclaw
+  ```
+
 Handled automatically by the `cannsim-remote` plugin (no action needed when using `cannsim_remote_run`):
 - `-o <dir>` on `cannsim record` — plugin never passes `-o`
 - `conda: command not found` in SSH — plugin finds conda via full path
@@ -415,20 +565,101 @@ Handled automatically by the `cannsim-remote` plugin (no action needed when usin
 - Stale remote job dir — plugin does `rm -rf` before each upload
 - GLIBCXX version mismatch — plugin never uploads pre-built binaries
 - triton patches — plugin auto-applies both patches (idempotent)
+- **CANN 9.0.0 false failure** — cannsim record exits code 1 after a successful simulation because `_cleanup_user_env` calls `os.getcwd()` on a directory it already deleted (`FileNotFoundError`). Plugin detects this via the `current_dir = os.getcwd()` + `FileNotFoundError` + `_cleanup_user_env` + `all tasks are finished!` pattern and auto-recovers by continuing to the report step. Fixed in plugin v2 (June 2026).
+- **Timeout** — with sub-kernel hosts (grid=1, M=BLOCK_M) simulation takes seconds; default 1800s is always sufficient. If you ever run a full-shape host (not recommended), 4096×4096 GEMM takes ~1500s — pass `timeout=3600`.
 
 Kernel/host code pitfalls (still require attention):
-1. `do_issue_vector_instr not support mix task type` — wrong binary magic (`ELF` instead of `ELF_AIVEC`) or Patch 1 not applied
-2. `Cannot open kernel binary` — .npubin must sit next to host binary; use `dirname(argv[0])`
-3. cannsim OOM-killed — camodel needs ≥32 GB RAM; always use `cannsim_remote_run`
-4. `simt` kernels crash — only `parallel_mode = "simd"` is supported
-5. `aclInit failed 500000` — host uses `acl*` APIs; rewrite to `rt*` only
-6. `torch_npu` crashes — `import torch` calls `aclInit` at import time; never import torch in cannsim host scripts
-7. `TRITON_COMPILE_ONLY=1` must NOT be set when running under cannsim
-8. BLOCK_HW=4096 fp32 causes UB overflow → empty kernel (symptom: ~28 cycles, 100% SCALAR)
-9. `num_stages=1` + hoisted `tl.zeros` → scalar div-by-zero crash; use `num_stages=2`
-10. False PASS from zero-initialized output — always use non-zero test data AND add correctness check
+1. **`cache_modifier=".cg"` silently kills compilation** — This CUDA L2-bypass hint causes `triton.compiler.compile()` to produce zero output (no .npubin, no error) on Ascend. Symptom: `_triton_dump/` directory is empty after `compile()` returns without raising. Never use `cache_modifier=".cg"` in Triton kernels targeting Ascend. Drop it unconditionally.
+2. `do_issue_vector_instr not support mix task type` — wrong binary magic (`ELF` instead of `ELF_AIVEC`) or Patch 1 not applied
+3. `Cannot open kernel binary` — .npubin must sit next to host binary; use `dirname(argv[0])`
+4. cannsim OOM-killed — camodel needs ≥32 GB RAM; always use `cannsim_remote_run`
+5. `simt` kernels crash — only `parallel_mode = "simd"` is supported
+6. `aclInit failed 500000` — host uses `acl*` APIs; rewrite to `rt*` only
+7. `torch_npu` crashes — `import torch` calls `aclInit` at import time; never import torch in cannsim host scripts
+8. `TRITON_COMPILE_ONLY=1` must NOT be set when running under cannsim
+9. BLOCK_HW=4096 fp32 causes UB overflow → empty kernel (symptom: ~28 cycles, 100% SCALAR)
+10. `num_stages=1` + hoisted `tl.zeros` → scalar div-by-zero crash; use `num_stages=2`
+11. False PASS from zero-initialized output — always use non-zero test data AND add correctness check
+12. **Sub-kernel buffer sizing** — with M=BLOCK_M, K=2*BLOCK_K, buffers are tiny (e.g. 128×128×4=64KB). If you accidentally allocate full-shape buffers but pass sub-kernel dims, the kernel still works but you waste memory. Size buffers to match the sub-kernel dims exactly.
+13. **Sub-kernel K too small** — K=1*BLOCK_K (only 1 loop iteration) may not show steady-state pipeline overlap between MTE2 and RVECEX. Use K=2*BLOCK_K minimum; use 4*BLOCK_K if overlap is not visible.
+14. **al.multibuffer compilation errors** — `al.multibuffer(tensor, size=2)` is a side-effect hint only. Two common crashes:
+    - `a = al.multibuffer(a, size=2)` then `tl.dot(a, b)` → `AttributeError: NoneType has no attribute 'type'` — multibuffer returns None; reassigning breaks tl.dot
+    - `al.compile_hint(a, "dot_pad_only_k")` AFTER `a = al.multibuffer(a, ...)` → `AttributeError: NoneType has no attribute 'handle'`
+    Fix: call `al.compile_hint` before `al.multibuffer`, and never reassign the multibuffer return.
+15. **1D-grid kernels with GROUP_M swizzle** — if the kernel remaps a 1D program ID to
+    (pid_m, pid_n) using NUM_PID_M/NUM_PID_N args at runtime, set NUM_PID_M=1 and NUM_PID_N=1
+    alongside gridX=1. The swizzle degenerates to tile (0,0), which is correct.
+    Do NOT leave NUM_PID_M/N at full-shape values with gridX=1 — the swizzle will compute
+    out-of-bounds tile indices. The kernel signature must also carry these as i32 args.
+16. The trace_core0.json file contains a full execution trace for all events which is too large of a data dump. So, DO NOT attempt to read that fully into your context. 
+    Instead, run the accompanying aggregation/ summarizing script as below, which will output a condensed summary of the key metrics in a human/LLM readable format.
+    ```bash
+    python scripts/aggregate_trace.py /path/to/trace_core0.json
+    ```
+17. **Existing baseline hosts may have a full-size run PLUS a correctness-check run** — when
+    creating a sub-kernel variant, strip BOTH (the 256x256 correctness check and the full 512x512
+    run) and replace with a single sub-kernel launch that also does its own correctness check.
+    Leaving the 256x256 correctness check in place causes cannsim to simulate that too (256x256
+    grid = 64 programs → much slower than 1-program sub-kernel).
+18. **Sub-kernel K must match between `compile_kernel.py` and the C++ host** — the .npubin is
+    compiled with `EXACT_K: tl.constexpr` baked in (determining the `static_range` trip count).
+    The C++ host's `SUB_K` (e.g. `2 * BLOCK_K`) must equal the `EXACT_K` used at compile time,
+    otherwise the runtime K doesn't match the compiled pipeline depth. Symptom: a 256x256
+    correctness check passes by coincidence but the 1-tile main run produces wrong results, OR
+    the trace shows a completely different per-tile instruction mix than expected. Always
+    define `EXACT_K` and `SUB_K` together in a single source of truth (e.g. a comment block
+    that both files reference) and update both at once.
+19. **`tl.compile_hint` does NOT exist on this triton-ascend** — `triton.language.compile_hint`
+    raises `AttributeError: module 'triton.language' has no attribute 'compile_hint'` at
+    runtime. The real API is `al.compile_hint` from
+    `triton.language.extra.cann.extension`. A common mistake is to add a shim
+    `tl.compile_hint = lambda tensor, hint: tensor` in `compile_kernel.py` (which makes
+    compilation succeed but is a no-op), and the kernel file then crashes when imported
+    outside the compile context. **Always use `al.compile_hint` in the kernel file, and
+    import it: `import triton.language.extra.cann.extension as al`.**
+20. **CMakeLists.txt: `set(ASCEND_PATH $ENV{ASCEND_HOME_PATH}")` — stray closing quote is a
+    parse error** — the existing baseline/CMakeLists.txt had a bug
+    `set(ASCEND_PATH $ENV{ASCEND_HOME_PATH}")` with a stray `"` after `ASCEND_HOME_PATH`.
+    When the env var is set (cannsim-remote always sets it), the if-branch runs and the bug
+    triggers: `CMake Error: Parse error. Function missing ending ')'.` Build fails with the
+    error pointing at line 34 of CMakeLists.txt. Fix: remove the stray quote so the line
+    reads `set(ASCEND_PATH $ENV{ASCEND_HOME_PATH})`. The else-branch (env unset) works
+    because the bug is only on the if-branch line.
+21. **`rtFunctionRegister` KERNEL_NAME mismatch → error `0x7bc78` and segfault** —
+    `rtFunctionRegister(handle, &stub, "name", (void*)"name", 0)` requires the name to
+    match the **Python function name** of the `@triton.jit` kernel you passed to
+    `triton.compiler.ASTSource(fn=...)`. The `.npubin` filename is irrelevant — what
+    matters is the symbol the compiler emitted, which equals the Python `def` name.
+
+    Easy mistake: your compile script does
+    ```python
+    @triton.jit
+    def _scale_kernel_direct(x_ptr, y_ptr, s, n_elements, BLOCK_SIZE: tl.constexpr):
+        ...
+    NPUBIN_DEST = os.path.join(SCRIPT_DIR, "scale_kernel.npubin")  # arbitrary filename
+    ```
+    Then in the C++ host:
+    ```cpp
+    #define KERNEL_NAME "scale_kernel"   # WRONG — this is the .npubin filename
+    rtFunctionRegister(binHandle, &funcStub, KERNEL_NAME, (void*)KERNEL_NAME, 0);
+    ```
+    This compiles and links fine, but the launch fails with `rtFunctionRegister ERROR:
+    0x7bc78`, then a SIGSEGV when cannsim tries to find the symbol. Fix: set
+    `KERNEL_NAME` to the actual `@triton.jit` Python function name
+    (e.g. `"_scale_kernel_direct"`).
+
+    Quick check before launching: search the `.npubin` for symbols:
+    ```bash
+    strings scale_kernel.npubin | grep -i 'kernel\|scale' | head
+    ```
+    The function name appears as a string inside the binary. Match that exactly.
+
+    Rule of thumb: in the C++ host, `#define KERNEL_NAME` to a copy of the Python
+    `def` line, kept in sync across the two files. The `.npubin` filename is just a
+    filename — rename it anything, it doesn't matter.
 
 ## Constraints
+- **Always use a sub-kernel host** — grid=(1,1,1), M=BLOCK_M, K=2×BLOCK_K. Full-shape runs are impractical (minutes to hours). Sub-kernel gives identical bottleneck diagnosis in seconds.
 - Always use `gen_report=True` — cycle counts alone are not actionable
 - Never upload pre-built binaries — always build on remote
 - Only `parallel_mode = "simd"` kernels work in cannsim; simt is broken
@@ -436,7 +667,33 @@ Kernel/host code pitfalls (still require attention):
 
 ---
 
+## Reference Trace Baselines
+
+- **`./references/matmul_baseline_trace_analysis.md`** — Baseline trace for the standard
+  matmul kernel (l1_2) at BLOCK_M/N=32, BLOCK_K=32, sub-kernel M=32/N=32/K=64, grid=1x1x1.
+  wall_cycles=8919. Key findings: CUBE at 7.2% utilization, ST_XD_XN_IMM CRITICAL at
+  593 avg cyc, FLOWCTRL bottleneck via SET_INTRA_BLOCKI. Use as baseline comparison for
+  optimization runs.
+
+- **`./references/matmul_opt_trace_analysis.md`** — Optimized matmul trace (l1_2) at
+  BLOCK_M/N=128, BLOCK_K=32, GROUP_M=4 swizzle, hoisted masks, dot_pad_only_k.
+  Sub-kernel: M=128, N=128, K=64, grid=1x1x1, NUM_PID_M=1, NUM_PID_N=1.
+  wall_cycles=16848 (1.9× more cycles, ~8× more compute → ~8× throughput per tile).
+  CUBE improved to 26.9% of wall. Dominant bottlenecks: SET_INTRA_BLOCKI (1247 avg cyc),
+  WAIT_FLAG_VEC@MTE3 (2488 avg cyc), ST_XD_XN_IMM scalar spill (592 avg cyc, 44418 total).
+  Full comparison table vs baseline inside the file.
+
 ## Complete Working Reference Examples
+
+- **`./templates/compile_kernel_template.py`** — Canonical compile_kernel.py template
+  with all three mandatory setup rules pre-applied: cache clear before import, PID-unique
+  DUMP_DIR, TRITON_ASCEND_ARCH=Ascend910_9589. Copy and replace the kernel definition.
+  Includes a diagnostic error message that lists the checklist on npubin-not-found.
+
+- **`./references/pending_optimization_antipatterns.md`** — Two optimization anti-patterns
+  discovered in l2_8 (June 2026) that need merging into optimization/SKILL.md:
+  (1) Oversized BLOCK_SIZE + mask for small C → STI_XN_IMM scalar spills (fix: constexpr C + no-mask)
+  (2) Additive bias before per-row reduction → separate Add GPU kernel (fix: bias_sum host scalar)
 
 These files are part of this tree and contain full working kernel + host + run-script examples:
 

@@ -1,3 +1,8 @@
+---
+name: orchestration
+description: Ascend Triton operator full-process development orchestration. Use when developing a Triton operator from scratch, performing an end-to-end development process, or unsure which sub-skill to use. Automatically orchestrates all stages.
+---
+
 # Triton Operator Full-Process Development Orchestration [LEAF NODE]
 
 Ascend Triton operator full-process development orchestration. Use when developing a Triton

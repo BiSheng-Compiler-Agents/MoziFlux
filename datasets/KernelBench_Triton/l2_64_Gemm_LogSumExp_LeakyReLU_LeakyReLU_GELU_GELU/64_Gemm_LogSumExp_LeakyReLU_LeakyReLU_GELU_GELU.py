@@ -1,5 +1,8 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def _rowwise_lse_leaky_gelu2(
@@ -48,3 +51,50 @@ def _rowwise_lse_leaky_gelu2(
     # Store result
     y_offs = pid * stride_ym + tl.arange(0, 1)
     tl.store(y_ptr + y_offs, x)
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a matrix multiplication (Gemm), followed by LogSumExp, LeakyReLU, 
+    LeakyReLU, GELU, and GELU activations.
+    """
+    def __init__(self, in_features=1024, out_features=512, bias=True):
+        super(ModelNew, self).__init__()
+        self.linear = nn.Linear(in_features, out_features, bias=bias)
+        self.neg_slope = 0.01
+
+    def forward(self, x):
+        if x.device.type != "npu":
+            raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
+
+        # Gemm using PyTorch linear on NPU
+        x = self.linear(x)
+
+        # Fused row-wise LogSumExp + 2x LeakyReLU + 2x GELU using Triton
+        B, N = x.shape
+        x_c = x.contiguous()
+        y = torch.empty((B, 1), device=x.device, dtype=x.dtype)
+
+        grid = (B,)
+        block_n = min(1024, triton.next_power_of_2(N))
+        _rowwise_lse_leaky_gelu2[grid](
+            x_c,
+            y,
+            x_c.stride(0),
+            x_c.stride(1),
+            y.stride(0),
+            NEG_SLOPE=self.neg_slope,
+            N=N,
+            BLOCK_N=block_n,
+            num_warps=4,
+            num_stages=2,
+        )
+        return y
+batch_size = 1024
+in_features = 8192
+out_features = 8192
+
+def get_inputs():
+    return [torch.rand(batch_size, in_features)]
+def get_init_inputs():
+    return [in_features, out_features]

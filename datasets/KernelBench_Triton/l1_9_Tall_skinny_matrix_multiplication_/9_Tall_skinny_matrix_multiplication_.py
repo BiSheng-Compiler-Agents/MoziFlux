@@ -1,5 +1,10 @@
+import os
+
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
 
 @triton.autotune(
     configs=[
@@ -57,3 +62,83 @@ def _matmul_kernel(
     C_block_ptrs = C_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
     c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
     tl.store(C_block_ptrs, acc, mask=c_mask)
+
+
+def _require_supported_runtime(tensor: torch.Tensor) -> None:
+    if tensor.is_cuda or tensor.device.type == "npu":
+        return
+    if os.environ.get("TRITON_INTERPRET") == "1":
+        return
+    raise RuntimeError(
+        "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1 for Triton interpreter mode."
+    )
+
+
+def _validate_inputs(a: torch.Tensor, b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    if a.ndim != 2 or b.ndim != 2:
+        raise ValueError("ModelNew expects two 2D tensors.")
+    if a.shape[1] != b.shape[0]:
+        raise ValueError(f"Incompatible shapes for matmul: {tuple(a.shape)} and {tuple(b.shape)}.")
+    if a.device != b.device:
+        raise ValueError("Inputs must be on the same device.")
+    if a.dtype != b.dtype:
+        raise ValueError("Inputs must have the same dtype.")
+    if a.dtype not in {torch.float16, torch.bfloat16}:
+        raise TypeError(f"Unsupported dtype for Triton tall-skinny matmul: {a.dtype}.")
+    _require_supported_runtime(a)
+    return a.contiguous(), b.contiguous()
+
+
+def _triton_tall_skinny_matmul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    a, b = _validate_inputs(a, b)
+    m, k = a.shape
+    _, n = b.shape
+    c_acc = torch.empty((m, n), device=a.device, dtype=torch.float32)
+
+    grid = lambda META: (triton.cdiv(m, META["BLOCK_M"]) * triton.cdiv(n, META["BLOCK_N"]),)
+    _matmul_kernel[grid](
+        a,
+        b,
+        c_acc,
+        m,
+        n,
+        k,
+        a.stride(0),
+        a.stride(1),
+        b.stride(0),
+        b.stride(1),
+        c_acc.stride(0),
+        c_acc.stride(1),
+    )
+    return c_acc.to(dtype=a.dtype)
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs a single matrix multiplication (C = A * B) where one of the matrices is tall and skinny (M >> N or N >> M)
+    """
+    def __init__(self):
+        super(ModelNew, self).__init__()
+    
+    def forward(self, A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+        """
+        Performs the matrix multiplication.
+
+        Args:
+            A (torch.Tensor): Input matrix of shape (M, K) or (K, M) where M >> N or N >> M.
+            B (torch.Tensor): Input matrix of shape (K, N) or (N, K) where M >> N or N >> M.
+
+        Returns:
+            torch.Tensor: Output matrix of shape (M, N) or (N, M)
+        """
+        return _triton_tall_skinny_matmul(A, B)
+M = 16384 * 2
+N = 16 * 2
+
+def get_inputs():
+    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    A = torch.rand(M, N, device=device)
+    B = torch.rand(N, M, device=device)
+    return [A, B]
+def get_init_inputs():
+    return []  # No special initialization inputs needed

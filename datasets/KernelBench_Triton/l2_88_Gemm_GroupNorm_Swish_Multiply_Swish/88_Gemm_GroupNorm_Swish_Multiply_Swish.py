@@ -1,5 +1,9 @@
+import math
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def _fused_gn_swish_mul_swish_kernel(
@@ -56,3 +60,90 @@ def _fused_gn_swish_mul_swish_kernel(
     out = y * tl.sigmoid(y)
 
     tl.store(y_ptr + base + c_idx, out, mask=mask)
+
+
+def gemm_groupnorm_swish_multiply_swish(
+    x,
+    linear_weight,
+    linear_bias,
+    norm_weight,
+    norm_bias,
+    multiply_weight,
+    num_groups,
+    eps=1e-5,
+):
+    if x.dim() != 2:
+        raise ValueError("expected `x` to be a 2D tensor")
+    if not hasattr(x, "is_npu") or not x.is_npu:
+        raise ValueError("the Triton entrypoint only supports Ascend NPU tensors")
+
+    x = x.contiguous()
+    linear_weight = linear_weight.contiguous()
+    linear_bias = linear_bias.contiguous()
+    norm_weight = norm_weight.contiguous()
+    norm_bias = norm_bias.contiguous()
+    multiply_weight = multiply_weight.contiguous()
+
+    x = torch.matmul(x, linear_weight.transpose(0, 1)) + linear_bias
+
+    n_rows, channels = x.shape
+    if channels % num_groups != 0:
+        raise ValueError("channels must be divisible by num_groups")
+
+    group_size = channels // num_groups
+    block_size = 1 << (group_size - 1).bit_length()
+    block_size = min(block_size, 1024)
+    num_warps = 2 if block_size <= 64 else 4
+
+    y = torch.empty_like(x)
+    grid = (n_rows * num_groups,)
+    _fused_gn_swish_mul_swish_kernel[grid](
+        x,
+        norm_weight,
+        norm_bias,
+        multiply_weight,
+        y,
+        n_rows,
+        channels,
+        num_groups,
+        group_size,
+        eps,
+        BLOCK_SIZE=block_size,
+        num_warps=num_warps,
+        num_stages=2,
+    )
+    return y
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a GEMM, GroupNorm, Swish, Multiply, and Swish operations.
+    Fused Triton kernel implements: GroupNorm + Swish + Multiply + Swish.
+    """
+    def __init__(self, in_features, out_features, num_groups, multiply_weight_shape):
+        super(ModelNew, self).__init__()
+        self.gemm = nn.Linear(in_features, out_features)
+        self.group_norm = nn.GroupNorm(num_groups, out_features)
+        self.multiply_weight = nn.Parameter(torch.randn(multiply_weight_shape)) 
+
+    def forward(self, x):
+        return gemm_groupnorm_swish_multiply_swish(
+            x,
+            self.gemm.weight,
+            self.gemm.bias,
+            self.group_norm.weight,
+            self.group_norm.bias,
+            self.multiply_weight,
+            self.group_norm.num_groups,
+            self.group_norm.eps,
+        )
+batch_size = 1024
+in_features = 8192
+out_features = 8192
+num_groups = 256
+multiply_weight_shape = (out_features,)
+
+def get_inputs():
+    return [torch.rand(batch_size, in_features)]
+def get_init_inputs():
+    return [in_features, out_features, num_groups, multiply_weight_shape]

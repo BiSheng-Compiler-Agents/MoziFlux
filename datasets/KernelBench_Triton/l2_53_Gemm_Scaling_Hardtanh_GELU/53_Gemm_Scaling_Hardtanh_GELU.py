@@ -1,5 +1,10 @@
+import torch
+import torch.nn as nn
+import torch_npu  # noqa: F401
+
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def _scale_hardtanh_gelu_kernel(
@@ -56,3 +61,80 @@ def _scale_hardtanh_gelu_kernel(
         tl.store(y_ptrs, y)
     else:
         tl.store(y_ptrs, y, mask=mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a GEMM, scaling, hardtanh, and GELU activation.
+    Fuses scale + hardtanh + GELU into a single Triton kernel for speed.
+    """
+    def __init__(
+        self,
+        in_features=1024,
+        out_features=512,
+        scaling_factor=0.5,
+        hardtanh_min=-2.0,
+        hardtanh_max=2.0,
+    ):
+        super(ModelNew, self).__init__()
+        self.gemm = nn.Linear(in_features, out_features)
+        self.scaling_factor = float(scaling_factor)
+        self.hardtanh = nn.Hardtanh(min_val=hardtanh_min, max_val=hardtanh_max)
+        self.gelu = nn.GELU()  # kept for parity with original interface
+
+    def _post_ops_triton(self, y: torch.Tensor) -> torch.Tensor:
+        if y.device.type != "npu":
+            raise RuntimeError("ModelNew expects GEMM outputs on Ascend NPU")
+        rows, cols = y.shape
+        # Ensure contiguous last-dim for coalesced access (Linear output is typically contiguous)
+        if not y.is_contiguous():
+            y = y.contiguous()
+
+        # In-place is safe since computation is elementwise
+        x_ptr = y
+        y_ptr = y
+        stride = y.stride(0)  # elements between consecutive rows
+
+        # Choose tile size to minimize grid overhead and maximize throughput
+        BLOCK_N = 256
+        if cols >= 1024 and (cols % 1024 == 0):
+            BLOCK_N = 1024
+        elif cols >= 512 and (cols % 512 == 0):
+            BLOCK_N = 512
+
+        grid = (rows, triton.cdiv(cols, BLOCK_N))
+        _scale_hardtanh_gelu_kernel[grid](
+            x_ptr, y_ptr,
+            rows, cols,
+            stride, stride,
+            self.scaling_factor,
+            float(self.hardtanh.min_val),
+            float(self.hardtanh.max_val),
+            BLOCK_N=BLOCK_N,
+            num_warps=8 if BLOCK_N >= 512 else 4,
+            num_stages=1,
+        )
+        return y
+
+    def forward(self, x):
+        supported_dtypes = {torch.float16, torch.bfloat16, torch.float32}
+        if x.device.type != "npu":
+            raise RuntimeError("ModelNew expects inputs on Ascend NPU")
+        if x.dtype not in supported_dtypes:
+            raise RuntimeError(f"Unsupported dtype for ModelNew: {x.dtype}")
+        if x.requires_grad:
+            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+
+        y = self.gemm(x)
+        return self._post_ops_triton(y)
+batch_size = 2048
+in_features = 8192
+out_features = 8192
+scaling_factor = 0.5
+hardtanh_min = -2
+hardtanh_max = 2
+
+def get_inputs():
+    return [torch.rand(batch_size, in_features)]
+def get_init_inputs():
+    return [in_features, out_features, scaling_factor, hardtanh_min, hardtanh_max]

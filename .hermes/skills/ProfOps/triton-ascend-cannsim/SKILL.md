@@ -44,6 +44,110 @@ metadata:
 > 4. Apply the fix
 > 5. Re-run `cannsim_remote_run`, compare traces
 
+## ⭐ RULE 1: Always use a sub-kernel host (grid=1, M=BLOCK_M, K=2×BLOCK_K)
+
+> **cannsim simulates every instruction cycle-by-cycle. Simulation time
+> scales linearly with instruction count = grid_size × loop_iters × instr_per_tile.
+> A full-shape 4096×4096 GEMM takes ~1500s. A sub-kernel takes seconds.**
+
+**This is not optional. Never run a full-shape host through cannsim.**
+
+Sub-kernel rules:
+- **grid = (1, 1, 1)** — one block is enough to see the bottleneck
+- **M = BLOCK_M, N = BLOCK_N** (or equivalent tile size) — one tile of data
+- **K = 2×BLOCK_K** (or 4× for steady-state pipelining) — minimum loop iters
+- **BLOCK_M/BLOCK_N/BLOCK_K constexpr values must NOT change** — they're compiled
+  into the .npubin and determine the instruction mix. Only runtime shape args change.
+- Allocate buffers sized for exactly 1 tile (tiny — bytes, not MB)
+
+What is preserved: bottleneck pipeline lane (MTE2/RVECEX/SCALAR/CUBE),
+WAIT_FLAG stall patterns, effect of any code fix, UB overflow symptoms.
+What is lost: absolute cycle count (irrelevant), multi-block L2 cache effects.
+
+**Speedup example**: grid 1024→1, K_iters 128→2 = **65,536× faster**.
+A 1500s run becomes ~0.02s.
+
+**FFTS dispatch savings are invisible at sub-kernel scale.** Persistent/work-stealing
+grid optimizations (reducing program count from N/B → min(N/B, 65535)) will show
+IDENTICAL cycles in the sub-kernel trace for baseline and optimized — because
+both run exactly 1 program. The FFTS benefit (~1,150 cy × saved_programs) is
+purely a dispatch-level effect that requires full-shape hardware to measure.
+Do NOT conclude the optimization failed from an identical sub-kernel trace — the
+trace is still useful for verifying the per-tile instruction mix has not regressed.
+
+### Don't propagate pre-existing full-shape setups
+
+If you find an existing `cannsim_opt/` or similar directory in a previous
+session that uses full-shape (e.g. 4096×4096) launches, **do not copy that
+pattern** into your new v2/v3 setup. The previous session was wrong about that
+too — fix it for your new work, and the new sub-kernel harness is the canonical
+form. Keep the old full-shape dir as a reference if needed, but always author
+new sub-kernel harnesses from scratch following this rule.
+
+### Sub-kernel C++ host pattern
+
+```cpp
+#include "runtime/rt.h"
+
+// Sub-kernel dimensions — override full-shape args with one-tile sizes
+// BLOCK_M/N/K are constexpr compiled into the .npubin — do NOT change them.
+// Only the runtime shape arguments (M, N, K) and gridX change.
+const int BLOCK_M = 128, BLOCK_N = 128, BLOCK_K = 32;  // must match kernel constexprs
+const int M = BLOCK_M;           // one tile row
+const int N = BLOCK_N;           // one tile col
+const int K = 2 * BLOCK_K;       // 2 loop iters (use 4 to see steady-state pipelining)
+const int gridX = 1;             // one block — enough to see bottleneck
+
+size_t sizeA = M * K * sizeof(float);
+size_t sizeB = K * N * sizeof(float);
+size_t sizeC = M * N * sizeof(float);
+
+rtSetDevice(0);
+rtStream_t stream;
+rtStreamCreate(&stream, 0);
+
+// Load npubin — path relative to argv[0] (cannsim changes CWD)
+std::string binPath = std::string(dirname(argv[0])) + "/my_kernel.npubin";
+// ... read file into kernelData ...
+
+rtDevBinary_t devBin;
+devBin.magic  = RT_DEV_BINARY_MAGIC_ELF_AIVEC;
+devBin.data   = kernelData.data();
+devBin.length = kernelData.size();
+void* binHandle = nullptr;
+rtDevBinaryRegister(&devBin, &binHandle);
+
+static size_t funcStub = 0;
+rtFunctionRegister(binHandle, &funcStub, "my_kernel", (void*)"my_kernel", 0);
+
+void *aDev, *bDev, *cDev;
+rtMalloc(&aDev, sizeA, RT_MEMORY_HBM, 0);
+rtMalloc(&bDev, sizeB, RT_MEMORY_HBM, 0);
+rtMalloc(&cDev, sizeC, RT_MEMORY_HBM, 0);
+rtMemcpy(aDev, sizeA, aHost.data(), sizeA, RT_MEMCPY_HOST_TO_DEVICE);
+rtMemcpy(bDev, sizeB, bHost.data(), sizeB, RT_MEMCPY_HOST_TO_DEVICE);
+
+// One launch only — no warmup/repeat loops (each launch multiplies simulation time)
+KernelArgs args = { nullptr, nullptr, aDev, bDev, cDev, M, N, K, gridX, 1, 1 };
+rtKernelLaunch(&funcStub, gridX, &args, sizeof(args), nullptr, stream);
+rtStreamSynchronize(stream);
+
+rtMemcpy(cHost.data(), sizeC, cDev, sizeC, RT_MEMCPY_DEVICE_TO_HOST);
+rtFree(aDev); rtFree(bDev); rtFree(cDev);
+rtStreamDestroy(stream); rtDeviceReset(0);
+```
+
+> **Sub-kernel buffer sizing** — with M=BLOCK_M, K=2*BLOCK_K, buffers are tiny
+> (e.g. 128×128×4=64KB). If you accidentally allocate full-shape buffers but
+> pass sub-kernel dims, the kernel still works but you waste memory. Size
+> buffers to match the sub-kernel dims exactly.
+>
+> **Sub-kernel K too small** — K=1*BLOCK_K (only 1 loop iteration) may not show
+> steady-state pipeline overlap between MTE2 and RVECEX. Use K=2*BLOCK_K
+> minimum; use 4*BLOCK_K if overlap is not visible.
+
+---
+
 ## Prerequisites
 
 | Requirement | Version |
@@ -121,17 +225,26 @@ The script sets the required env vars, compiles the kernel using `triton.compile
 and copies the resulting `.npubin` next to itself (so the C++ host binary can find it):
 
 ```python
-# compile_kernel.py  — placed in local_dir, run on remote by run_kernel.sh
-import os, glob, shutil, pathlib
+import os
+import glob, shutil, pathlib, subprocess
 
-SCRIPT_DIR = str(pathlib.Path(__file__).parent.resolve())
-DUMP_DIR   = os.path.join(SCRIPT_DIR, "_triton_dump")
+SCRIPT_DIR  = str(pathlib.Path(__file__).parent.resolve())
+DUMP_DIR    = os.path.join(SCRIPT_DIR, "_triton_dump_" + str(os.getpid()))
 NPUBIN_DEST = os.path.join(SCRIPT_DIR, "my_kernel.npubin")
 
+# ⚠️ ORDERING CRITICAL: these four env vars MUST be set before `import triton`.
+# Importing triton first causes ERR99999 ("UNKNOWN application exception") and
+# an empty dump dir — no npubin is produced, with no clear error message.
 os.environ["TRITON_KERNEL_DUMP"]  = "1"
 os.environ["TRITON_DUMP_DIR"]     = DUMP_DIR
 os.environ["TRITON_ASCEND_ARCH"]  = "Ascend910_9589"
 os.environ["TRITON_COMPILE_ONLY"] = "1"
+
+# Clear triton cache to force fresh dump (stale cache bypasses TRITON_KERNEL_DUMP)
+import shutil as _shutil
+_cache_dir = os.path.expanduser("~/.triton/cache")
+if os.path.isdir(_cache_dir):
+    _shutil.rmtree(_cache_dir, ignore_errors=True)
 
 import triton
 import triton.language as tl
@@ -147,8 +260,12 @@ compile(
     target=GPUTarget("npu", "Ascend910_9589", 32),
 )
 
-npubin = sorted(glob.glob(os.path.join(DUMP_DIR, "**", "my_kernel.npubin"), recursive=True))[0]
-shutil.copy2(npubin, NPUBIN_DEST)
+npubin = sorted(glob.glob(os.path.join(DUMP_DIR, "**", "my_kernel.npubin"), recursive=True))
+if not npubin:
+    r = subprocess.run(["find", DUMP_DIR, "-type", "f"], capture_output=True, text=True)
+    print(f"[COMPILE] Dump dir contents:\n{r.stdout}")
+    raise FileNotFoundError(f"No npubin found under {DUMP_DIR}")
+shutil.copy2(npubin[0], NPUBIN_DEST)
 print(f"[COMPILE] npubin written to {NPUBIN_DEST}")
 ```
 
@@ -256,12 +373,19 @@ rtFree(xDev); rtStreamDestroy(stream); rtDeviceReset(0);
 if(NOT "$ENV{ASCEND_HOME_PATH}" STREQUAL "")
   set(ASCEND_PATH $ENV{ASCEND_HOME_PATH})
 else()
-  set(ASCEND_PATH "/usr/local/Ascend/cann")
+  set(ASCEND_PATH "$ENV{HOME}/miniconda3/Ascend/cann-9.0.0")
 endif()
 
+# ⚠️ All four subdirs are required — omitting profiling/toolchain causes
+# "prof_common.h: No such file or directory" and blocks compilation.
 include_directories(
   ${ASCEND_PATH}/include
+  ${ASCEND_PATH}/include/aclnn
+  ${ASCEND_PATH}/include/experiment
+  ${ASCEND_PATH}/include/experiment/msprof
   ${ASCEND_PATH}/x86_64-linux/pkg_inc
+  ${ASCEND_PATH}/x86_64-linux/pkg_inc/profiling
+  ${ASCEND_PATH}/x86_64-linux/pkg_inc/toolchain
   ${ASCEND_PATH}/x86_64-linux/pkg_inc/runtime
 )
 
@@ -421,12 +545,13 @@ representative trace. Core 0 is not guaranteed to be representative.
 
 The trace_core0.json file contains a full execution trace for all events, which is too large of a data dump.
 So, DO NOT attempt to read that fully into your context. Instead, run the accompanying aggregation/ summarizing script as below,
-which will output a condensed summary of the key metrics in a human/LLM readable format into a file at the same location named trace_summary.txt
+which will output a condensed summary of the key metrics in a human/LLM readable format.
 ```bash 
-python scripts/aggregate_trace.py /path/to/report/trace_core0.json
+python scripts/aggregate_trace.py /path/to/trace_core0.json
 ```
 
-This will output `/path/to/report/trace_summary.txt`
+Output is written to `/tmp/trace_summary.txt` — always at that fixed path, NOT next to the input file.
+Read /tmp/trace_summary.txt after running the script.
 
 ### Reading the trace summary and information about the Ascend 910_95 / A5-class NPU architecture
 
@@ -561,6 +686,30 @@ Returns: `success`, `job_name`, `remote_job_dir`, `remote_experiment_dir`, `patc
 
 - **Never upload a pre-built binary** — build on the remote instead.
   A binary compiled locally with GCC 13 will not run on a remote with GCC 11.
+
+- **`TRITON_COMPILE_ONLY=1` must be set BEFORE importing triton in compile_kernel.py** — all `os.environ["TRITON_*"]` assignments must appear at the very top of compile_kernel.py, before any `import triton` line. If set after import, the runtime already attempted NPU init and crashes with `ERR99999 UNKNOWN application exception`. Pattern: env vars first → clear `~/.triton/cache` → then `import triton`.
+
+- **`prof_common.h: No such file or directory`** — CMakeLists must include `pkg_inc/profiling` and `pkg_inc/toolchain` in addition to `pkg_inc/runtime`. Required full set:
+  ```cmake
+  include_directories(
+    ${ASCEND_PATH}/include
+    ${ASCEND_PATH}/include/aclnn
+    ${ASCEND_PATH}/include/experiment
+    ${ASCEND_PATH}/include/experiment/msprof
+    ${ASCEND_PATH}/x86_64-linux/pkg_inc
+    ${ASCEND_PATH}/x86_64-linux/pkg_inc/profiling
+    ${ASCEND_PATH}/x86_64-linux/pkg_inc/toolchain
+    ${ASCEND_PATH}/x86_64-linux/pkg_inc/runtime
+  )
+  ```
+  Use `target_link_options(target PRIVATE -Wl,--allow-shlib-undefined)` not the cmake-level flag form.
+  A ready-to-use template is at [`templates/CMakeLists_full_includes.txt`](templates/CMakeLists_full_includes.txt).
+
+- **cannsim report "log_ca not found" + no trace_core0.json** — `instr.bin` and `log_ca/` land at the job root (same directory as the test binary), not inside the `cannsim_<ts>_<binary>/` subdir that cannsim creates. `cannsim report -e <exp_dir>` looks for `log_ca` relative to `<exp_dir>`. If the trace is missing, check that `log_ca/` exists at the job root, and try passing the job root as `-e` instead of the cannsim subdir.
+
+- **`ls | grep cannsim_` is fragile for exp_dir extraction** — `cannsim_host/` also matches. Use `find <job_root> -maxdepth 1 -name 'cannsim_2*' -type d` to isolate the timestamped experiment directory reliably.
+
+- **Large-matrix cannsim is multi-hour** — a 4096×4096 matmul with BLOCK_M/N=32 generates 16384 kernel programs; the simulator runs them serially and requires 400+ min CPU time. For trace/bottleneck analysis, always use the smallest matrix size that exercises the same code path (256×256 or 512×512). Make the C++ host accept a size argument (`argv[1]`) so one binary covers both cannsim trace and full-size correctness checks. Reserve full 4096×4096 runs for real hardware benchmarking.
   Upload C++ source + CMakeLists.txt and build in `run_kernel.sh`:
   ```bash
   if [ ! -f "$SCRIPT_DIR/my_binary" ]; then
@@ -651,7 +800,9 @@ takes care of them:
 4. **cannsim OOM-killed** — camodel needs ≥32 GB RAM. Always use `cannsim_remote_run`
    rather than running cannsim locally.
 
-5. **`simt` kernels crash in cannsim** — only `parallel_mode = "simd"` is supported.
+4. `simt` kernels crash — only `parallel_mode = "simd"` is supported
+10. **CANN 9.0.0 cleanup bug** (handled automatically by plugin): cannsim record exits code 1 after a successful simulation. `_cleanup_user_env` calls `os.getcwd()` on a directory it already deleted → `FileNotFoundError`. The plugin now detects this via `"current_dir = os.getcwd()" + "FileNotFoundError" + "_cleanup_user_env"` in stderr AND `"all tasks are finished!"` in stdout, and continues to the report step. No action needed — just be aware that `success: False` with this pattern is a false negative that is now auto-recovered.
+11. **Timeout for large kernels**: default was 600s; now 1800s. GEMM 4096×4096 takes ~1500s to simulate. If you see a killed/terminated simulation with no `all tasks are finished!` in the log, increase `timeout` further (e.g. 3600s).
 
 6. **`aclInit failed 500000`** — host uses `acl*` APIs. Rewrite to `rt*` only
    and drop `libascendcl.so` from the link step.
@@ -659,10 +810,57 @@ takes care of them:
 7. **`torch_npu` crashes under cannsim** — `import torch` calls `aclInit` at
    import time (error `507008`). Never import torch in cannsim host scripts.
 
-8. **`TRITON_COMPILE_ONLY=1` must NOT be set when running under cannsim** —
+- **`TRITON_COMPILE_ONLY=1` must NOT be set when running under cannsim** —
    `compile_kernel.py` sets it for compilation, but `run_kernel.sh` must NOT
    export it into the environment when launching the host binary. Keep it scoped
    to the `python compile_kernel.py` invocation only.
+
+- **ERR99999 / empty `_triton_dump_*/` dir** — `TRITON_COMPILE_ONLY`, `TRITON_ASCEND_ARCH`,
+   `TRITON_KERNEL_DUMP`, and `TRITON_DUMP_DIR` must all be set as `os.environ[...]`
+   BEFORE any `import triton` line in `compile_kernel.py`. If triton is imported first
+   it initialises the runtime, which then fails without a physical NPU (ERR99999). Symptom:
+   `_triton_dump_<pid>/` exists but is completely empty; `No .npubin found` is raised.
+   Fix: move all four `os.environ` assignments to the very top of the file, before even
+   the cache-clearing `import shutil` block.
+
+- **`prof_common.h: No such file or directory`** — CMakeLists missing include paths.
+   The minimal set that works on CANN 9.0.0 requires all eight paths below; `profiling`
+   and `toolchain` subdirs were absent from earlier templates:
+   ```cmake
+   include_directories(
+     ${ASCEND_PATH}/include
+     ${ASCEND_PATH}/include/aclnn
+     ${ASCEND_PATH}/include/experiment
+     ${ASCEND_PATH}/include/experiment/msprof
+     ${ASCEND_PATH}/x86_64-linux/pkg_inc
+     ${ASCEND_PATH}/x86_64-linux/pkg_inc/profiling
+     ${ASCEND_PATH}/x86_64-linux/pkg_inc/toolchain
+     ${ASCEND_PATH}/x86_64-linux/pkg_inc/runtime
+   )
+   ```
+   Use `target_link_options(target PRIVATE -Wl,--allow-shlib-undefined)` not the cmake-level flag.
+
+- **Large-program-count cannsim timeout** — 4096×4096 matmul with BLOCK_M/N=32 = 16,384
+   programs; the simulator runs each serially and needs 400+ CPU-minutes — it will be
+   killed or timeout. **For trace analysis, always use matrix sizes that keep total
+   programs ≤ 1,024.** Rule of thumb: programs = `(M/BM) × (N/BN)` for 2D grid or
+   `(M*N)/(BM*BN)` for 1D grid. A 4096×4096 kernel with BM=128, BN=128 = 1,024 programs
+   and completes in ~15 min. Accept matrix size as `argv[1]` so one binary covers both
+   cannsim trace (small) and full-size correctness/perf (4096).
+
+- **Existing baseline hosts may have multiple kernel launches** — when creating a sub-kernel
+   variant for cannsim, strip ALL launches (including correctness-check launches at e.g. 256×256)
+   and replace with a single sub-kernel launch. A 256×256 correctness-check grid = 64 programs
+   and is 64× slower than a grid=1 sub-kernel. The sub-kernel launch itself can perform
+   its own correctness check using the small tensor dimensions.
+
+- **Extracting fields from large cannsim_remote_run result files** — the tool writes a single
+   giant JSON line (200KB+) to /tmp/hermes-results/. Python parsing may be blocked in review
+   sessions. Use grep -oP to extract specific fields reliably:
+   ```bash
+   grep -oP '"trace_local_path"\s*:\s*"[^"]*"' /tmp/hermes-results/<result>.txt
+   grep -oP '"cannsim_log_tail"\s*:\s*"[^"\\\\]*(?:\\\\.[^"\\\\]*)*"' /tmp/hermes-results/<result>.txt
+   ```
 
 9. **`rtGetAiCoreCount failed 0x32898`** — `NPUUtils.get_aicore_num()` calls
    `rtGetAiCoreCount` before the simulated device is ready. Fix: patch
