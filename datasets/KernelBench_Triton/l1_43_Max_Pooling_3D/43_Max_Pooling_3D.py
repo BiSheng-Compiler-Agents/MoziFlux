@@ -1,3 +1,7 @@
+import math
+import torch
+import torch.nn as nn
+
 import triton
 import triton.language as tl
 
@@ -102,3 +106,124 @@ def _maxpool3d_fwd_kernel(
         x += dil_w
 
     tl.store(y_ptr + out_idx, acc, mask=mask_ow)
+
+
+def _as_triple(v):
+    if isinstance(v, (tuple, list)):
+        assert len(v) == 3
+        return int(v[0]), int(v[1]), int(v[2])
+    v = int(v)
+    return (v, v, v)
+
+
+def _compute_out_dim(in_size: int, k: int, stride: int, pad: int, dil: int, ceil_mode: bool) -> int:
+    # effective kernel size with dilation
+    eff = dil * (k - 1) + 1
+    if ceil_mode:
+        return max(0, (in_size + 2 * pad - eff + stride) // stride)
+    else:
+        return max(0, (in_size + 2 * pad - eff) // stride + 1)
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs Max Pooling 3D.
+    """
+    def __init__(self, kernel_size: int, stride: int = None, padding: int = 0, dilation: int = 1, return_indices: bool = False, ceil_mode: bool = False):
+        """
+        Initializes the Max Pooling 3D layer.
+        """
+        super(ModelNew, self).__init__()
+        if stride is None:
+            stride = kernel_size
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+        self.return_indices = return_indices
+        self.ceil_mode = ceil_mode
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Applies Max Pooling 3D to the input tensor.
+        """
+        if self.return_indices:
+            raise NotImplementedError("return_indices=True is not supported by the Triton implementation")
+        if self.ceil_mode:
+            raise NotImplementedError("ceil_mode=True is not supported by the Triton implementation")
+        if not x.is_contiguous():
+            raise ValueError("expected a contiguous input tensor")
+        if x.dtype not in (torch.float16, torch.float32):
+            raise TypeError(f"expected float16 or float32 input, got {x.dtype}")
+        if x.device.type != "npu":
+            raise ValueError(f"expected an NPU tensor, got device={x.device}")
+
+        N, C, D, H, W = x.shape
+
+        kD, kH, kW = _as_triple(self.kernel_size)
+        sD, sH, sW = _as_triple(self.stride)
+        pD, pH, pW = _as_triple(self.padding)
+        dD, dH, dW = _as_triple(self.dilation)
+
+        outD = _compute_out_dim(D, kD, sD, pD, dD, self.ceil_mode)
+        outH = _compute_out_dim(H, kH, sH, pH, dH, self.ceil_mode)
+        outW = _compute_out_dim(W, kW, sW, pW, dW, self.ceil_mode)
+
+        if outD == 0 or outH == 0 or outW == 0:
+            return x.new_empty((N, C, outD, outH, outW))
+
+        y = torch.empty((N, C, outD, outH, outW), device=x.device, dtype=x.dtype)
+
+        grid = lambda META: (N * C * outD * outH, triton.cdiv(outW, META["BLOCK_W"]))
+        _maxpool3d_fwd_kernel[grid](
+            x, y,
+            N, C, D, H, W,
+            outD, outH, outW,
+            sD, sH, sW,
+            pD, pH, pW,
+            dD, dH, dW,
+            K_D=kD, K_H=kH, K_W=kW,
+        )
+        return y
+
+
+def max_pool3d(
+    x: torch.Tensor,
+    kernel_size_: int | None = None,
+    stride_: int | None = None,
+    padding_: int | None = None,
+    dilation_: int | None = None,
+    return_indices: bool = False,
+    ceil_mode: bool = False,
+) -> torch.Tensor:
+    if kernel_size_ is None:
+        kernel_size_ = kernel_size
+    if stride_ is None:
+        stride_ = stride
+    if padding_ is None:
+        padding_ = padding
+    if dilation_ is None:
+        dilation_ = dilation
+    return ModelNew(
+        kernel_size=kernel_size_,
+        stride=stride_,
+        padding=padding_,
+        dilation=dilation_,
+        return_indices=return_indices,
+        ceil_mode=ceil_mode,
+    )(x)
+batch_size = 16
+channels = 32
+dim1 = 128
+dim2 = 128
+dim3 = 128
+kernel_size = 3
+stride = 2
+padding = 1
+dilation = 3
+
+def get_inputs():
+    x = torch.rand(batch_size, channels, dim1, dim2, dim3)
+    return [x]
+def get_init_inputs():
+    return [kernel_size, stride, padding, dilation]

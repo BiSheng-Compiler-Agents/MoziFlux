@@ -1,5 +1,17 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
+
+DEFAULT_BATCH_SIZE = 128
+DEFAULT_IN_CHANNELS = 8
+DEFAULT_OUT_CHANNELS = 64
+DEFAULT_DEPTH = 16
+DEFAULT_HEIGHT = 64
+DEFAULT_WIDTH = 64
+DEFAULT_KERNEL_SIZE = 3
+DEFAULT_SUM_TENSOR_SHAPE = (out_channels, 1, 1, 1)
 
 
 @triton.autotune(
@@ -14,12 +26,12 @@ import triton.language as tl
 )
 @triton.jit
 def _fused_post_conv_kernel(
-    x_ptr,  # *float32, input from conv: [N, C, D, H, W] flattened
-    sum_ptr,  # *float32, per-channel bias: [C]
-    y_ptr,  # *float32, output buffer (same shape as x)
-    inner,  # int32, D*H*W
-    C,  # int32, number of channels
-    n_elements,  # int32, total number of elements in x
+    x_ptr,          # *float32, input from conv: [N, C, D, H, W] flattened
+    sum_ptr,        # *float32, per-channel bias: [C]
+    y_ptr,          # *float32, output buffer (same shape as x)
+    inner,          # int32, D*H*W
+    C,              # int32, number of channels
+    n_elements,     # int32, total number of elements in x
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -56,3 +68,53 @@ def _fused_post_conv_kernel(
     gelu = 0.5 * y * (1.0 + erf_t)
 
     tl.store(y_ptr + offsets, gelu, mask=mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a 3D convolution, applies LeakyReLU, sums with a tensor, clamps, and applies GELU activation.
+    Fuses the elementwise ops after convolution into a single Triton kernel for better performance.
+    """
+    def __init__(
+        self,
+        in_channels=DEFAULT_IN_CHANNELS,
+        out_channels=DEFAULT_OUT_CHANNELS,
+        kernel_size=DEFAULT_KERNEL_SIZE,
+        sum_tensor_shape=DEFAULT_SUM_TENSOR_SHAPE,
+    ):
+        super(ModelNew, self).__init__()
+        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size)
+        self.sum_tensor = nn.Parameter(torch.randn(sum_tensor_shape))
+
+    def forward(self, x):
+        # Convolution via PyTorch (cuDNN/cutlass optimized)
+        x = self.conv(x)
+
+        # Fused LeakyReLU -> Add (per-channel) -> Clamp -> GELU via Triton
+        # Shapes
+        N, C, D, H, W = x.shape
+        n_elements = x.numel()
+        inner = D * H * W
+
+        # Ensure contiguous tensors
+        x_contig = x.contiguous()
+        bias = self.sum_tensor.view(C).contiguous()
+        out = torch.empty_like(x_contig)
+
+        grid = lambda META: (triton.cdiv(n_elements, META["BLOCK_SIZE"]),)
+        _fused_post_conv_kernel[grid](
+            x_contig, bias, out,
+            inner, C, n_elements,
+        )
+        return out
+batch_size = 128
+in_channels = 8
+out_channels = 64
+depth, height, width = 16, 64, 64
+kernel_size = 3
+sum_tensor_shape = (out_channels, 1, 1, 1)
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, depth, height, width)]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, sum_tensor_shape]

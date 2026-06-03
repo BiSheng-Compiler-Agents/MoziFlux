@@ -1,3 +1,6 @@
+import torch
+import torch.nn as nn
+import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
@@ -71,3 +74,75 @@ def _fused_gelu_groupnorm_mean_relu(
     mean_row = total * invC
     out_val = tl.maximum(mean_row, 0.0)
     tl.store(out_ptr + pid, out_val)
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a GEMM, BatchNorm, GELU, GroupNorm, Mean, and ReLU operations in sequence.
+    Fuses GELU+GroupNorm+Mean+ReLU with a Triton kernel for improved performance.
+    """
+    def __init__(self, in_features=None, out_features=None, num_groups=None):
+        super(ModelNew, self).__init__()
+        in_features = in_features_default if in_features is None else in_features
+        out_features = out_features_default if out_features is None else out_features
+        num_groups = num_groups_default if num_groups is None else num_groups
+        if out_features % num_groups != 0:
+            raise ValueError("out_features must be divisible by num_groups")
+        self.gemm = nn.Linear(in_features, out_features)
+        self.batch_norm = nn.BatchNorm1d(out_features)
+        self.group_norm = nn.GroupNorm(num_groups, out_features)
+
+    def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_features).
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, 1).
+        """
+        x = self.gemm(x)
+        x = self.batch_norm(x)
+
+        if x.device.type != "npu":
+            raise RuntimeError("ModelNew expects inputs on Ascend NPU")
+        if x.requires_grad:
+            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+
+        N, C = x.shape
+        G = self.group_norm.num_groups
+        if C % G != 0:
+            raise ValueError("out_features must be divisible by num_groups")
+        group_size = C // G
+
+        x_contig = x.contiguous()
+        weight = self.group_norm.weight.contiguous()
+        bias = self.group_norm.bias.contiguous()
+
+        out = torch.empty((N, 1), device=x.device, dtype=x.dtype)
+
+        grid = (N,)
+        _fused_gelu_groupnorm_mean_relu[grid](
+            x_contig,
+            weight,
+            bias,
+            out,
+            C,
+            group_size,
+            EPS=self.group_norm.eps,
+            NUM_GROUPS=G,
+            BLOCK_SIZE=group_size,
+            num_warps=4,
+            num_stages=3,
+        )
+        return out
+
+
+batch_size = 128
+in_features_default = 512
+out_features_default = 1024
+num_groups_default = 8
+
+def get_inputs():
+    return [torch.randn(batch_size, in_features_default, device="npu")]
+
+def get_init_inputs():
+    return [in_features_default, out_features_default, num_groups_default]

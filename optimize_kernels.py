@@ -1,55 +1,44 @@
 """
-optimize_kernels.py — Automated Triton kernel optimization pipeline
+optimize_kernels.py — Thin orchestrator for sandboxed Triton kernel optimization.
 
-Runs the Hermes agent on every kernel in datasets/KernelBench_Triton/,
-producing three files per kernel:
-  1. <N>_<name>.py          — baseline (already exists, must not be modified)
-  2. opt_<N>_<name>.py      — optimized Triton kernel (all shapes)
-  3. profile_kernels.py     — perf_report benchmark vs torch_ref + baseline
-
-The agent uses cannsim for trace-driven optimization and validates correctness
-before writing the final files.
-
-State is tracked in optimize_state.json so interrupted runs can be resumed.
+Uses the kernel-sandbox plugin to enforce workspace boundaries, inject
+per-stage context, and verify deliverables. The plugin handles all
+sandboxing; this script only:
+  1. Discovers kernels
+  2. Creates workspaces with .pipeline_state.json
+  3. Launches the Hermes agent (plugin does the rest)
+  4. Reads final state for reporting
 
 Usage:
-    # Run all pending kernels (resume-safe):
-    python optimize_kernels.py
-
-    # Dry-run: print which kernels would be processed:
-    python optimize_kernels.py --dry-run
-
-    # Process only Level-1 kernels:
-    python optimize_kernels.py --level 1
-
-    # Process only Level-2 kernels:
-    python optimize_kernels.py --level 2
-
-    # Process a single kernel by directory name:
-    python optimize_kernels.py --kernel l2_1_Conv2D_ReLU_BiasAdd
-
-    # Re-run failed kernels (skip completed ones):
-    python optimize_kernels.py --retry-failed
-
-    # Force re-run everything (ignore state):
-    python optimize_kernels.py --force
-
-    # Limit number of kernels to process in this run:
-    python optimize_kernels.py --max 10
-
-    # Control parallelism (default: 1 — sequential):
-    python optimize_kernels.py --workers 2
+    python optimize_kernels.py                          # all pending kernels
+    python optimize_kernels.py --dry-run                # show what would run
+    python optimize_kernels.py --level 1                # only Level-1
+    python optimize_kernels.py --kernel l1_25_Swish     # single kernel
+    python optimize_kernels.py --retry-failed           # re-run failed/incomplete
+    python optimize_kernels.py --force                  # ignore state, re-run all
+    python optimize_kernels.py --max 5                  # limit to N kernels
+    python optimize_kernels.py --workers 2              # parallel (default: 1)
+    python optimize_kernels.py --model openai/gpt-5.5 --provider openrouter
 """
+
 import argparse
 import json
 import logging
+import os
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-# ── Logging ────────────────────────────────────────────────────────────────────
+# ── Hermes env ──────────────────────────────────────────────────────────────
+DEFAULT_HERMES_HOME = os.environ.get("HERMES_HOME", "/opt/data")
+os.environ.setdefault("HERMES_HOME", DEFAULT_HERMES_HOME)
+_PROJECT_DIR = Path(__file__).parent.resolve()
+os.chdir(_PROJECT_DIR)
+sys.path.insert(0, str(_PROJECT_DIR))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-7s  %(message)s",
@@ -57,67 +46,55 @@ logging.basicConfig(
 )
 log = logging.getLogger("optimize_kernels")
 
-# ── Paths ──────────────────────────────────────────────────────────────────────
+# ── Paths ────────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).parent
-DATASET_DIR = ROOT / "datasets" / "KernelBench_Triton"
-STATE_FILE = ROOT / "optimize_state.json"
+DATASET_DIR = Path(
+    os.environ.get("OPTIMIZE_DATASET_DIR",
+                   ROOT / "datasets" / "KernelBench_Triton"))
+STATE_FILE = Path(
+    os.environ.get("OPTIMIZE_STATE_FILE", ROOT / "optimize_state.json"))
 
-# ── Agent config ───────────────────────────────────────────────────────────────
-MODEL = "owl-alpha"
-PROVIDER = "openrouter"
+# ── Agent config ─────────────────────────────────────────────────────────────
+MODEL = os.environ.get("OPTIMIZE_MODEL", "deepseek/deepseek-v4-flash")
+PROVIDER = os.environ.get("OPTIMIZE_PROVIDER", "openrouter")
+MAX_ITERATIONS = int(os.environ.get("OPTIMIZE_MAX_ITERATIONS", "90"))
 
-# ── Per-kernel task prompt ─────────────────────────────────────────────────────
+# Max times we re-invoke the agent to drive the pipeline forward within one
+# kernel. The agent's single run_conversation call ends its turn whenever it
+# stops emitting tool calls — which can leave the pipeline parked mid-stage
+# (e.g. at "verify" after deliverables are written but before remote_verify is
+# run). We re-enter the conversation with a continuation nudge until the
+# pipeline reaches "done" or stalls (no stage progress between turns).
+MAX_PIPELINE_TURNS = int(os.environ.get("OPTIMIZE_MAX_PIPELINE_TURNS", "6"))
+
+# Continuation prompt for re-entering a parked pipeline. The kernel-sandbox
+# pre_llm_call hook injects the authoritative stage instructions; this just
+# tells the agent to act on them.
+CONTINUE_PROMPT = (
+    "Your pipeline is not yet DONE. Read the STAGE and TASK in the sandbox "
+    "context above and perform the next required action now (do not just "
+    "report status). If the stage is VERIFY, run the verification tool the "
+    "context names. Continue until the pipeline reaches the 'done' stage.")
+
+# ── Per-kernel task prompt (plugin injects workspace + stage context) ───────
 TASK_PROMPT = """
-Optimize the Triton kernel in the directory: {kernel_dir}
+Optimize the Triton kernel in this directory.
 
-The baseline kernel file is: {baseline_file}
+Required deliverables (all 5 must be produced):
+1. opt_<baseline>.py       — Optimized kernel + ModelNew host interface
+2. profile_kernels.py       — @perf_report benchmark, all dispatch paths, unit test
+3. Optimizations.md         — Each optimization applied, with code snippets and rationale
+4. performance_report.md    — cannsim trace tables (baseline vs optimized), hardware latency
+5. review.md                — Static P0/P1/P2 review of the optimized kernel
 
-Follow this exact workflow:
-
-1. READ the baseline kernel file carefully. Understand:
-   - Every parameter in the @triton.jit signature (never assume params exist)
-   - What shapes N/C/H/W (or equivalent) the kernel must handle
-   - What the kernel computes
-
-2. PROFILE the baseline with cannsim (-g flag) to get trace_core0.json.
-   Use the cannsim_remote plugin. Test at least:
-   - One small spatial shape
-   - One large spatial shape
-   - One non-power-of-2 dimension if applicable
-
-3. ANALYZE the trace. Identify the top bottlenecks (SCALAR%, SCALARLDST%,
-   WAIT_FLAG stalls, VEC unit usage vs RVECEX, UB overflow, FFTS dispatch
-   overhead from too many programs).
-
-4. WRITE opt_{baseline_filename} in the same directory with:
-   - Optimizations validated by trace data (not guessed)
-   - Coverage of ALL shapes the kernel signature accepts
-   - Correctness verified by cannsim [PASS]
-
-5. WRITE profile_kernels.py in the same directory following the
-   triton-ascend-kernel-profiling skill exactly:
-   - Load kernels via importlib (never copy-paste code)
-   - @triton.testing.perf_report decorator
-   - styles=[("blue", "-"), ("red", "-"), ("green", "-")]
-   - ylabel="Latency (ms)"
-   - do_bench returns seconds — no * 1e3
-   - Grid overflow guard: if N*C*H > 65535, chunk over N
-   - Unit test with atol=1e-2, rtol=1e-2 for fp16
-   - Shapes covering all dispatch paths of the optimized kernel
-
-6. RECORD an episode in kernel-episode-memory with all findings.
-
-The kernel directory is: {kernel_dir}
-The baseline file is: {baseline_file}
-
-Do not modify the baseline file. Write only opt_* and profile_kernels.py.
+Use cannsim_local_run to simulate the kernel and get trace data.
+Use kernel_status to check your pipeline state and mark stages complete.
 """
 
-# ── State management ───────────────────────────────────────────────────────────
+# ── State management (orchestrator-level, separate from plugin state) ────────
 
 
 def load_state() -> dict:
-    """Load optimization state from JSON, or return empty state."""
     if STATE_FILE.exists():
         with open(STATE_FILE) as f:
             return json.load(f)
@@ -125,33 +102,27 @@ def load_state() -> dict:
 
 
 def save_state(state: dict) -> None:
-    """Atomically save state to JSON."""
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE_FILE.with_suffix(".tmp")
     with open(tmp, "w") as f:
         json.dump(state, f, indent=2)
     tmp.replace(STATE_FILE)
 
 
-def mark_kernel(state: dict,
-                kernel_name: str,
-                status: str,
-                detail: str = "",
-                files: list = None) -> None:
-    """Update a kernel's status in the state dict and save."""
-    state["kernels"][kernel_name] = {
+def mark_kernel(state: dict, name: str, status: str, detail: str = "") -> None:
+    state["kernels"][name] = {
         "status": status,
         "detail": detail,
-        "files": files or [],
+        "model": MODEL,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     save_state(state)
 
 
-# ── Kernel discovery ───────────────────────────────────────────────────────────
+# ── Kernel discovery ────────────────────────────────────────────────────────
 
 
 def discover_kernels(level: int = None) -> list[Path]:
-    """Return sorted list of kernel directories, optionally filtered by level."""
     dirs = sorted(d for d in DATASET_DIR.iterdir() if d.is_dir())
     if level is not None:
         dirs = [d for d in dirs if d.name.startswith(f"l{level}_")]
@@ -159,43 +130,87 @@ def discover_kernels(level: int = None) -> list[Path]:
 
 
 def get_baseline_file(kernel_dir: Path) -> Path | None:
-    """Find the baseline .py file (not opt_*, not profile_*)."""
-    candidates = [
+    """Return the agent-readable kernel file (<Number>_<name>.py), or None.
+
+    base_*.py files are read-only references and must NOT be selected here.
+    """
+    all_py = [
         f for f in kernel_dir.glob("*.py")
-        if not f.name.startswith("opt_") and "profile" not in f.name.lower()
+        if not f.name.startswith("opt_") and not f.name.startswith("base_")
+        and "profile" not in f.name.lower() and not f.name.startswith(".")
     ]
-    return candidates[0] if len(candidates) == 1 else None
+    candidates = [f for f in all_py if re.match(r"^\d+_.+\.py$", f.name)]
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
 
 
 def kernel_is_complete(kernel_dir: Path) -> tuple[bool, list[str]]:
-    """
-    Check whether a kernel directory has all three required files.
-    Returns (is_complete, list_of_missing_files).
-    """
-    files = [f.name for f in kernel_dir.glob("*.py")]
+    """Check that all required optimization deliverables are present."""
+    py_files = {f.name for f in kernel_dir.glob("*.py")}
+    all_files = {f.name for f in kernel_dir.iterdir() if f.is_file()}
     missing = []
-
-    has_opt = any(f.startswith("opt_") for f in files)
-    has_profile = any("profile" in f.lower() for f in files)
-
-    if not has_opt:
+    if not any(f.startswith("opt_") for f in py_files):
         missing.append("opt_*.py")
-    if not has_profile:
+    if "profile_kernels.py" not in py_files:
         missing.append("profile_kernels.py")
-
+    for name in ("Optimizations.md", "performance_report.md", "review.md",
+                 "results.txt"):
+        if name not in all_files:
+            missing.append(name)
     return len(missing) == 0, missing
 
 
-# ── Per-kernel optimization via Hermes agent ───────────────────────────────────
+# ── Workspace setup ──────────────────────────────────────────────────────────
+
+
+def setup_workspace(kernel_dir: Path, state: dict) -> bool:
+    """
+    Ensure the kernel directory has a .pipeline_state.json.
+    Returns True if ready to run.
+    """
+    baseline = get_baseline_file(kernel_dir)
+    if baseline is None:
+        log.warning("  ✗ %s — cannot find unique baseline file",
+                    kernel_dir.name)
+        mark_kernel(state, kernel_dir.name, "failed",
+                    "no unique baseline file")
+        return False
+
+    sf = kernel_dir / ".pipeline_state.json"
+    if not sf.exists():
+        pipeline_state = {
+            "baseline":
+            baseline.name,
+            "current_stage":
+            "optimize",
+            "stages_completed": [],
+            "deliverables_complete":
+            False,
+            "deliverables_missing": [
+                "opt_*.py", "profile_kernels.py", "Optimizations.md",
+                "performance_report.md", "review.md"
+            ],
+            "turn_count":
+            0,
+            "created_at":
+            datetime.now(timezone.utc).isoformat(),
+        }
+        with open(sf, "w") as f:
+            json.dump(pipeline_state, f, indent=2)
+        log.info("  Initialized .pipeline_state.json for %s", kernel_dir.name)
+
+    return True
+
+
+# ── Per-kernel optimization ──────────────────────────────────────────────────
 
 
 def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
     """
     Run the Hermes agent on a single kernel directory.
-
-    Returns a result dict:
-      { "kernel": name, "status": "done"|"failed"|"skipped",
-        "detail": str, "files": [str], "elapsed_s": float }
+    The kernel-sandbox plugin handles all sandboxing, context injection,
+    and deliverable verification via hooks.
     """
     from run_agent import AIAgent
 
@@ -203,62 +218,74 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
     log.info("▶ Starting %s", name)
     t0 = time.time()
 
-    # Check if already complete on disk (regardless of state file)
-    complete, missing = kernel_is_complete(kernel_dir)
-    if complete:
-        log.info("  ✓ %s already complete (skipping)", name)
-        mark_kernel(state,
-                    name,
-                    "done",
-                    "already complete on disk",
-                    files=[f.name for f in kernel_dir.glob("*.py")])
-        return {
-            "kernel": name,
-            "status": "skipped",
-            "detail": "already complete",
-            "files": [],
-            "elapsed_s": 0.0
-        }
-
-    baseline = get_baseline_file(kernel_dir)
-    if baseline is None:
-        log.warning("  ✗ %s — cannot find unique baseline file", name)
-        mark_kernel(state, name, "failed", "no unique baseline file found")
+    # Setup workspace (creates .pipeline_state.json if needed)
+    if not setup_workspace(kernel_dir, state):
         return {
             "kernel": name,
             "status": "failed",
-            "detail": "no unique baseline file found",
-            "files": [],
-            "elapsed_s": time.time() - t0
+            "detail": "workspace setup failed",
+            "elapsed_s": 0.0
         }
 
-    prompt = TASK_PROMPT.format(
-        kernel_dir=str(kernel_dir),
-        baseline_file=str(baseline),
-        baseline_filename=baseline.name,
-    )
+    prompt = TASK_PROMPT.strip()
 
     agent = AIAgent(
         model=MODEL,
         provider=PROVIDER,
         quiet_mode=True,
-        # Each kernel gets its own isolated task_id so tool calls,
-        # working directories and sessions don't bleed across kernels.
+        enabled_toolsets=["hermes-cli", "triton_ascend"],
         session_id=f"kernelbench-{name}",
-        max_iterations=90,
-        save_trajectories=True)
+        max_iterations=MAX_ITERATIONS,
+        save_trajectories=True,
+    )
 
     try:
         mark_kernel(state, name, "running",
                     f"started {datetime.now(timezone.utc).isoformat()}")
-        result = agent.run_conversation(  # noqa: F841
-            user_message=prompt,
-            task_id=f"kernelbench-{name}",
-        )
 
-        # Fire phoenix_tracer on_session_finalize to close root span and flush.
-        # conversation_loop.py fires on_session_end but never on_session_finalize,
-        # so the root hermes.session span would stay open forever without this.
+        sf = kernel_dir / ".pipeline_state.json"
+
+        def _read_stage() -> str:
+            if sf.exists():
+                try:
+                    with open(sf) as f:
+                        return json.load(f).get("current_stage", "unknown")
+                except (json.JSONDecodeError, OSError):
+                    pass
+            return "unknown"
+
+        # Drive the pipeline forward across multiple turns. The agent often ends
+        # its turn with the pipeline parked mid-stage (deliverables written but
+        # verification not run). We re-enter the same conversation, feeding the
+        # message history back, until the pipeline reaches "done" or stalls.
+        result = {}
+        history = None
+        msg = prompt
+        prev_stage = None
+        for turn in range(1, MAX_PIPELINE_TURNS + 1):
+            result = agent.run_conversation(
+                user_message=msg,
+                conversation_history=history,
+                task_id=f"kernelbench-{name}",
+            )
+            history = result.get("messages")
+            stage = _read_stage()
+            log.info("  %s turn %d → stage=%s", name, turn, stage)
+
+            if stage == "done":
+                break
+            # Stall guard: if the agent made no stage progress this turn (and it
+            # isn't the very first optimize turn that still needs deliverables),
+            # don't keep burning identical turns.
+            if stage == prev_stage and turn > 1:
+                log.warning(
+                    "  %s stalled at stage=%s after turn %d — stopping", name,
+                    stage, turn)
+                break
+            prev_stage = stage
+            msg = CONTINUE_PROMPT
+
+        # Fire on_session_finalize for the plugin
         try:
             from hermes_cli.plugins import invoke_hook
             invoke_hook("on_session_finalize",
@@ -267,35 +294,70 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
         except Exception:
             pass
 
-        # Verify the expected files now exist on disk
-        complete_after, missing_after = kernel_is_complete(kernel_dir)
         elapsed = time.time() - t0
 
-        if complete_after:
-            files = [f.name for f in kernel_dir.glob("*.py")]
-            log.info("  ✓ %s done (%.0fs, %d files)", name, elapsed,
-                     len(files))
-            mark_kernel(state,
-                        name,
-                        "done",
-                        detail=f"elapsed {elapsed:.0f}s",
-                        files=files)
+        # Read the plugin's pipeline state for reporting
+        pipeline_state = {}
+        if sf.exists():
+            with open(sf) as f:
+                pipeline_state = json.load(f)
+
+        current_stage = pipeline_state.get("current_stage", "unknown")
+        complete = pipeline_state.get("deliverables_complete", False)
+        missing = pipeline_state.get("deliverables_missing", [])
+        verified = pipeline_state.get("verified", False)
+        turns = pipeline_state.get("turn_count", 0)
+
+        log.info(
+            "  %s done — stage=%s complete=%s verified=%s turns=%d elapsed=%.0fs",
+            name,
+            current_stage,
+            complete,
+            verified,
+            turns,
+            elapsed,
+        )
+
+        if current_stage == "done":
+            mark_kernel(
+                state,
+                name,
+                "done",
+                detail=
+                f"stage={current_stage} turns={turns} elapsed={elapsed:.0f}s")
             return {
                 "kernel": name,
                 "status": "done",
-                "detail": f"elapsed {elapsed:.0f}s",
-                "files": files,
+                "detail": f"complete in {elapsed:.0f}s",
                 "elapsed_s": elapsed
             }
-        else:
-            detail = f"agent finished but missing: {missing_after}"
-            log.warning("  ⚠ %s incomplete — %s", name, detail)
-            mark_kernel(state, name, "incomplete", detail)
+        elif not complete:
+            mark_kernel(state,
+                        name,
+                        "incomplete",
+                        detail=f"stage={current_stage} missing={missing}")
             return {
                 "kernel": name,
                 "status": "incomplete",
-                "detail": detail,
-                "files": [],
+                "detail": f"missing: {missing}",
+                "elapsed_s": elapsed
+            }
+        else:
+            # Deliverables exist but the pipeline never reached "done" — most
+            # commonly stuck at "verify" because verification was not run/passed.
+            # This is NOT a success: report it as unverified so it can be retried,
+            # rather than silently marking it done.
+            mark_kernel(
+                state,
+                name,
+                "unverified",
+                detail=
+                f"stage={current_stage} verified={verified} turns={turns}")
+            return {
+                "kernel": name,
+                "status": "unverified",
+                "detail":
+                f"deliverables complete but stage={current_stage} (not verified)",
                 "elapsed_s": elapsed
             }
 
@@ -307,19 +369,17 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
             "kernel": name,
             "status": "failed",
             "detail": str(e),
-            "files": [],
             "elapsed_s": elapsed
         }
 
 
-# ── Summary printing ───────────────────────────────────────────────────────────
+# ── Summary ─────────────────────────────────────────────────────────────────
 
 
 def print_summary(results: list[dict], state: dict) -> None:
-    """Print a final run summary and overall state tallies."""
     done = [r for r in results if r["status"] == "done"]
-    skipped = [r for r in results if r["status"] == "skipped"]
     incomplete = [r for r in results if r["status"] == "incomplete"]
+    unverified = [r for r in results if r["status"] == "unverified"]
     failed = [r for r in results if r["status"] == "failed"]
 
     print()
@@ -327,13 +387,19 @@ def print_summary(results: list[dict], state: dict) -> None:
     print("RUN SUMMARY")
     print("=" * 60)
     print(f"  Done:       {len(done)}")
-    print(f"  Skipped:    {len(skipped)}")
+    print(f"  Unverified: {len(unverified)}")
     print(f"  Incomplete: {len(incomplete)}")
     print(f"  Failed:     {len(failed)}")
     print()
 
+    if unverified:
+        print("Unverified (deliverables present but pipeline not done):")
+        for r in unverified:
+            print(f"  {r['kernel']}: {r['detail']}")
+        print()
+
     if incomplete:
-        print("Incomplete (missing files):")
+        print("Incomplete:")
         for r in incomplete:
             print(f"  {r['kernel']}: {r['detail']}")
         print()
@@ -344,56 +410,56 @@ def print_summary(results: list[dict], state: dict) -> None:
             print(f"  {r['kernel']}: {r['detail']}")
         print()
 
-    # Overall state tally
     counts: dict[str, int] = {}
     for info in state["kernels"].values():
         s = info["status"]
         counts[s] = counts.get(s, 0) + 1
 
-    print("OVERALL STATE (all kernels ever attempted):")
+    print("OVERALL STATE:")
     for s, c in sorted(counts.items()):
         print(f"  {s:<12} {c}")
     print(f"\nState file: {STATE_FILE}")
 
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+# ── Main ────────────────────────────────────────────────────────────────────
 
 
 def main():
+    global DATASET_DIR, STATE_FILE, MODEL, PROVIDER, MAX_ITERATIONS, MAX_PIPELINE_TURNS
+
     parser = argparse.ArgumentParser(
-        description=
-        "Automated Triton kernel optimization pipeline via Hermes agent")
-    parser.add_argument("--dry-run",
-                        action="store_true",
-                        help="Print which kernels would be processed and exit")
-    parser.add_argument("--level",
+        description="Sandboxed Triton kernel optimization pipeline")
+    parser.add_argument("--dataset-dir", type=Path, default=DATASET_DIR)
+    parser.add_argument("--state-file", type=Path, default=STATE_FILE)
+    parser.add_argument("--hermes-home",
+                        type=Path,
+                        default=Path(DEFAULT_HERMES_HOME))
+    parser.add_argument("--model", type=str, default=MODEL)
+    parser.add_argument("--provider", type=str, default=PROVIDER)
+    parser.add_argument("--max-iterations", type=int, default=MAX_ITERATIONS)
+    parser.add_argument("--max-pipeline-turns",
                         type=int,
-                        choices=[1, 2],
-                        help="Process only Level-1 or Level-2 kernels")
-    parser.add_argument("--kernel",
-                        type=str,
-                        help="Process a single kernel by directory name")
-    parser.add_argument(
-        "--retry-failed",
-        action="store_true",
-        help="Re-run kernels marked failed or incomplete in state")
-    parser.add_argument("--force",
-                        action="store_true",
-                        help="Re-run all kernels, ignoring state")
-    parser.add_argument(
-        "--max",
-        type=int,
-        default=None,
-        help="Maximum number of kernels to process in this run")
-    parser.add_argument("--workers",
-                        type=int,
-                        default=1,
-                        help="Number of parallel workers (default: 1)")
+                        default=MAX_PIPELINE_TURNS)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--level", type=int, choices=[1, 2])
+    parser.add_argument("--kernel", type=str)
+    parser.add_argument("--retry-failed", action="store_true")
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--max", type=int, default=None)
+    parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
+
+    DATASET_DIR = args.dataset_dir
+    STATE_FILE = args.state_file
+    MODEL = args.model
+    PROVIDER = args.provider
+    MAX_ITERATIONS = args.max_iterations
+    MAX_PIPELINE_TURNS = args.max_pipeline_turns
+    os.environ["HERMES_HOME"] = str(args.hermes_home)
 
     state = load_state()
 
-    # ── Discover kernels ──────────────────────────────────────────────────────
+    # ── Discover kernels ──────────────────────────────────────────────────
     if args.kernel:
         dirs = [DATASET_DIR / args.kernel]
         if not dirs[0].is_dir():
@@ -402,30 +468,36 @@ def main():
     else:
         dirs = discover_kernels(level=args.level)
 
-    # ── Filter based on state + flags ─────────────────────────────────────────
+    # ── Filter based on state + flags ─────────────────────────────────────
     to_process = []
     for d in dirs:
         name = d.name
-        # --force: include everything
         if args.force:
             to_process.append(d)
             continue
-        # Already done on disk → always skip
         complete, _ = kernel_is_complete(d)
-        if complete:
+        # Files present is NOT sufficient — the pipeline must have reached the
+        # "done" stage (i.e. verified). A kernel parked at "verify" has all its
+        # deliverable files but was never validated, so it must NOT be skipped.
+        pstate_file = d / ".pipeline_state.json"
+        pstage = "unknown"
+        if pstate_file.exists():
+            try:
+                with open(pstate_file) as pf:
+                    pstage = json.load(pf).get("current_stage", "unknown")
+            except (json.JSONDecodeError, OSError):
+                pass
+        if complete and pstage == "done":
             continue
-        # Check state
-        existing = state["kernels"].get(name, {})
-        existing_status = existing.get("status", "pending")
-        if existing_status == "done":
-            # State says done but files are missing → re-run
+        existing = state["kernels"].get(name, {}).get("status", "pending")
+        if existing == "done":
+            to_process.append(d)  # state says done but files missing → re-run
+        elif existing in ("failed", "incomplete",
+                          "unverified") and args.retry_failed:
             to_process.append(d)
-        elif existing_status in ("failed", "incomplete") and args.retry_failed:
+        elif existing in ("pending", "running", ""):
             to_process.append(d)
-        elif existing_status in ("pending", "running", ""):
-            to_process.append(d)
-        elif existing_status not in ("done", ):
-            # running/unknown → include by default
+        elif existing != "done":
             to_process.append(d)
 
     if args.max:
@@ -445,17 +517,15 @@ def main():
         print_summary([], state)
         return
 
-    # ── Run ───────────────────────────────────────────────────────────────────
+    # ── Run ───────────────────────────────────────────────────────────────
     results = []
     t_start = time.time()
 
     if args.workers == 1:
-        # Sequential — simplest, avoids any thread-safety concerns with AIAgent
         for kernel_dir in to_process:
             r = optimize_kernel(kernel_dir, state)
             results.append(r)
     else:
-        # Parallel — each worker creates its own AIAgent instance
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
             futures = {
                 pool.submit(optimize_kernel, d, state): d
@@ -463,8 +533,7 @@ def main():
             }
             for fut in as_completed(futures):
                 try:
-                    r = fut.result()
-                    results.append(r)
+                    results.append(fut.result())
                 except Exception as e:
                     d = futures[fut]
                     log.error("Unexpected error for %s: %s", d.name, e)
@@ -472,7 +541,6 @@ def main():
                         "kernel": d.name,
                         "status": "failed",
                         "detail": str(e),
-                        "files": [],
                         "elapsed_s": 0.0
                     })
 

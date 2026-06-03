@@ -1,0 +1,16 @@
+=== Unit Test: l1_19_ReLU ===
+  N=1024                        baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=0.00e+00 maxDelta_base2=0.00e+00  maxDelta_opt=0.00e+00
+  N=65536                       baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=0.00e+00 maxDelta_base2=0.00e+00  maxDelta_opt=0.00e+00
+  N=524288                      baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=0.00e+00 maxDelta_base2=0.00e+00  maxDelta_opt=0.00e+00
+  N=4M                          baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=0.00e+00 maxDelta_base2=0.00e+00  maxDelta_opt=0.00e+00
+  N=100                         baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=0.00e+00 maxDelta_base2=0.00e+00  maxDelta_opt=0.00e+00
+  N=4097                        baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=0.00e+00 maxDelta_base2=0.00e+00  maxDelta_opt=0.00e+00
+All shapes PASSED
+relu_perf:
+                 label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0               N=1024       0.001498          0.117893          0.056097          0.081216
+1              N=65536       0.002107          0.120185          0.057751          0.082493
+2             N=524288       0.003444          0.118461          0.056897          0.083998
+3                 N=4M       0.016635          0.119499          0.057283          0.079463
+4                N=16M       0.071018          0.295975          0.088507          0.102612
+5  N=bench-4096x393216       4.501933         14.638434          5.525115          5.658935

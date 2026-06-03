@@ -1,3 +1,6 @@
+import torch
+import torch.nn as nn
+import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
@@ -59,3 +62,103 @@ def fused_bias_act_gn_kernel(
     y = y * gamma + beta
 
     tl.store(out_ptr + idx, y.to(x.dtype), mask=mask)
+
+
+def _next_power_of_2(x: int) -> int:
+    if x <= 1:
+        return 1
+    return 1 << (x - 1).bit_length()
+
+
+batch_size = 128
+in_features = 512
+out_features = 1024
+bias_shape = (out_features,)
+num_groups = 32
+
+
+class ModelNew(nn.Module):
+    """
+    A model that performs a GEMM, BiasAdd, Hardtanh, Mish, and GroupNorm operations in sequence.
+    """
+    def __init__(
+        self,
+        in_features=in_features,
+        out_features=out_features,
+        bias_shape=bias_shape,
+        num_groups=num_groups,
+    ):
+        super(ModelNew, self).__init__()
+        if out_features % num_groups != 0:
+            raise ValueError("out_features must be divisible by num_groups")
+        self.gemm = nn.Linear(in_features, out_features)
+        self.bias = nn.Parameter(torch.randn(bias_shape))
+        self.hardtanh = nn.Hardtanh()
+        self.mish = nn.Mish()
+        self.groupnorm = nn.GroupNorm(num_groups=num_groups, num_channels=out_features)
+
+    def _fused_post_gemm(self, y: torch.Tensor) -> torch.Tensor | None:
+        # Fused BiasAdd -> Hardtanh -> Mish -> GroupNorm using Triton
+        N, C = y.shape
+        G = self.groupnorm.num_groups
+        if (C % G) != 0:
+            raise RuntimeError("Channels must be divisible by num_groups for GroupNorm.")
+        GROUP_SIZE = C // G
+        if GROUP_SIZE > 256:
+            raise RuntimeError("GROUP_SIZE > 256 is not supported by the fused Triton path.")
+
+        # Ensure contiguity
+        y_in = y.contiguous()
+        extra_bias = self.bias.contiguous()
+        gamma = self.groupnorm.weight.contiguous()
+        beta = self.groupnorm.bias.contiguous()
+        eps = float(self.groupnorm.eps)
+
+        out = torch.empty_like(y_in)
+
+        # Choose an efficient block size (power-of-two, capped)
+        BLOCK_SIZE = _next_power_of_2(GROUP_SIZE)
+        BLOCK_SIZE = min(max(BLOCK_SIZE, 32), 256)
+        # Prefer fewer warps for small groups to reduce overhead
+        if BLOCK_SIZE <= 32:
+            num_warps = 1
+        elif BLOCK_SIZE <= 64:
+            num_warps = 2
+        else:
+            num_warps = 4
+
+        grid = (N * G,)
+
+        fused_bias_act_gn_kernel[grid](
+            y_in, extra_bias, gamma, beta, out,
+            N, C, G, GROUP_SIZE, eps,
+            BLOCK_SIZE=BLOCK_SIZE,
+            num_warps=num_warps,
+            num_stages=2,
+        )
+        return out
+
+    def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_features).
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, out_features).
+        """
+        if x.device.type != "npu":
+            raise RuntimeError("ModelNew expects Ascend NPU inputs.")
+        if not self.groupnorm.affine:
+            raise RuntimeError("ModelNew requires affine GroupNorm parameters.")
+
+        y = self.gemm(x)
+        return self._fused_post_gemm(y)
+batch_size = 1024
+in_features = 8192
+out_features = 8192
+bias_shape = (out_features,)
+num_groups = 256
+
+def get_inputs():
+    return [torch.rand(batch_size, in_features)]
+def get_init_inputs():
+    return [in_features, out_features, bias_shape, num_groups]

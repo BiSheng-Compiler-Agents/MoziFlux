@@ -1,0 +1,13 @@
+============================================================
+UNIT TEST — correctness vs torch_ref (pure PyTorch)
+============================================================
+  M128-K256-N256                baseline1 [PASS] maxΔ=1.46e-03  baseline2 [PASS] maxΔ=1.46e-03  optimized [FAIL] maxΔ=1.09e+00
+  M256-K512-N512                baseline1 [PASS] maxΔ=1.95e-03  baseline2 [PASS] maxΔ=1.95e-03  optimized [FAIL] maxΔ=1.03e+00
+  M512-K1024-N1024              baseline1 [PASS] maxΔ=1.46e-03  baseline2 [PASS] maxΔ=1.46e-03  optimized [FAIL] maxΔ=1.89e+00
+
+RESULT: FAIL — some kernels produced incorrect output.
+l2_9_Matmul_Sub_Mul_ReLU_perf:
+              label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    M128-K256-N256       0.040319          0.114191          0.103826          0.143451
+1    M256-K512-N512       0.064173          0.130514          0.132008          0.140099
+2  M512-K1024-N1024       0.061820          0.148806          0.160608          0.146999

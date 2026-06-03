@@ -1,29 +1,25 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
 
 
+def _triple(v):
+    if isinstance(v, tuple):
+        assert len(v) == 3
+        return v
+    return (v, v, v)
+
+
 @triton.jit
 def avgpool3d_kernel(
-    x_ptr,
-    y_ptr,
-    N,
-    C,
-    D,
-    H,
-    W,
-    OD,
-    OH,
-    OW,
-    SD,
-    SH,
-    SW,
-    PD,
-    PH,
-    PW,
+    x_ptr, y_ptr,
+    N, C, D, H, W,
+    OD, OH, OW,
+    SD, SH, SW,
+    PD, PH, PW,
     n_elements,
-    KSIZE_D: tl.constexpr,
-    KSIZE_H: tl.constexpr,
-    KSIZE_W: tl.constexpr,
+    KSIZE_D: tl.constexpr, KSIZE_H: tl.constexpr, KSIZE_W: tl.constexpr,
     BLOCK: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -83,3 +79,64 @@ def avgpool3d_kernel(
     out = acc * scale
 
     tl.store(y_ptr + offs, out, mask=mask_o)
+
+
+class ModelNew(nn.Module):
+    """
+    3D average pooling backed by a Triton kernel on Ascend NPU.
+    """
+    def __init__(self, kernel_size: int = 3, stride: int = 2, padding: int = 1):
+        super(ModelNew, self).__init__()
+        self.avg_pool = nn.AvgPool3d(kernel_size=kernel_size, stride=stride, padding=padding)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not hasattr(x, "is_npu") or not x.is_npu:
+            raise ValueError("ModelNew expects an Ascend NPU tensor input.")
+
+        x = x.contiguous()
+        N, C, D, H, W = x.shape
+
+        kD, kH, kW = _triple(self.avg_pool.kernel_size)
+        sD, sH, sW = _triple(self.avg_pool.stride if self.avg_pool.stride is not None else self.avg_pool.kernel_size)
+        pD, pH, pW = _triple(self.avg_pool.padding)
+
+        # Output dimensions (ceil_mode=False)
+        OD = (D + 2 * pD - kD) // sD + 1
+        OH = (H + 2 * pH - kH) // sH + 1
+        OW = (W + 2 * pW - kW) // sW + 1
+
+        # Allocate output with same dtype as input
+        y = torch.empty((N, C, OD, OH, OW), device=x.device, dtype=x.dtype)
+
+        n_elements = y.numel()
+        # Tuned BLOCK for good occupancy and memory throughput on H200
+        BLOCK = 256
+        grid = lambda META: (triton.cdiv(n_elements, META['BLOCK']),)
+
+        avgpool3d_kernel[grid](
+            x, y,
+            N, C, D, H, W,
+            OD, OH, OW,
+            sD, sH, sW,
+            pD, pH, pW,
+            n_elements,
+            KSIZE_D=kD, KSIZE_H=kH, KSIZE_W=kW,
+            BLOCK=BLOCK,
+            num_warps=8,
+            num_stages=4,
+        )
+        return y
+batch_size = 16
+channels = 32
+depth = 128
+height = 128
+width = 256
+kernel_size = 3
+stride = 2
+padding = 1
+
+def get_inputs():
+    x = torch.rand(batch_size, channels, depth, height, width)
+    return [x]
+def get_init_inputs():
+    return [kernel_size, stride, padding]

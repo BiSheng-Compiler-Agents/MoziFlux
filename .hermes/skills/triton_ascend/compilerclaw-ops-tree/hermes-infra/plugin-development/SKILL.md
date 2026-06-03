@@ -1,3 +1,8 @@
+---
+name: plugin-development
+description: Build Hermes Agent plugins — lifecycle hooks, tool registration, slash commands, and context engines. Use when creating or modifying plugins in `~/.hermes/plugins/`.
+---
+
 # Hermes Plugin Development [LEAF NODE]
 
 Build Hermes Agent plugins — lifecycle hooks, tool registration, slash commands, and context engines.
@@ -202,14 +207,21 @@ session_id: str, completed: bool, interrupted: bool
 session_id: str, platform: str
 ```
 
+- `on_session_end` — **fires in both CLI and AIAgent API** (`agent.run_conversation()`).
+  Use this for cleanup logic that must run regardless of how the agent is invoked.
+  Signature: `session_id: str, completed: bool, interrupted: bool`
+- `on_session_finalize` — **CLI only**, fired at clean exit. Does NOT fire in AIAgent API.
+  If you need to support both CLI and programmatic usage, register `on_session_end`
+  (not `on_session_finalize`). Only register `on_session_finalize` if you specifically
+  need CLI-only cleanup.
+
 Common mistakes that caused silent failures:
 - `messages=` instead of `conversation_history=` in pre_llm_call
 - `response=` instead of `assistant_response=` in post_llm_call
 - `task_id=` as LLM span key — Hermes does NOT pass task_id to pre/post_llm_call hooks;
   use `session_id` as the span lookup key instead
-- Registering `on_session_end` only — the CLI fires `on_session_finalize` at clean exit,
-  NOT `on_session_end`. Register both and have `on_session_finalize` delegate to your
-  session-end logic.
+- Registering `on_session_finalize` for AIAgent API plugins — it will NEVER fire.
+  Use `on_session_end` instead.
 
 ---
 
@@ -307,6 +319,97 @@ with open(env_path) as f:
             k, _, v = line.partition("=")
             os.environ[k.strip()] = v.strip()
 ```
+
+### `requires_env` — keep it complete and in sync
+
+**`requires_env` must be complete in BOTH `plugin.yaml` AND `ctx.register_tool()`.**
+Both lists must match and must include **every** env var the code actually reads
+via `os.environ.get()`. If a var is in code but not in `requires_env`, the plugin
+load check silently passes but the tool fails at runtime with a confusing error.
+
+Audit checklist when creating or reviewing a plugin:
+1. Grep `__init__.py` for all `os.environ.get("VAR_NAME"` calls
+2. Every **truly-required** VAR_NAME (no code default, plugin can't run without it)
+   must appear in `plugin.yaml` → `requires_env` AND `register_tool()` → `requires_env=[...]`
+3. Both lists must match each other and match `check_fn`'s actual gate
+4. Prefer "no default" (`""`) for truly required vars — don't silently fall through
+
+### ⚠️ Optional env vars must NOT be in `requires_env` (set-but-empty reads as missing)
+
+Only list a var in `requires_env` if the plugin genuinely cannot run without it.
+A var that has a code default (e.g. `PORT` defaulting to 22, `BASE_DIR`, `CONDA_ENV`)
+is **optional** — listing it in `requires_env` is a bug:
+
+- `requires_env` enforcement treats a SET-BUT-EMPTY value (`KEY=""` in `.env`) as
+  "missing" (`_missing_requires_env_names` uses `not get_env_value(name)`). A user
+  who deliberately blanks an optional var to take the default gets a load failure.
+- The rule: `requires_env` = only what `check_fn` actually gates on. If `check_fn`
+  is `lambda: bool(_host() and _user() and _pass())`, then ONLY those three go in
+  `requires_env` — in both `plugin.yaml` and `register_tool()`. Optional vars with
+  defaults go in a YAML comment, not the list.
+
+**Never `int()` (or otherwise parse) a possibly-empty env string.** The 2-arg
+`os.environ.get("PORT", "22")` default only applies when the var is ABSENT; a
+set-but-empty `PORT=""` returns `""`, and `int("")` raises `ValueError`. Read,
+strip, then fall back on blank:
+
+```python
+def _remote_port() -> int:
+    val = os.environ.get("REMOTE_VERIFY_PORT", "").strip()
+    return int(val) if val else 22                      # tolerates "" and unset
+
+def _remote_base_dir() -> str:
+    return os.environ.get("REMOTE_VERIFY_BASE_DIR", "").strip() or "~/kernel_verify"
+```
+
+**`requires_env` in `plugin.yaml` is a YAML list — use `-` markers.** A bare
+indented block without dashes parses as ONE multiline string, not a list, so the
+"enforcement" silently does nothing:
+
+```yaml
+requires_env:          # WRONG — no dashes → parses as a single string
+  REMOTE_VERIFY_HOST
+  REMOTE_VERIFY_USER
+requires_env:          # RIGHT — proper list
+  - REMOTE_VERIFY_HOST
+  - REMOTE_VERIFY_USER
+```
+
+### Never hardcode paths in plugin code
+
+Derive all paths from env vars. For tools that need to find binaries, source the
+appropriate `set_env.sh` first and then use `shutil.which()` on the resulting PATH
+— do not hardcode fallback candidate paths.
+
+**Pattern — binary that appears on PATH after sourcing an env script:**
+```python
+def _find_bin(env: dict[str, str] | None = None) -> str:
+    env_bin = os.environ.get("MY_BIN", "")
+    if env_bin and os.path.isfile(env_bin):
+        return env_bin
+    search_env = env if env is not None else os.environ
+    on_path = shutil.which("mybinary", path=search_env.get("PATH", ""))
+    if on_path:
+        return on_path
+    raise FileNotFoundError("mybinary not found. Set MY_BIN or source set_env.sh.")
+```
+
+**Pattern — deriving conda paths from CONDA_BIN env var (never hardcode /opt/miniconda3/):**
+```python
+conda_bin = os.environ.get("CONDA_BIN", "")
+if conda_bin:
+    conda_root = os.path.dirname(os.path.dirname(conda_bin))
+    env_lib = os.path.join(conda_root, "envs", env_name, "lib")
+    env_bin_path = os.path.join(conda_root, "envs", env_name, "bin")
+```
+
+**`check_fn` must also avoid hardcoding paths.** Use `shutil.which()` on the current
+PATH or check env vars — do not hardcode `os.path.isfile("/opt/...")`.
+
+### Plugin descrips and docstrings — no hardcoded paths either
+
+Plugin `description` fields, `schema` descriptions, and module docstrings should
+also avoid hardcoding absolute paths. Use env var names or relative terms instead.
 
 ---
 
@@ -544,8 +647,216 @@ def register(ctx) -> None:
     ctx.register_hook("pre_tool_call", _on_pre_tool_call)
 ```
 
+## Subprocess management — killing the whole process tree on timeout
+
+Plugins that wrap long-running external tools (simulators, compilers, SSH-driven
+jobs) via `subprocess.Popen(..., shell=True)` have a **silent orphan bug**: when a
+timeout fires, `proc.kill()` only kills the immediate `/bin/sh -c` wrapper, NOT the
+grandchildren it spawned. The real workload (e.g. a camodel simulator) keeps running
+detached, often spinning at 100%+ CPU for hours, untracked.
+
+**Symptom seen in the wild (cannsim-local):** a `cannsim record` job that hung in
+runtime teardown left a `bmm_host` grandchild at ~1700% CPU with hours of accumulated
+CPU time, reparented to init, while the plugin's `_run()` had already returned. The
+plugin reported the timeout but never actually stopped the work.
+
+**Root cause:** `shell=True` inserts a shell between Python and the real binary, and
+`Popen.kill()` sends SIGKILL to that shell's PID only. Children survive.
+
+**Fix — launch in a new process group and kill the group:**
+```python
+import os, signal, subprocess
+
+proc = subprocess.Popen(
+    cmd, shell=True, cwd=cwd, env=env,
+    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    start_new_session=True,   # puts child in its own process group (setsid)
+)
+try:
+    stdout, stderr = proc.communicate(timeout=timeout)
+except subprocess.TimeoutExpired:
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)  # kill the WHOLE tree
+    except ProcessLookupError:
+        pass
+    stdout, stderr = proc.communicate()
+    return -1, stdout, stderr + f"\n[TIMEOUT after {timeout}s — process group killed]"
+```
+
+- `start_new_session=True` (or `preexec_fn=os.setsid`) makes the child a process-group
+  leader so its descendants share one PGID.
+- `os.killpg(os.getpgid(proc.pid), SIGKILL)` then reaps the shell AND every grandchild.
+- A plain `proc.kill()` is NOT enough whenever `shell=True` or the child forks workers.
+
+**Distinguish "still working" from "hung in teardown" before killing.** A wrapped sim
+whose compute finished but is hung in library/atexit teardown has already written all
+its output to disk — recovery is possible without re-running. Don't assume a timeout
+means lost work: check whether the result artifacts (trace dumps, logs) are present and
+stable first.
+
+### Log-file polling for early completion detection (companion pattern)
+
+Instead of waiting for the full timeout or for the subprocess to exit naturally, a
+plugin can poll a log file written by the child process and **kill early** the moment
+work is done. This saves minutes of wasted wait when the child hangs in teardown
+after producing its output.
+
+**When to use:** child processes that write progress markers to a log file and then
+hang in library/destructor teardown (common with GPU simulators, cannsim, etc.).
+
+**Pattern:**
+```python
+import os, signal, time, subprocess
+
+def _run_with_early_kill(cmd, cwd, env, timeout, log_path, markers=("Done",)):
+    proc = subprocess.Popen(
+        cmd, shell=True, cwd=cwd, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        start_new_session=True,              # ← makes the child a process-group leader
+    )
+    start = time.time()
+    while True:
+        elapsed = time.time() - start
+        if elapsed > timeout:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            proc.communicate()
+            return -1, "", f"[TIMEOUT after {timeout}s]"
+
+        ret = proc.poll()
+        if ret is not None:                          # exited naturally
+            stdout, stderr = proc.communicate()
+            return ret, stdout, stderr
+
+        if os.path.isfile(log_path):
+            with open(log_path) as f:
+                content = f.read()
+            if any(m in content for m in markers):
+                # Do NOT blind-sleep-then-kill — see the race warning below.
+                if _wait_for_artifact_stable(out_path, poll=3, max_wait=120):
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    proc.wait()
+                    return 0, "", f"[EARLY EXIT — artifact stable]"
+        time.sleep(3)
+```
+
+Key elements:
+- `start_new_session=True` ensures the child and all descendants share one PGID
+- `os.killpg(os.getpgid(proc.pid), signal.SIGKILL)` kills the whole process tree,
+  including grandchildren (which bare `proc.kill()` leaves orphaned)
+- Poll the log file the child writes (not the pipes — child may close pipes before flush)
+- Use the SAME completion markers the child's own code emits (`Result copied back`,
+  `all tasks are finished!`, etc.)
+- On timeout, still use process-group kill to avoid orphaned grandchildren
+
+### ⚠️ The completion marker can fire BEFORE the output artifact is fully written
+
+**Do NOT kill on the marker + a fixed `time.sleep(N)` grace.** The log marker
+(`all tasks are finished!`, `Done`, etc.) is often printed BEFORE the child
+serializes its final output file — that write may happen during the same
+atexit/teardown phase the early-kill is trying to skip. A blind sleep RACES the
+write and, for slow/hanging children (e.g. cannsim with `al.multibuffer`),
+usually wins — leaving an incomplete/empty artifact and a downstream tool failing
+with "file not found". Confirmed twice: cannsim-local (`instr.bin` missing →
+`cannsim report` fails) and cannsim-remote (same, in the SSH bash wrapper).
+
+**Fix: wait for the output artifact to be NON-EMPTY, structurally valid, and quiet
+for a full window before killing**, with a max-wait fallback. Two equal size samples
+are not enough when the child appends chunks with gaps between flushes.
+
+```python
+def _wait_for_artifact_stable(path, poll=3.0, max_wait=120.0, quiet_window=30.0,
+                              record_size: int | None = None) -> tuple[bool, str]:
+    deadline = time.time() + max_wait
+    stable_since = None
+    last_state = None
+    while time.time() < deadline:
+        if os.path.isfile(path):
+            st = os.stat(path)
+            state = (st.st_size, st.st_mtime_ns)
+            aligned = st.st_size > 0 and (record_size is None or st.st_size % record_size == 0)
+            if state != last_state:
+                stable_since = time.time() if aligned else None
+                last_state = state
+            elif aligned and stable_since is not None and time.time() - stable_since >= quiet_window:
+                return True, f"artifact stable for {quiet_window}s at {st.st_size} bytes"
+        time.sleep(poll)
+    return False, "artifact did not become safe before timeout"
+```
+
+If this check fails, kill the process group for cleanup but return failure — do not
+pretend downstream results are reliable. Blind timeout kill solves leaked processes,
+not trustworthy artifacts.
+
+**cannsim-specific application:** `trace_tools` decodes `instr.bin` as repeated
+`struct "<QIIQ200s200s"` records, i.e. 424 bytes each. Treat `size % 424 != 0` as a
+truncated write. Use `"all tasks are finished"` as the strong early-kill marker;
+`"Result copied back"` is weaker and should not be a success-path kill trigger for
+reliable traces. `instr.bin` is first written in the user-app CWD and can later be
+moved into a `cannsim_*` subdirectory on natural exit, so check both locations.
+
+Always validate `start_new_session=True` + `os.killpg()` together. Using `proc.kill()`
+alone with shell=True is insufficient — the shell absorbs the signal and the real
+workload survives as an orphaned grandchild, untracked.
+
+**Large result hygiene:** plugin tools that produce huge artifacts (e.g. trace JSON)
+should return stable file paths, byte sizes, and concise log tails by default. Make raw
+artifact content opt-in (`return_trace_json=True`, max-byte cap, etc.) so normal tool
+results do not exceed context limits.
+
+---
+
+## Multi-stage pipeline plugins (stage gating + the single-turn trap)
+
+A common plugin pattern is a **staged pipeline**: `pre_llm_call` injects
+stage-specific instructions, `post_tool_call`/`post_llm_call` advance a state file
+(e.g. `optimize → verify → record → done`). This pattern has a structural trap that
+silently lets work finish UNVERIFIED.
+
+**1. Hooks CANNOT force another turn — the orchestrator must drive the loop.**
+`post_llm_call`'s return value is **ignored** (only `pre_tool_call` block and
+`pre_llm_call` context injection are honored — see the hooks return-value table).
+So a plugin can advance pipeline state between turns, but it cannot make the agent
+take another turn. `agent.run_conversation()` is ONE turn: it ends when the model
+stops emitting tool calls. If the orchestrator calls `run_conversation()` exactly
+once, the pipeline parks at whatever stage the agent left it (e.g. deliverables
+written, stage advanced to `verify`, but verify never executed). The driving
+orchestrator — not a hook — must loop `run_conversation` (feeding the previous
+`result["messages"]` back as `conversation_history`) until the state file reaches
+the terminal stage or stalls. Design the plugin assuming it cannot self-advance.
+
+**2. "Deliverables present" ≠ "pipeline done" — gate on STAGE, not file existence.**
+A skip-gate or final classifier that treats "all output files exist" as success will
+mislabel a kernel parked at `verify` (files written, never validated) as `done`, AND
+skip it on every retry. Always check the pipeline **stage** reached `done`, not just
+that artifacts are on disk. Add a distinct status (e.g. `"unverified"`) for
+deliverables-complete-but-not-verified so retries pick it up.
+
+**3. Stage-advance messages must agree with `pre_llm_call` and not hardcode the wrong
+tool.** A hardcoded transition message ("Stage advanced to VERIFY. Run <sim tool> to
+validate") can contradict the context-aware `pre_llm_call` instruction and send the
+agent down the wrong path — and it's often the LAST instruction the agent sees, so it
+wins. Make advance messages branch on the same conditions `pre_llm_call` uses (e.g.
+`_remote_verify_available()`).
+
+**4. Separate the VERIFICATION RESULT from analysis tooling.** When hardware
+verification is available, the pass/fail *result* must come from the hardware tool
+(`remote_verify`) — but do NOT blanket-forbid the simulator. The agent should remain
+free to use simulation (cannsim) for bottleneck analysis and further optimization
+during the verify stage; it just must not be treated as the verification result.
+Word the instruction as "the verification RESULT must come from hardware; you MAY
+still use the simulator for analysis" — not "do NOT use the simulator."
+
 ## Constraints
+- When documenting a plugin pattern here, capture the GENERALIZABLE lesson, not
+  implementation-status tracking. Do NOT add "Known gaps / RESOLVED" tables,
+  per-function fix logs, or verbatim copies of automation code that already lives
+  in a plugin/orchestrator — those describe the current repo state, not how to
+  build plugins, and go stale immediately. State the architectural rule in prose
+  and let the code be the code. (User-corrected this session.)
 - Plugin code must never crash the agent — always wrap file/network writes in try/except
+- Subprocess-wrapping plugins must use `start_new_session=True` + `os.killpg` on timeout,
+  not bare `proc.kill()` — otherwise grandchild workers orphan and spin forever
 - `hermes_constants` caches HERMES_HOME at import time — set env var BEFORE any imports when testing
 - `task_id` is NOT passed to pre/post_llm_call hooks — use `session_id` for span lookup
-- `on_session_start` is NOT fired by CLI — only by gateway; use lazy init in `pre_llm_call`
+- `on_session_end` fires in both CLI and AIAgent API; `on_session_finalize` is CLI-only
+- **File creation**: Only create files in the project directory (`/opt/moziflux/`, `.hermes/skills/`, `.hermes/plugins/`) when the user explicitly asks. All unrelated work, experiments, and temporary files go to `~/`. Do not pollute the project directory.

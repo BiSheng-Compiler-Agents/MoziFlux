@@ -1,0 +1,26 @@
+============================================================
+Correctness Test
+============================================================
+[TEST] small_FP16     Baseline Triton1=[PASS 2.38e-07]  Baseline Triton2=[PASS 2.38e-07]  Optimized Triton=[PASS 2.38e-07]
+[TEST] square_FP16    Baseline Triton1=[PASS 7.81e-03]  Baseline Triton2=[PASS 7.81e-03]  Optimized Triton=[PASS 7.81e-03]
+[TEST] tall_FP16      Baseline Triton1=[PASS 1.56e-02]  Baseline Triton2=[PASS 1.56e-02]  Optimized Triton=[PASS 1.56e-02]
+[TEST] wide_FP16      Baseline Triton1=[PASS 1.56e-02]  Baseline Triton2=[PASS 1.56e-02]  Optimized Triton=[PASS 1.56e-02]
+[TEST] BF16           Baseline Triton1=[PASS 3.81e-06]  Baseline Triton2=[PASS 3.81e-06]  Optimized Triton=[PASS 3.81e-06]
+[TEST] FP32           Baseline Triton1=[PASS 0.00e+00]  Baseline Triton2=[PASS 0.00e+00]  Optimized Triton=[PASS 0.00e+00]
+[TEST] batch1_FP16    Baseline Triton1=[PASS 1.56e-02]  Baseline Triton2=[PASS 1.56e-02]  Optimized Triton=[PASS 1.56e-02]
+[TEST] large_FP16     Baseline Triton1=[PASS 6.25e-02]  Baseline Triton2=[PASS 6.25e-02]  Optimized Triton=[PASS 6.25e-02]
+[TEST] 2Dx2D          Baseline Triton1=[ERROR:ValueError: A and B must both be 3D batched matrices]  Baseline Triton2=[ERROR:ValueError: A and B must both be 3D batched matrices]  Optimized Triton=[PASS]
+[TEST] 2Dx3D          Baseline Triton1=[ERROR:ValueError: A and B must both be 3D batched matrices]  Baseline Triton2=[ERROR:ValueError: A and B must both be 3D batched matrices]  Optimized Triton=[PASS]
+[TEST] 3Dx2D          Baseline Triton1=[ERROR:ValueError: A and B must both be 3D batched matrices]  Baseline Triton2=[ERROR:ValueError: A and B must both be 3D batched matrices]  Optimized Triton=[PASS]
+[TEST] Some tests FAILED
+
+============================================================
+Performance Benchmark
+============================================================
+bmm_benchmark:
+                  label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      b2-m128-n128-k64       0.158139          0.043356          0.040119          0.031123
+1     b4-m256-n256-k128       0.492016          0.108769          0.100946          0.064720
+2     b8-m512-n512-k256       1.626361          0.647718          0.604511          0.333428
+3   b16-m512-n1024-k512       7.734136          3.677158          3.391097          1.713266
+4  b32-m512-n2048-k1024      55.133900         25.902870         22.882290         11.287255

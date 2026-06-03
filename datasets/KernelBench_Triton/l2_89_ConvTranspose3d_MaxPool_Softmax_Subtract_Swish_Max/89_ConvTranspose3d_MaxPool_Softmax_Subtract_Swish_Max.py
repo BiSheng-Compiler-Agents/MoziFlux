@@ -1,3 +1,5 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
 
@@ -171,3 +173,81 @@ def _softmax_sub_swish_max_kernel(
 
     # Store output [B, D, H, W], which is linearized by offs_m
     tl.store(out_ptr + offs_m, out_max, mask=m_mask)
+
+
+def fused_softmax_sub_swish_max(x: torch.Tensor, sub: torch.Tensor) -> torch.Tensor:
+    """
+    Fused implementation of:
+        y = softmax(x, dim=1)
+        z = y - sub.view(1, C, 1, 1, 1)
+        s = sigmoid(z) * z
+        out = max(s, dim=1).values
+    x: [B, C, D, H, W], float32 Ascend NPU tensor
+    sub: [C], float32 Ascend NPU tensor
+    returns out: [B, D, H, W], float32 Ascend NPU tensor
+    """
+    if x.ndim != 5:
+        raise ValueError("fused_softmax_sub_swish_max expects x with shape [B, C, D, H, W].")
+    if sub.ndim != 1:
+        raise ValueError("fused_softmax_sub_swish_max expects sub with shape [C].")
+    if x.shape[1] != sub.shape[0]:
+        raise ValueError("Channel dimension of x must match length of sub.")
+    if x.device.type != "npu" or sub.device.type != "npu":
+        raise RuntimeError("fused_softmax_sub_swish_max requires Ascend NPU tensors.")
+    if x.dtype not in (torch.float16, torch.float32):
+        raise RuntimeError(f"Unsupported x dtype for fused_softmax_sub_swish_max: {x.dtype}")
+    if sub.dtype not in (torch.float16, torch.float32):
+        raise RuntimeError(f"Unsupported sub dtype for fused_softmax_sub_swish_max: {sub.dtype}")
+
+    B, C, D, H, W = x.shape
+    x = x.contiguous()
+    sub = sub.contiguous().to(device=x.device, dtype=x.dtype)
+    out = torch.empty((B, D, H, W), device=x.device, dtype=x.dtype)
+
+    grid = lambda meta: (triton.cdiv(B * D * H * W, meta["BLOCK_M"]),)
+
+    _softmax_sub_swish_max_kernel[grid](
+        x, sub, out,
+        B, C, D, H, W,
+    )
+    return out
+
+
+class ModelNew(nn.Module):
+    """
+    A model that performs a sequence of operations:
+        - ConvTranspose3d
+        - MaxPool3d
+        - Softmax
+        - Subtract
+        - Swish
+        - Max
+    """
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, output_padding, pool_kernel_size, pool_stride, pool_padding):
+        super(ModelNew, self).__init__()
+        self.conv_transpose = nn.ConvTranspose3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, output_padding=output_padding)
+        self.max_pool = nn.MaxPool3d(kernel_size=pool_kernel_size, stride=pool_stride, padding=pool_padding)
+        self.subtract = nn.Parameter(torch.randn(out_channels))  # element-wise across channels
+
+    def forward(self, x):
+        x = self.conv_transpose(x)
+        x = self.max_pool(x)
+        # Fused: softmax(dim=1) -> subtract -> swish -> max over channels
+        x = fused_softmax_sub_swish_max(x, self.subtract)
+        return x
+batch_size = 128
+in_channels = 3
+out_channels = 16
+depth, height, width = 16, 32, 32
+kernel_size = 3
+stride = 2
+padding = 1
+output_padding = 1
+pool_kernel_size = 2
+pool_stride = 2
+pool_padding = 0
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, depth, height, width)]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, pool_kernel_size, pool_stride, pool_padding]

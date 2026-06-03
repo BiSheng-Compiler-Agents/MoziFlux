@@ -1,3 +1,5 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
 
@@ -67,3 +69,57 @@ def _kl_div_batch_sum_kernel(
     # Reduce once per row and store (one store per row; no global contention)
     total = tl.sum(acc, axis=0)
     tl.store(out_ptr + row, total)
+
+
+class ModelNew(nn.Module):
+    """
+    A model that computes Kullback-Leibler Divergence for comparing two distributions.
+
+    Parameters:
+        None
+    """
+    def __init__(self):
+        super(ModelNew, self).__init__()
+
+    def forward(self, predictions, targets):
+        if predictions.device.type != "npu" or targets.device.type != "npu":
+            raise ValueError("ModelNew expects predictions and targets on Ascend NPU")
+        if predictions.ndim != 2 or targets.ndim != 2:
+            raise ValueError("ModelNew expects 2D predictions and targets")
+        if predictions.shape != targets.shape:
+            raise ValueError("ModelNew expects predictions and targets with matching shapes")
+
+        # Ensure contiguous memory for predictable strides
+        p = predictions.contiguous()
+        t = targets.contiguous()
+        B, D = p.shape
+
+        # Per-row accumulators (float32 for numeric stability)
+        row_sums = torch.empty(B, device=p.device, dtype=torch.float32)
+
+        # Strides in elements
+        stride_pb, stride_pd = p.stride()
+        stride_tb, stride_td = t.stride()
+
+        # Launch one program per row; tile over columns internally with unrolling
+        grid = (B,)
+        _kl_div_batch_sum_kernel[grid](
+            p, t, row_sums,
+            B, D,
+            stride_pb, stride_pd,
+            stride_tb, stride_td,
+            BLOCK_SIZE=1024,
+            num_warps=8,
+            num_stages=2,
+        )
+        # 'batchmean' reduction: sum over all elements divided by batch size
+        return row_sums.sum() / B
+batch_size = 8192 * 2
+input_shape = (8192 * 2,)
+dim = 1
+
+def get_inputs():
+    scale = torch.rand(())
+    return [(torch.rand(batch_size, *input_shape)*scale).softmax(dim=-1), torch.rand(batch_size, *input_shape).softmax(dim=-1)]
+def get_init_inputs():
+    return []

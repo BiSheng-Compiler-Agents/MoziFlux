@@ -2,7 +2,20 @@
 **/.idea/
 **/__pycache__/
 **/.venv/
+**/.env
+**/.pipeline_state.json
 **/logs/
 **/outputs/
-**/.env/
-**/datasets/
+
+# Ignore everything under datasets except the deliverable files we track
+datasets/**
+!datasets/KernelBench_Triton/
+!datasets/KernelBench_Triton/*/
+!datasets/KernelBench_Triton/*/[0-9]*_*.py
+!datasets/KernelBench_Triton/*/base_*.py
+!datasets/KernelBench_Triton/*/opt_[0-9]*_*.py
+!datasets/KernelBench_Triton/*/profile_kernels.py
+!datasets/KernelBench_Triton/*/Optimizations.md
+!datasets/KernelBench_Triton/*/performance_report.md
+!datasets/KernelBench_Triton/*/review.md
+!datasets/KernelBench_Triton/*/results.txt

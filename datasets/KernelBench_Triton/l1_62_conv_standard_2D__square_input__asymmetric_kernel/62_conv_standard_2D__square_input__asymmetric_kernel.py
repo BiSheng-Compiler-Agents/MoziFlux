@@ -1,3 +1,6 @@
+import math
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
 
@@ -290,3 +293,142 @@ def _conv2d_im2col_gemm_kernel_mma(
                  ow[:, None] * y_stride_w)
     y_mask = m_mask[:, None] & n_mask[None, :]
     tl.store(y_ptr + y_offsets, acc, mask=y_mask)
+
+
+def _pair(value):
+    if isinstance(value, tuple):
+        return value
+    return (value, value)
+
+
+def conv2d_triton(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None = None,
+    stride: int | tuple[int, int] = 1,
+    padding: int | tuple[int, int] = 0,
+    dilation: int | tuple[int, int] = 1,
+    groups: int = 1,
+) -> torch.Tensor:
+    if x.device.type != "npu":
+        raise ValueError(f"conv2d_triton requires an Ascend NPU tensor, got {x.device.type!r}")
+    if groups != 1:
+        raise NotImplementedError("conv2d_triton only supports groups=1")
+    if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
+        raise TypeError(f"Unsupported input dtype: {x.dtype}")
+
+    stride = _pair(stride)
+    padding = _pair(padding)
+    dilation = _pair(dilation)
+
+    B, CI, H, W = x.shape
+    CO, CI_w, KH, KW = weight.shape
+    if CI != CI_w:
+        raise ValueError("Input channels mismatch")
+
+    STRH, STRW = stride
+    PADH, PADW = padding
+    DILH, DILW = dilation
+    OH = (H + 2 * PADH - DILH * (KH - 1) - 1) // STRH + 1
+    OW = (W + 2 * PADW - DILW * (KW - 1) - 1) // STRW + 1
+    if OH <= 0 or OW <= 0:
+        raise ValueError("Invalid output shape computed for conv2d_triton")
+
+    x_c = x.contiguous()
+    Kdim = CI * KH * KW
+    w_flat = weight.reshape(CO, Kdim).contiguous()
+    y = torch.empty((B, CO, OH, OW), device=x.device, dtype=torch.float32)
+
+    Mdim = B * OH * OW
+    Ndim = CO
+
+    def grid(meta):
+        return (
+            triton.cdiv(Mdim, meta["BLOCK_M"]),
+            triton.cdiv(Ndim, meta["BLOCK_N"]),
+        )
+
+    if x.dtype == torch.float16:
+        _conv2d_im2col_gemm_kernel_mma[grid](
+            x_c, w_flat, y,
+            B, CI, H, W, OH, OW, KH, KW, CO,
+            STRH, STRW, PADH, PADW, DILH, DILW,
+            M=Mdim, N=Ndim, K=Kdim,
+            IS_BF16=False,
+        )
+    elif x.dtype == torch.bfloat16:
+        _conv2d_im2col_gemm_kernel_mma[grid](
+            x_c, w_flat, y,
+            B, CI, H, W, OH, OW, KH, KW, CO,
+            STRH, STRW, PADH, PADW, DILH, DILW,
+            M=Mdim, N=Ndim, K=Kdim,
+            IS_BF16=True,
+        )
+    else:
+        _conv2d_im2col_gemm_kernel[grid](
+            x_c, w_flat, y,
+            B, CI, H, W, OH, OW, KH, KW, CO,
+            STRH, STRW, PADH, PADW, DILH, DILW,
+            M=Mdim, N=Ndim, K=Kdim,
+        )
+
+    if bias is not None:
+        y += bias.view(1, CO, 1, 1).to(y.dtype)
+    if x.dtype != torch.float32:
+        y = y.to(dtype=x.dtype)
+    return y
+
+
+class ModelNew(nn.Module):
+    """
+    Performs a standard 2D convolution operation with a square input and an asymmetric kernel.
+
+    Args:
+        in_channels (int): Number of channels in the input tensor.
+        out_channels (int): Number of channels produced by the convolution.
+        kernel_size (tuple): Size of the convolution kernel (height, width).
+        stride (int, optional): Stride of the convolution. Defaults to 1.
+        padding (int or tuple, optional): Padding applied to the input. Defaults to 0.
+        dilation (int or tuple, optional): Spacing between kernel elements. Defaults to 1.
+        groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
+        bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
+    """
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: tuple, stride: int = 1, padding: int = 0, dilation: int = 1, groups: int = 1, bias: bool = False):
+        super(ModelNew, self).__init__()
+        self.conv2d = nn.Conv2d(
+            in_channels, out_channels, kernel_size,
+            stride=stride, padding=padding, dilation=dilation,
+            groups=groups, bias=bias
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Performs the 2D convolution.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_channels, height, width).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, out_channels, height_out, width_out).
+        """
+        return conv2d_triton(
+            x=x,
+            weight=self.conv2d.weight,
+            bias=self.conv2d.bias,
+            stride=self.conv2d.stride,
+            padding=self.conv2d.padding,
+            dilation=self.conv2d.dilation,
+            groups=self.conv2d.groups,
+        )
+batch_size = 8
+in_channels = 32
+out_channels = 64
+kernel_size = (5, 9)
+width = 512
+height = 512
+
+def get_inputs():
+    x = torch.rand(batch_size, in_channels, height, width)
+    return [x]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization

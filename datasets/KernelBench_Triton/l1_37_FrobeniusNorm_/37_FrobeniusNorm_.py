@@ -1,3 +1,6 @@
+import torch
+import torch.nn as nn
+import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
@@ -45,3 +48,65 @@ def _scale_kernel(x_ptr, y_ptr, n_elements, sumsq_ptr, BLOCK: tl.constexpr):
     x = tl.load(x_ptr + offsets, mask=mask, other=0.0)
     y = x.to(tl.float32) * inv_norm
     tl.store(y_ptr + offsets, y, mask=mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs Frobenius norm normalization.
+    """
+    def __init__(self):
+        """
+        Initializes the Frobenius norm normalization layer.
+        """
+        super(ModelNew, self).__init__()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Applies Frobenius norm normalization to the input tensor.
+
+        Args:
+            x (torch.Tensor): Input tensor of arbitrary shape.
+
+        Returns:
+            torch.Tensor: Output tensor with Frobenius norm normalization applied, same shape as input.
+        """
+        if x.device.type != "npu":
+            raise ValueError("ModelNew expects an Ascend NPU tensor")
+        if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
+            raise ValueError(
+                f"ModelNew supports float16, bfloat16, and float32 inputs, got {x.dtype}"
+            )
+        if x.numel() == 0:
+            raise ValueError("ModelNew does not support empty tensors")
+
+        # Contiguous memory for efficient Triton access
+        original_shape = x.shape
+        x_contig = x if x.is_contiguous() else x.contiguous()
+        n_elements = x_contig.numel()
+
+        # Larger block to reduce grid size and atomics; tuned for Hopper (H200)
+        BLOCK = 16384
+        grid = (triton.cdiv(n_elements, BLOCK),)
+
+        # Accumulate sum of squares in fp32 using atomics (no partials buffer, fewer kernel launches)
+        sumsq = torch.zeros(1, device=x_contig.device, dtype=torch.float32)
+        _sumsq_kernel[grid](x_contig, n_elements, sumsq, BLOCK=BLOCK, num_warps=8, num_stages=4)
+
+        # Result dtype follows PyTorch's promotion for division by float32 scalar
+        out_dtype = torch.promote_types(x_contig.dtype, torch.float32)
+        y = torch.empty_like(x_contig, dtype=out_dtype)
+
+        # Pass 2: scale by inverse Frobenius norm
+        _scale_kernel[grid](x_contig, y, n_elements, sumsq, BLOCK=BLOCK, num_warps=8, num_stages=4)
+
+        return y.view(original_shape)
+batch_size = 112
+features = 64
+dim1 = 512
+dim2 = 512
+
+def get_inputs():
+    x = torch.rand(batch_size, features, dim1, dim2)
+    return [x]
+def get_init_inputs():
+    return []

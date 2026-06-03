@@ -1,3 +1,5 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
 
@@ -39,3 +41,90 @@ def _fused_bias_scale_clamp_inplace(
     y = y / s
 
     tl.store(in_out_ptr + offsets, y, mask=mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a transposed convolution, adds a bias term, clamps, scales, clamps, and divides.
+    The post-conv elementwise ops are fused into a single Triton kernel for improved performance.
+    """
+    def __init__(
+        self,
+        in_channels=None,
+        out_channels=None,
+        kernel_size=None,
+        stride=None,
+        padding=None,
+        output_padding=None,
+        bias_shape=None,
+        scaling_factor=None,
+    ):
+        super(ModelNew, self).__init__()
+        if in_channels is None:
+            in_channels = 3
+        if out_channels is None:
+            out_channels = 16
+        if kernel_size is None:
+            kernel_size = 3
+        if stride is None:
+            stride = 2
+        if padding is None:
+            padding = 1
+        if output_padding is None:
+            output_padding = 1
+        if bias_shape is None:
+            bias_shape = (out_channels, 1, 1)
+        if scaling_factor is None:
+            scaling_factor = 2.0
+        self.conv_transpose = nn.ConvTranspose2d(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride=stride,
+            padding=padding,
+            output_padding=output_padding,
+        )
+        self.bias = nn.Parameter(torch.randn(bias_shape))
+        self.scaling_factor = scaling_factor
+
+    def forward(self, x):
+        if x.device.type != "npu":
+            raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
+
+        y = self.conv_transpose(x)
+        s = float(self.scaling_factor)
+        y = y.contiguous()
+        bias = self.bias.to(device=y.device, dtype=y.dtype).contiguous().view(-1)
+
+        _, C, H, W = y.shape
+        n_elements = y.numel()
+        HW = H * W
+        block_size = HW
+        grid = lambda META: (triton.cdiv(n_elements, META["BLOCK_SIZE"]),)
+        _fused_bias_scale_clamp_inplace[grid](
+            y,
+            bias,
+            s,
+            n_elements,
+            C,
+            HW,
+            BLOCK_SIZE=block_size,
+            num_warps=8,
+            num_stages=3,
+        )
+        return y
+batch_size = 128
+in_channels  = 64  
+out_channels = 64  
+height = width = 128 
+kernel_size = 3
+stride = 2
+padding = 1
+output_padding = 1
+bias_shape = (out_channels, 1, 1)
+scaling_factor = 2.0
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, height, width)]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, bias_shape, scaling_factor]

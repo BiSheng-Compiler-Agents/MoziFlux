@@ -1,3 +1,8 @@
+import os
+
+import torch
+import torch.nn as nn
+
 import triton
 import triton.language as tl
 
@@ -121,3 +126,79 @@ def _upper_tri_matmul_kernel(
         store_mask = (rm[:, None] <= rn[None, :]) & m_in[:,
                                                          None] & n_in[None, :]
         tl.store(c_ptrs, acc, mask=store_mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs matrix multiplication (C = A * B) and returns its upper triangular part.
+    """
+    def __init__(self):
+        super(ModelNew, self).__init__()
+
+    def forward(self, A, B):
+        """
+        Performs matrix multiplication and returns torch.triu(A @ B).
+
+        Args:
+            A (torch.Tensor): Matrix of shape (N, N).
+            B (torch.Tensor): Matrix of shape (N, N).
+
+        Returns:
+            torch.Tensor: Upper triangular part of A @ B, shape (N, N).
+        """
+        if A.ndim != 2 or B.ndim != 2:
+            raise ValueError("ModelNew expects two 2D tensors.")
+        if A.shape != B.shape or A.shape[0] != A.shape[1]:
+            raise ValueError("ModelNew expects square matrices of the same shape.")
+        if A.device != B.device:
+            raise ValueError("Inputs must be on the same device.")
+        if A.dtype != B.dtype:
+            raise ValueError("Inputs must have the same dtype.")
+        if A.dtype not in {torch.float16, torch.float32}:
+            raise TypeError(f"Unsupported dtype for upper triangular matmul: {A.dtype}.")
+        if not (A.is_cuda or A.device.type == "npu" or os.environ.get("TRITON_INTERPRET") == "1"):
+            raise RuntimeError(
+                "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1 for Triton interpreter mode."
+            )
+
+        N = A.shape[0]
+        A_ = A.contiguous()
+        B_ = B.contiguous()
+
+        # Allocate output as zeros so we can skip strictly-below-diagonal tiles safely
+        C = torch.zeros((N, N), device=A.device, dtype=A.dtype)
+
+        grid = lambda META: (
+            triton.cdiv(N, META["BLOCK_M"]),
+            triton.cdiv(N, META["BLOCK_N"]),
+        )
+        _upper_tri_matmul_kernel[grid](
+            A_, B_, C,
+            N,
+            A_.stride(0), A_.stride(1),
+            B_.stride(0), B_.stride(1),
+            C.stride(0), C.stride(1),
+        )
+        # C already contains only the upper-triangular values
+        return C
+N = 4096
+
+def get_inputs():
+    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    """
+    Generates upper triangular matrices for testing.
+
+    Returns:
+        list: A list containing two upper triangular matrices of shape (N, N).
+    """
+    A = torch.triu(torch.rand(N, N, device=device))
+    B = torch.triu(torch.rand(N, N, device=device))
+    return [A, B]
+def get_init_inputs():
+    """
+    No specific initialization inputs are needed for this model.
+
+    Returns:
+        list: An empty list.
+    """
+    return []

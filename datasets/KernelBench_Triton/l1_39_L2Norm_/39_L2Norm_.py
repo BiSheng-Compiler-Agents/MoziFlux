@@ -1,3 +1,5 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
 
@@ -53,3 +55,87 @@ def _l2norm_rowwise_kernel(
         y = x * inv_norm
         tl.store(row_y_ptr + (n * stride_yn) + col_offs_y, y, mask=mask)
         n += BLOCK_N
+
+
+def _select_block_and_warps(N: int):
+    # Choose a power-of-two block size for good memory coalescing
+    if N >= 16384:
+        block = 4096
+    elif N >= 8192:
+        block = 2048
+    elif N >= 4096:
+        block = 1024
+    elif N >= 2048:
+        block = 512
+    elif N >= 1024:
+        block = 256
+    else:
+        block = 128
+    # Tune warps for the chosen block size
+    if block >= 4096:
+        warps = 8
+    elif block >= 1024:
+        warps = 4
+    else:
+        warps = 2
+    return block, warps
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs L2 normalization.
+    """
+    def __init__(self):
+        """
+        Initializes the L2Norm layer.
+
+        Args:
+            dim (int): Dimension along which to normalize.
+        """
+        super(ModelNew, self).__init__()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Applies L2 normalization to the input tensor.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (B, D).
+
+        Returns:
+            torch.Tensor: Output tensor with L2 normalization applied, same shape as input.
+        """
+        if not getattr(x, "is_npu", False):
+            raise RuntimeError("ModelNew expects an input tensor on Ascend NPU")
+        if x.dim() != 2:
+            raise ValueError("ModelNew expects a 2D input tensor")
+        if x.requires_grad:
+            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+
+        x_c = x.contiguous()
+        B, D = x_c.shape
+        y = torch.empty_like(x_c)
+
+        stride_xm, stride_xn = x_c.stride()
+        stride_ym, stride_yn = y.stride()
+
+        BLOCK_N, num_warps = _select_block_and_warps(D)
+        grid = (B,)
+
+        _l2norm_rowwise_kernel[grid](
+            x_c, y,
+            B, D,
+            stride_xm, stride_xn,
+            stride_ym, stride_yn,
+            BLOCK_N=BLOCK_N,
+            num_warps=num_warps,
+            num_stages=4,
+        )
+        return y
+batch_size = 32768
+dim = 65535
+
+def get_inputs():
+    x = torch.rand(batch_size, dim)
+    return [x]
+def get_init_inputs():
+    return []

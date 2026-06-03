@@ -1,3 +1,7 @@
+import math
+import torch
+import torch.nn as nn
+
 import triton
 import triton.language as tl
 
@@ -91,3 +95,132 @@ def conv2d_nchw_s1p0_vecoc_kernel(
                  OH[None, :, :] * y_h_stride + OW[None, :, :] * y_w_stride)
     store_mask = mask_oc[:, None, None] & mask_spatial[None, :, :]
     tl.store(y_ptr + y_offsets, acc, mask=store_mask)
+
+
+def _triton_conv2d_s1p0(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None) -> torch.Tensor:
+    # Preconditions: stride=1, padding=0, dilation=1, groups=1, NCHW contiguous
+    if x.device.type != "npu" or weight.device.type != "npu":
+        raise ValueError("conv2d Triton path requires NPU tensors")
+    if x.dtype != weight.dtype:
+        raise ValueError("input and weight dtypes must match")
+    if x.ndim != 4 or weight.ndim != 4:
+        raise ValueError("expected x and weight to be 4D tensors")
+    N, C, H, W = x.shape
+    OC, Cw, K, Kw = weight.shape
+    if C != Cw or K != Kw:
+        raise ValueError("only square kernels with matching input channels are supported")
+    H_out = H - K + 1
+    W_out = W - K + 1
+    if H_out <= 0 or W_out <= 0:
+        raise ValueError("invalid output spatial size")
+    if bias is not None:
+        if bias.device.type != "npu":
+            raise ValueError("bias must be placed on NPU when provided")
+        if bias.dtype != x.dtype:
+            raise ValueError("bias dtype must match input dtype")
+        if bias.ndim != 1 or bias.shape[0] != OC:
+            raise ValueError("bias must be a 1D tensor with shape [out_channels]")
+
+    # Allocate output (compute in fp32 for stability, cast back later)
+    y = torch.empty((N, OC, H_out, W_out), device=x.device, dtype=torch.float32)
+
+    # Tiling configuration: fuse OC in block to reuse input tile
+    BLOCK_HO = 4
+    BLOCK_WO = 128
+    BLOCK_OC = 16
+
+    tiles_ho = triton.cdiv(H_out, BLOCK_HO)
+    tiles_wo = triton.cdiv(W_out, BLOCK_WO)
+    grid = (N, triton.cdiv(OC, BLOCK_OC), tiles_ho * tiles_wo)
+
+    # Ensure contiguous memory
+    x_c = x.contiguous()
+    w_c = weight.contiguous()
+    b_c = bias.contiguous() if (bias is not None) else torch.empty(1, device=x.device, dtype=torch.float32)
+
+    conv2d_nchw_s1p0_vecoc_kernel[grid](
+        x_c, w_c, b_c, y,
+        N, H, W, OC, H_out, W_out, tiles_wo,
+        C=C, K=K, BIAS=1 if bias is not None else 0,
+        BLOCK_HO=BLOCK_HO, BLOCK_WO=BLOCK_WO, BLOCK_OC=BLOCK_OC,
+        num_warps=8, num_stages=2,
+    )
+    # Match input dtype
+    if y.dtype != x.dtype:
+        y = y.to(x.dtype)
+    return y
+
+
+def conv2d_standard_2d_square_input_square_kernel(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None = None,
+) -> torch.Tensor:
+    return _triton_conv2d_s1p0(x, weight, bias)
+
+
+class ModelNew(nn.Module):
+    """
+    Performs a standard 2D convolution operation with a square input and square kernel.
+
+    Args:
+        in_channels (int): Number of channels in the input tensor.
+        out_channels (int): Number of channels produced by the convolution.
+        kernel_size (int): Size of the square convolution kernel.
+        stride (int, optional): Stride of the convolution. Defaults to 1.
+        padding (int, optional): Padding applied to the input. Defaults to 0.
+        dilation (int, optional): Spacing between kernel elements. Defaults to 1.
+        groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
+        bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
+    """
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, stride: int = 1, padding: int = 0, dilation: int = 1, groups: int = 1, bias: bool = False):
+        super(ModelNew, self).__init__()
+        # Keep a reference PyTorch module for parameter management and fallback
+        self.conv2d = nn.Conv2d(in_channels, out_channels, (kernel_size, kernel_size), stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Performs the 2D convolution.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_channels, height, width).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, out_channels, height_out, width_out).
+        """
+        if x.device.type != "npu":
+            raise ValueError("ModelNew.forward requires an NPU input tensor")
+        if self.conv2d.stride != (1, 1):
+            raise NotImplementedError("only stride=1 is supported")
+        if self.conv2d.padding != (0, 0):
+            raise NotImplementedError("only padding=0 is supported")
+        if self.conv2d.dilation != (1, 1):
+            raise NotImplementedError("only dilation=1 is supported")
+        if self.conv2d.groups != 1:
+            raise NotImplementedError("only groups=1 is supported")
+        if x.requires_grad:
+            raise NotImplementedError("autograd is not supported for this Triton path")
+
+        w = self.conv2d.weight
+        b = self.conv2d.bias
+        if w.device.type != "npu":
+            raise ValueError("model weights must be placed on NPU before calling forward")
+        if b is not None and b.device.type != "npu":
+            raise ValueError("model bias must be placed on NPU before calling forward")
+        if w.dtype != x.dtype:
+            w = w.to(dtype=x.dtype)
+        if b is not None and b.dtype != x.dtype:
+            b = b.to(dtype=x.dtype)
+        return conv2d_standard_2d_square_input_square_kernel(x, w, b)
+batch_size = 16
+in_channels = 16
+out_channels = 128
+kernel_size = 3
+width = 1024
+height = 1024
+
+def get_inputs():
+    x = torch.rand(batch_size, in_channels, height, width)
+    return [x]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization

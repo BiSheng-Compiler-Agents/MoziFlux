@@ -1,3 +1,6 @@
+import torch
+import torch.nn as nn
+import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
@@ -33,3 +36,84 @@ def _cumsum_lastdim_kernel(
         scan = tl.cumsum(vals, axis=0) + carry
         tl.store(row_o + cols * stride_on, scan, mask=mask)
         carry += tl.sum(vals, axis=0)
+
+
+class ModelNew(nn.Module):
+    """
+    A model that performs a masked cumulative sum, only summing elements that satisfy a condition.
+
+    Parameters:
+        dim (int): The dimension along which to perform the masked cumulative sum.
+    """
+
+    def __init__(self, dim=1):
+        super(ModelNew, self).__init__()
+        self.dim = dim
+
+    def forward(self, x, mask):
+        return masked_cumsum(x, mask, dim=self.dim)
+
+
+def masked_cumsum(x, mask, dim=-1):
+    if x.device.type != "npu" or mask.device.type != "npu":
+        raise ValueError("masked_cumsum requires NPU tensors")
+    if x.shape != mask.shape:
+        raise ValueError("x and mask must have the same shape")
+    if x.ndim == 0:
+        raise ValueError("masked_cumsum requires at least one dimension")
+    if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
+        raise TypeError("masked_cumsum supports float16, bfloat16, and float32 only")
+
+    dim = dim % x.ndim
+    mask = mask.to(torch.bool)
+    y = x * mask.to(dtype=x.dtype)
+
+    if dim != y.ndim - 1:
+        y = y.movedim(dim, -1)
+    y = y.contiguous()
+
+    m_size = y.numel() // y.shape[-1]
+    n_size = y.shape[-1]
+    y2d = y.view(m_size, n_size)
+    out2d = torch.empty_like(y2d)
+
+    stride_xm, stride_xn = y2d.stride()
+    stride_om, stride_on = out2d.stride()
+
+    if n_size <= 128:
+        block_n = 128
+    elif n_size <= 512:
+        block_n = 256
+    else:
+        block_n = 512
+    num_blocks = triton.cdiv(n_size, block_n)
+
+    _cumsum_lastdim_kernel[(m_size,)](
+        y2d,
+        out2d,
+        m_size,
+        n_size,
+        stride_xm,
+        stride_xn,
+        stride_om,
+        stride_on,
+        BLOCK_N=block_n,
+        NUM_BLOCKS=num_blocks,
+        num_warps=8,
+        num_stages=4,
+    )
+
+    out = out2d.view_as(y)
+    if dim != x.ndim - 1:
+        out = out.movedim(-1, dim)
+    return out
+batch_size = 32768
+input_shape = (32768,)
+dim = 1
+
+def get_inputs():
+    x = torch.rand(batch_size, *input_shape)
+    mask = torch.randint(0, 2, x.shape).bool()  # Random boolean mask
+    return [x, mask]
+def get_init_inputs():
+    return [dim]

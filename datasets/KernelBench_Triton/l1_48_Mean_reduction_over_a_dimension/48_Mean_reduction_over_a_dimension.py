@@ -1,19 +1,17 @@
+import math
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
 
 
+# Reduce over last dimension (dim=2): x[b, m, :] -> y[b, m]
 @triton.jit
 def _mean_reduce_last_kernel(
-    x_ptr,
-    y_ptr,
-    B,
-    M,
-    N,
-    stride_b,
-    stride_m,
-    stride_n,
-    y_stride_b,
-    y_stride_m,
+    x_ptr, y_ptr,
+    B, M, N,
+    stride_b, stride_m, stride_n,
+    y_stride_b, y_stride_m,
     invN,  # float32
     BLOCK_N: tl.constexpr,
 ):
@@ -45,18 +43,14 @@ def _mean_reduce_last_kernel(
     tl.store(out_ptr, mean)
 
 
+# Reduce over middle dimension (dim=1): x[b, :, n] -> y[b, n]
+# Tile along contiguous N to keep loads coalesced.
 @triton.jit
 def _mean_reduce_mid_tiled_kernel(
-    x_ptr,
-    y_ptr,
-    B,
-    M,
-    N,
-    stride_b,
-    stride_m,
-    stride_n,
-    y_stride_b,
-    y_stride_n,
+    x_ptr, y_ptr,
+    B, M, N,
+    stride_b, stride_m, stride_n,
+    y_stride_b, y_stride_n,
     invM,  # float32
     BLOCK_N: tl.constexpr,
 ):
@@ -79,8 +73,7 @@ def _mean_reduce_mid_tiled_kernel(
             mi = m + u
             mi_valid = mi < M
             ptr = x_ptr + b * stride_b + mi * stride_m + offs_n * stride_n
-            vals = tl.load(ptr, mask=n_mask & mi_valid,
-                           other=0.0).to(tl.float32)
+            vals = tl.load(ptr, mask=n_mask & mi_valid, other=0.0).to(tl.float32)
             acc += vals
         m += UNROLL
 
@@ -89,18 +82,14 @@ def _mean_reduce_mid_tiled_kernel(
     tl.store(out_ptr, mean, mask=n_mask)
 
 
+# Reduce over first dimension (dim=0): x[:, m, n] -> y[m, n]
+# Tile along contiguous N to keep loads coalesced.
 @triton.jit
 def _mean_reduce_first_tiled_kernel(
-    x_ptr,
-    y_ptr,
-    B,
-    M,
-    N,
-    stride_b,
-    stride_m,
-    stride_n,
-    y_stride_m,
-    y_stride_n,
+    x_ptr, y_ptr,
+    B, M, N,
+    stride_b, stride_m, stride_n,
+    y_stride_m, y_stride_n,
     invB,  # float32
     BLOCK_N: tl.constexpr,
 ):
@@ -123,11 +112,122 @@ def _mean_reduce_first_tiled_kernel(
             bi = b + u
             bi_valid = bi < B
             ptr = x_ptr + bi * stride_b + m * stride_m + offs_n * stride_n
-            vals = tl.load(ptr, mask=n_mask & bi_valid,
-                           other=0.0).to(tl.float32)
+            vals = tl.load(ptr, mask=n_mask & bi_valid, other=0.0).to(tl.float32)
             acc += vals
         b += UNROLL
 
     mean = acc * invB
     out_ptr = y_ptr + m * y_stride_m + offs_n * y_stride_n
     tl.store(out_ptr, mean, mask=n_mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs mean reduction over a specific dimension.
+    """
+    def __init__(self, dim: int):
+        """
+        Initializes the model with the dimension to reduce over.
+
+        Args:
+            dim (int): The dimension to reduce over.
+        """
+        super(ModelNew, self).__init__()
+        self.dim = dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Reduces the input tensor along the specified dimension by taking the mean.
+
+        Args:
+            x (torch.Tensor): Input tensor of arbitrary shape.
+
+        Returns:
+            torch.Tensor: Output tensor with reduced dimension. The shape of the output is the same as the input except for the reduced dimension which is removed.
+        """
+        return mean_reduction_over_a_dimension(x, self.dim)
+
+def mean_reduction_over_a_dimension(x: torch.Tensor, dim: int) -> torch.Tensor:
+    if not isinstance(x, torch.Tensor):
+        raise TypeError("x must be a torch.Tensor")
+
+    if not x.is_npu:
+        raise ValueError("mean_reduction_over_a_dimension expects an Ascend NPU tensor")
+
+    if x.dim() != 3:
+        raise ValueError("mean_reduction_over_a_dimension expects a 3D tensor")
+
+    if x.dtype != torch.float32:
+        raise TypeError("mean_reduction_over_a_dimension only supports torch.float32 inputs")
+
+    dim = int(dim)
+    if dim < 0:
+        dim += x.dim()
+    if dim not in (0, 1, 2):
+        raise ValueError(f"invalid reduction dim {dim} for input rank {x.dim()}")
+
+    B, M, N = x.shape
+    if (dim == 0 and B == 0) or (dim == 1 and M == 0) or (dim == 2 and N == 0):
+        raise ValueError("mean_reduction_over_a_dimension does not support empty reduction axes")
+
+    x = x.contiguous()
+
+    device = x.device
+    dtype = x.dtype
+
+    # Choose tile along the contiguous N dimension for coalesced loads.
+    if dim == 2:
+        y = torch.empty((B, M), device=device, dtype=dtype)
+        BLOCK_N = 512 if N >= 512 else (256 if N >= 256 else (128 if N >= 128 else 64))
+        grid = (B * M,)
+        _mean_reduce_last_kernel[grid](
+            x, y,
+            B, M, N,
+            x.stride(0), x.stride(1), x.stride(2),
+            y.stride(0), y.stride(1),
+            1.0 / float(N),
+            BLOCK_N=BLOCK_N,
+            num_warps=8 if BLOCK_N >= 256 else 4,
+            num_stages=4,
+        )
+        return y
+
+    if dim == 1:
+        y = torch.empty((B, N), device=device, dtype=dtype)
+        BLOCK_N = 256 if N >= 256 else 128 if N >= 128 else 64
+        grid = (B, triton.cdiv(N, BLOCK_N))
+        _mean_reduce_mid_tiled_kernel[grid](
+            x, y,
+            B, M, N,
+            x.stride(0), x.stride(1), x.stride(2),
+            y.stride(0), y.stride(1),
+            1.0 / float(M),
+            BLOCK_N=BLOCK_N,
+            num_warps=8 if BLOCK_N >= 256 else 4,
+            num_stages=4,
+        )
+        return y
+
+    y = torch.empty((M, N), device=device, dtype=dtype)
+    BLOCK_N = 256 if N >= 256 else 128 if N >= 128 else 64
+    grid = (M, triton.cdiv(N, BLOCK_N))
+    _mean_reduce_first_tiled_kernel[grid](
+        x, y,
+        B, M, N,
+        x.stride(0), x.stride(1), x.stride(2),
+        y.stride(0), y.stride(1),
+        1.0 / float(B),
+        BLOCK_N=BLOCK_N,
+        num_warps=8 if BLOCK_N >= 256 else 4,
+        num_stages=4,
+    )
+    return y
+batch_size = 128
+dim1 = 4096
+dim2 = 4095
+
+def get_inputs():
+    x = torch.rand(batch_size, dim1, dim2)
+    return [x]
+def get_init_inputs():
+    return [1]

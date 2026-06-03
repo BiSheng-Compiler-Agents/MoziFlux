@@ -325,6 +325,11 @@ def _handle_list(args: dict, **_) -> str:
 
 def register(ctx) -> None:
 
+    _requires_env = ["KERNEL_EPISODES_DB"]
+
+    def _check_fn():
+        return True  # DB is created on first use; no pre-check needed
+
     ctx.register_tool(
         name="episode_write",
         toolset="triton_ascend",
@@ -383,6 +388,8 @@ def register(ctx) -> None:
             },
         },
         handler=_handle_write,
+        requires_env=_requires_env,
+        check_fn=_check_fn,
     )
 
     ctx.register_tool(
@@ -428,6 +435,8 @@ def register(ctx) -> None:
             },
         },
         handler=_handle_update,
+        requires_env=_requires_env,
+        check_fn=_check_fn,
     )
 
     ctx.register_tool(
@@ -448,6 +457,8 @@ def register(ctx) -> None:
             },
         },
         handler=_handle_delete,
+        requires_env=_requires_env,
+        check_fn=_check_fn,
     )
 
     ctx.register_tool(
@@ -494,6 +505,8 @@ def register(ctx) -> None:
             },
         },
         handler=_handle_retrieve,
+        requires_env=_requires_env,
+        check_fn=_check_fn,
     )
 
     ctx.register_tool(
@@ -527,4 +540,6 @@ def register(ctx) -> None:
             },
         },
         handler=_handle_list,
+        requires_env=_requires_env,
+        check_fn=_check_fn,
     )

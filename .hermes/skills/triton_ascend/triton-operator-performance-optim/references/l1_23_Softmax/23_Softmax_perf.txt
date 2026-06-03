@@ -1,5 +1,0 @@
-latency-case-1: NA
-# raw-op-statistic-case-1: {"ops":[{"op_type":"DSARandomUniform","avg_time_us":151405.885}]}
-# latency-error-case-1: no resolved kernels matched op_statistic csv
-# resolved-kernels-case-1: _softmax_row_fwd_db_kernel
-# kernel-source-case-1: metadata+operator

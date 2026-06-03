@@ -1,0 +1,20 @@
+name: kernel-sandbox
+version: "1.1.0"
+description: >
+  Sandboxed kernel optimization flow enforces workspace boundaries,
+  injects per-stage context, and verifies deliverables. The agent can
+  only read/write inside its kernel workspace directory and cannot
+  modify project-level files (plugins, skills, optimize_kernels.py).
+  results.txt is auto-saved from remote_verify output and validated
+  for correctness (all providers present, UNIT_TEST PASS, no MISMATCH).
+  Pipeline advancement is blocked if results.txt is missing or invalid.
+author: "Hermes Agent & Shayan"
+requires_env:
+  - KERNEL_SANDBOX_ROOT
+provides_tools:
+  - kernel_status
+provides_hooks:
+  - pre_tool_call
+  - pre_llm_call
+  - post_llm_call
+  - on_session_end

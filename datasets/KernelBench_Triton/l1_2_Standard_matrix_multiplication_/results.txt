@@ -1,0 +1,16 @@
+Correctness check (atol=1e-3, rtol=1e-3):
+  M256-K256-N256              baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=0.00e+00  maxDelta_base2=0.00e+00  maxDelta_opt=0.00e+00
+  M512-K512-N512              baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=0.00e+00  maxDelta_base2=0.00e+00  maxDelta_opt=0.00e+00
+  M1024-K1024-N1024           baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=0.00e+00  maxDelta_base2=0.00e+00  maxDelta_opt=0.00e+00
+  M1024-K4096-N2048           baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=0.00e+00  maxDelta_base2=0.00e+00  maxDelta_opt=0.00e+00
+  M512-K2048-N1024            baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=0.00e+00  maxDelta_base2=0.00e+00  maxDelta_opt=0.00e+00
+  M2048-K1024-N4096           baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxDelta_base1=0.00e+00  maxDelta_base2=0.00e+00  maxDelta_opt=0.00e+00
+All PASS
+matmul_l1_2_perf:
+               label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0     M256-K256-N256       0.004657          0.086456          0.076284          0.055228
+1     M512-K512-N512       0.014136          0.087067          0.085341          0.057431
+2  M1024-K1024-N1024       0.084306          0.148207          0.131960          0.087438
+3  M1024-K4096-N2048       0.643715          0.648920          0.646861          0.649010
+4   M512-K2048-N1024       0.084689          0.108034          0.164172          0.085563
+5  M2048-K1024-N4096       0.649293          0.672706          0.664716          0.668198

@@ -1,31 +1,20 @@
 """
 Vector Add kernel — Triton-Ascend reference implementation.
-
-Compiles the kernel and dumps the npubin to cannsim_host/ using
-TRITON_KERNEL_DUMP without requiring a physical NPU.
-
-This script is intended to run on the remote cannsim machine via run_kernel.sh,
-not locally. It requires a CANN-patched triton-ascend environment (compilerclaw).
-run_kernel.sh invokes it automatically as part of the build step.
+Compiles the kernel and writes the npubin for cannsim.
 """
 import os
-import glob
-import shutil
+import pathlib
 
-DUMP_DIR = "/tmp/triton_dump_vector_add"
-NPUBIN_DEST = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "cannsim_host", "add_kernel.npubin")
+SCRIPT_DIR = str(pathlib.Path(__file__).parent.resolve())
+NPUBIN_DEST = os.path.join(SCRIPT_DIR, "cannsim_host", "add_kernel.npubin")
 
-os.environ["TRITON_KERNEL_DUMP"] = "1"
-os.environ["TRITON_DUMP_DIR"] = DUMP_DIR
 os.environ["TRITON_ASCEND_ARCH"] = "Ascend910_9589"
 os.environ["TRITON_COMPILE_ONLY"] = "1"
 
-if True:  # noqa: E402
-    import triton
-    import triton.language as tl
-    from triton.compiler import compile, ASTSource
-    from triton.backends.compiler import GPUTarget
+import triton  # noqa: E402
+import triton.language as tl  # noqa: E402
+from triton.compiler import compile, ASTSource  # noqa: E402
+from triton.backends.compiler import GPUTarget  # noqa: E402
 
 
 @triton.jit
@@ -38,10 +27,7 @@ def add_kernel(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr):
     tl.store(out_ptr + offs, x + y, mask=mask)
 
 
-N = 1024
 BLOCK = 1024
-
-target = GPUTarget("npu", "Ascend910_9589", 32)
 
 src = ASTSource(
     fn=add_kernel,
@@ -54,24 +40,12 @@ src = ASTSource(
     constants={"BLOCK": BLOCK},
 )
 
-print(f"Compiling add_kernel (N={N}, BLOCK={BLOCK}) ...")
-result = compile(src, target=target)
-print("Compilation OK")
+print(f"[COMPILE] Compiling add_kernel BLOCK={BLOCK} ...")
+result = compile(src, target=GPUTarget("npu", "Ascend910_9589", 32))
+print("[COMPILE] Compilation OK")
 
-# Copy npubin to cannsim_host/
+data = result.asm["npubin"]
 os.makedirs(os.path.dirname(NPUBIN_DEST), exist_ok=True)
-
-npubin_files = sorted(
-    glob.glob(f"{DUMP_DIR}/**/add_kernel.npubin", recursive=True))
-if npubin_files:
-    shutil.copy2(npubin_files[0], NPUBIN_DEST)
-    print(
-        f"npubin copied to: {NPUBIN_DEST}  ({os.path.getsize(NPUBIN_DEST)} bytes)"
-    )
-else:
-    print("WARNING: add_kernel.npubin not found in dump dir")
-
-print("\nDumped files:")
-for f in sorted(glob.glob(f"{DUMP_DIR}/**/*", recursive=True)):
-    if os.path.isfile(f):
-        print(f"  {f}  ({os.path.getsize(f)} bytes)")
+with open(NPUBIN_DEST, "wb") as f:
+    f.write(data)
+print(f"[COMPILE] npubin written to {NPUBIN_DEST} ({len(data)} bytes)")
