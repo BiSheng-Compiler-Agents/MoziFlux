@@ -28,6 +28,10 @@ Keywords: code review, static analysis.
 | Hardcoded core count | Literals like `grid = (20,)` | P0 |
 | Core type mismatch | Kernel containing `tl.dot` using `num_vectorcore` | P0 |
 | Matrix multiplication degraded to element-wise | No `tl.dot`, using Vector Core element-wise multiply-add for matmul/GEMV | P0 |
+| Shape-specific kernel branch with no fallback | `if C == 16: fast_kernel` with no else clause — other shapes crash or produce wrong results | P0 |
+| Untested dispatch path | Fast path and generic path exist but only one has unit tests | P0 |
+| New runtime guards not in baseline | `if out_channels > 256: raise` or `if sum_dim != 1: raise` when baseline had no such constraint | P0 |
+| Requirement/regime mismatch | Kernel/problem says large-K, small-K, tall-skinny, or irregular, but optimized code/tests/profile shapes target unrelated square/control regimes | P1 |
 | BLOCK_SIZE not `tl.constexpr` | Declaration check | P1 |
 | Matrix operation BLOCK not multiple of 16 | Numeric check | P2 |
 
@@ -302,12 +306,10 @@ These files are part of this tree and contain the authoritative API and constrai
 
 - **`../../shared/references/code-review-report-template.md`** (35 lines) — Output report format template
 
-- **`../../shared/references/triton-api-reference.md`** — Complete Triton-Ascend API reference for verifying correct API usage during review:
-  - Section 4 (AL extension): All op signatures, parameter types, error conditions for `al.sync_block_set/wait`, `al.scope`, `al.cast`, `al.fixpipe`, `al.copy`, `@register_custom_op` field requirements, `al.parallel` bind_sub_block constraint (max 2 on 910B), memory ops (`al.index_put`, `al.gather_out_to_ub`, `al.scatter_ub_to_out`, `al.index_select_simd`) — all with exact error types raised on misuse
-  - Section 5 (BL extension): `bl.alloc`, `bl.subview` 32-byte alignment rules — common source of silent misalignment bugs
-  - Section 7 (NPUOptions): Compiler flag interactions — e.g. `sync_solver` must be True when using `al.sync_block_set/wait`; `force_simt_only` vs `parallel_mode` conflicts; `enable_sync_block_lock` requirement
-  - Hardware notes: 910_95-only APIs that silently fail on other hardware
+Shared references are mandatory evidence for API/hardware review; read the relevant file(s) with `read_file` before making findings that depend on them.
 
-- **`../../shared/references/ascend-terminology.md`** — Hardware terminology for identifying constraint violations:
-  - HIVM IR mapping — helps identify which Triton ops map to which hardware pipeline and where conflicts arise
-  - UB constraints, alignment rules
+- **`../../shared/references/code-review-checklist.md`** — Read for every formal review; it is the full P0/P1/P2 checklist.
+- **`../../shared/references/triton-api-reference.md`** — Read when reviewing any non-basic API usage: `al.*`, `bl.*`, `NPUOptions`, `tl.dot` options, synchronization, custom ops, memory ops, or compiler flags. It contains exact signatures, parameter types, error conditions, 32-byte alignment rules, and hardware/API availability notes.
+- **`../../shared/references/ascend-terminology.md`** — Read when identifying hardware constraint violations or interpreting cannsim terms: HIVM IR mapping, pipeline mapping, UB constraints, memory hierarchy, alignment rules.
+- **`../../shared/references/tiling-strategies.md`** — Read when reviewing `BLOCK_*`, grid shape, swizzle/grouping, reductions, persistent-grid loops, or UB/L1 budget correctness.
+- **`../../shared/references/hardware-architecture.md`** — Read when reviewing core type selection, platform differences, memory hierarchy assumptions, INT64 avoidance, or `TRITON_ALL_BLOCKS_PARALLEL`.

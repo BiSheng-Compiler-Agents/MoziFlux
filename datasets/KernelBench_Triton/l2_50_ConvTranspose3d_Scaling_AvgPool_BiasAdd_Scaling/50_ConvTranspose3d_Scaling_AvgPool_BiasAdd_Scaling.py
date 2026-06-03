@@ -1,23 +1,42 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
+
+try:
+    import torch_npu  # noqa: F401
+except ImportError:
+    torch_npu = None
+
+
+DEFAULT_BATCH_SIZE = 128
+DEFAULT_IN_CHANNELS = 3
+DEFAULT_OUT_CHANNELS = 16
+DEFAULT_DEPTH = 16
+DEFAULT_HEIGHT = 32
+DEFAULT_WIDTH = 32
+DEFAULT_KERNEL_SIZE = 3
+DEFAULT_STRIDE = 2
+DEFAULT_PADDING = 1
+DEFAULT_SCALE1 = 0.5
+DEFAULT_SCALE2 = 1.0
+DEFAULT_BIAS_SHAPE = (out_channels, 1, 1, 1)
+
+
+def _is_npu_tensor(x: torch.Tensor) -> bool:
+    return bool(getattr(x, "is_npu", False) or x.device.type == "npu")
 
 
 @triton.jit
 def _avgpool3d_k2s2_bias_scale_fused(
-    x_ptr,  # *float32 [N, C, D, H, W] contiguous NCDHW
-    bias_ptr,  # *float32 [C]
-    y_ptr,  # *float32 [N, C, D2, H2, W2] contiguous NCDHW
-    N,
-    C,
-    D,
-    H,
-    W,  # input dims
-    D2,
-    H2,
-    W2,  # output dims = floor(D/2), floor(H/2), floor(W/2)
-    scale1,  # float
-    scale2,  # float
-    n_elements,  # total output elements = N*C*D2*H2*W2
+    x_ptr,                # *float32 [N, C, D, H, W] contiguous NCDHW
+    bias_ptr,             # *float32 [C]
+    y_ptr,                # *float32 [N, C, D2, H2, W2] contiguous NCDHW
+    N, C, D, H, W,        # input dims
+    D2, H2, W2,           # output dims = floor(D/2), floor(H/2), floor(W/2)
+    scale1,               # float
+    scale2,               # float
+    n_elements,           # total output elements = N*C*D2*H2*W2
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -27,13 +46,13 @@ def _avgpool3d_k2s2_bias_scale_fused(
 
     # Fewer integer divisions for index de-linearization
     out_spatial = D2 * H2 * W2
-    nc = offs // out_spatial  # combined n*C + c
+    nc = offs // out_spatial                          # combined n*C + c
     rem = offs - nc * out_spatial
     t0 = rem // W2
     w2 = rem - t0 * W2
     d2 = t0 // H2
     h2 = t0 - d2 * H2
-    c = nc % C  # for bias indexing
+    c = nc % C                                        # for bias indexing
 
     # Map to input coordinates (stride=2, kernel=2, padding=0)
     w = w2 * 2
@@ -86,3 +105,92 @@ def _avgpool3d_k2s2_bias_scale_fused(
 
     # Store to output
     tl.store(y_ptr + offs, out, mask=mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a 3D transposed convolution, scaling, average pooling, bias addition, and scaling.
+    """
+    def __init__(
+        self,
+        in_channels=DEFAULT_IN_CHANNELS,
+        out_channels=DEFAULT_OUT_CHANNELS,
+        kernel_size=DEFAULT_KERNEL_SIZE,
+        stride=DEFAULT_STRIDE,
+        padding=DEFAULT_PADDING,
+        scale1=DEFAULT_SCALE1,
+        scale2=DEFAULT_SCALE2,
+        bias_shape=DEFAULT_BIAS_SHAPE,
+    ):
+        super(ModelNew, self).__init__()
+        self.conv_transpose = nn.ConvTranspose3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        self.scale1 = nn.Parameter(torch.tensor(scale1))
+        self.avg_pool = nn.AvgPool3d(kernel_size=2)
+        self.bias = nn.Parameter(torch.randn(bias_shape))
+        self.scale2 = nn.Parameter(torch.tensor(scale2))
+
+    def forward(self, x):
+        if not _is_npu_tensor(x):
+            raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
+        x = self.conv_transpose(x)
+        # Fast fused AvgPool3d(kernel=2, stride=2) + bias + final scaling using Triton.
+        # Matches: x = x * self.scale1; x = avg_pool(x); x = x + self.bias; x = x * self.scale2
+        # Fused as: out = (avg_pool(x * scale1) + bias) * scale2
+        x = x.contiguous()
+        N, C, D, H, W = x.shape
+        D2, H2, W2 = D // 2, H // 2, W // 2
+        out = torch.empty((N, C, D2, H2, W2), device=x.device, dtype=x.dtype)
+
+        bias_1d = self.bias.view(C).contiguous()
+        n_elements = N * C * D2 * H2 * W2
+        BLOCK = 256
+        grid = lambda META: ((n_elements + BLOCK - 1) // BLOCK,)
+
+        _avgpool3d_k2s2_bias_scale_fused[grid](
+            x,
+            bias_1d,
+            out,
+            N,
+            C,
+            D,
+            H,
+            W,
+            D2,
+            H2,
+            W2,
+            float(self.scale1.item()),
+            float(self.scale2.item()),
+            n_elements,
+            BLOCK_SIZE=BLOCK,
+            num_warps=4,
+            num_stages=2,
+        )
+        return out
+
+
+_MODEL_CACHE: dict[tuple[torch.device, torch.dtype], ModelNew] = {}
+
+
+def run_operator(x: torch.Tensor) -> torch.Tensor:
+    key = (x.device, x.dtype)
+    model = _MODEL_CACHE.get(key)
+    if model is None:
+        model = ModelNew().to(device=x.device, dtype=x.dtype)
+        model.eval()
+        _MODEL_CACHE[key] = model
+    return model(x)
+batch_size = 128
+in_channels = 3
+out_channels = 16
+depth, height, width = 16, 32, 32
+kernel_size = 3
+stride = 2
+padding = 1
+scale1 = 0.5
+scale2 = 1.0
+bias_shape = (out_channels, 1, 1, 1)
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, depth, height, width, device='npu')]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, stride, padding, scale1, scale2, bias_shape]

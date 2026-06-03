@@ -1,4 +1,0 @@
-latency-case-1: 1122445.433
-# raw-op-statistic-case-1: {"ops":[{"op_type":"_maxpool1d_forward_kernel","avg_time_us":1122445.433},{"op_type":"DSARandomUniform","avg_time_us":50514.929}]}
-# resolved-kernels-case-1: _maxpool1d_forward_kernel
-# kernel-source-case-1: metadata+operator

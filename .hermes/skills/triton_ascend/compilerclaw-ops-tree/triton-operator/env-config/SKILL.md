@@ -1,3 +1,8 @@
+---
+name: env-config
+description: "Validate/build the Ascend Triton operator dev environment (CANN, torch_npu, triton-ascend)"
+---
+
 # Triton Operator Environment Configuration [LEAF NODE]
 
 Validate and build the Triton operator development environment on Ascend NPU, including

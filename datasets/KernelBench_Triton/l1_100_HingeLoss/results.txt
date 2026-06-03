@@ -1,0 +1,23 @@
+============================================================
+Correctness Test: every variant vs torch reference
+============================================================
+  [tiny     N=512    ] Baseline Triton1=[PASS 5.96e-08]  Baseline Triton2=[PASS 5.96e-08]  Optimized Triton=[PASS 5.96e-08]
+  [small    N=4096   ] Baseline Triton1=[PASS 5.96e-08]  Baseline Triton2=[PASS 5.96e-08]  Optimized Triton=[PASS 5.96e-08]
+  [medium   N=32768  ] Baseline Triton1=[PASS 5.96e-08]  Baseline Triton2=[PASS 5.96e-08]  Optimized Triton=[PASS 5.96e-08]
+  [large    N=131072 ] Baseline Triton1=[PASS 5.96e-08]  Baseline Triton2=[PASS 5.96e-08]  Optimized Triton=[PASS 5.96e-08]
+  [nopow2   N=5000   ] Baseline Triton1=[PASS 1.79e-07]  Baseline Triton2=[PASS 1.79e-07]  Optimized Triton=[PASS 1.79e-07]
+  [bench    N=32768  ] Baseline Triton1=[PASS 5.96e-08]  Baseline Triton2=[PASS 5.96e-08]  Optimized Triton=[PASS 5.96e-08]
+────────────────────────────────────────────────────────────
+Overall: ALL PASS
+
+============================================================
+Benchmark: HingeLoss Latency
+============================================================
+hinge_loss_benchmark:
+    label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    tiny       0.099639          0.040198          0.039079          0.028489
+1   small       0.101492          0.046715          0.046083          0.036140
+2  medium       0.150089          0.052511          0.061590          0.064088
+3   large       0.161325          0.060895          0.061337          0.085594
+4  nopow2       0.101627          0.050160          0.051734          0.064035
+5   bench       0.150492          0.052542          0.061868          0.064022

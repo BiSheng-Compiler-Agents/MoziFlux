@@ -1,0 +1,231 @@
+========================================================================
+UNIT TEST — every variant vs torch.matmul
+========================================================================
+  [B1-small      ] Baseline Triton1=[FAIL 6.41e+01]  Baseline Triton2=[ERROR:MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]--------]  Optimized Triton=[PASS 1.56e-02]
+  [B4-small      ] Baseline Triton1=[FAIL 6.97e+01]  Baseline Triton2=[ERROR:MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]--------]  Optimized Triton=[PASS 1.56e-02]
+  [B1-medium     ] Baseline Triton1=[FAIL 1.29e+02]  Baseline Triton2=[ERROR:MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]--------]  Optimized Triton=[PASS 6.25e-02]
+  [B4-medium     ] Baseline Triton1=[FAIL nan]  Baseline Triton2=[ERROR:MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]--------]  Optimized Triton=[PASS 6.25e-02]
+  [B16-medium    ] Baseline Triton1=[FAIL nan]  Baseline Triton2=[ERROR:MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]--------]  Optimized Triton=[PASS 3.12e-02]
+  [B8-tallM      ] Baseline Triton1=[FAIL nan]  Baseline Triton2=[ERROR:MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]--------]  Optimized Triton=[PASS 3.12e-02]
+  [B8-wideN      ] Baseline Triton1=[FAIL nan]  Baseline Triton2=[ERROR:MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]--------]  Optimized Triton=[PASS 3.12e-02]
+  [B2-nonpow2    ] Baseline Triton1=[FAIL nan]  Baseline Triton2=[ERROR:MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]--------]  Optimized Triton=[PASS 6.25e-02]
+  [B4-nonpow2    ] Baseline Triton1=[FAIL nan]  Baseline Triton2=[ERROR:MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]--------]  Optimized Triton=[PASS 6.25e-02]
+  [B8-large      ] Baseline Triton1=[FAIL nan]  Baseline Triton2=[ERROR:MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]--------]  Optimized Triton=[PASS 6.25e-02]
+  [B1-benchmark  ] Baseline Triton1=[FAIL nan]  Baseline Triton2=[ERROR:MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]--------]  Optimized Triton=[PASS 6.25e-02]
+  [B4-benchmark  ] Baseline Triton1=[FAIL nan]  Baseline Triton2=[ERROR:MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]--------]  Optimized Triton=[PASS 6.25e-02]
+
+Broadcasting Tests:
+  [2Dx3D         ] Baseline Triton1=[ERROR:AssertionError: Input shapes must be (N,M,K) and (K,L)]  Baseline Triton2=[ERROR:AssertionError: Input shapes must be (N,M,K) and (K,L)]  Optimized Triton=[PASS 1.56e-02]
+  [3Dx2D         ] Baseline Triton1=[FAIL nan]  Baseline Triton2=[ERROR:MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]--------]  Optimized Triton=[PASS 3.12e-02]
+  [2Dx2D         ] Baseline Triton1=[ERROR:AssertionError: Input shapes must be (N,M,K) and (K,L)]  Baseline Triton2=[ERROR:AssertionError: Input shapes must be (N,M,K) and (K,L)]  Optimized Triton=[PASS 1.56e-02]
+
+Some tests FAILED!
+
+[BENCH] baseline2 failed on B1-small: MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]------------------
+[ConvertLinalgRToBinary] encounters error:
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: Failed to run buildFinalHIVMPipelines pipeline
+
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: ub overflow, requires 2097152 bits while 2031616 bits available!
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:45): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:27): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+[ERROR] Failed to run BiShengIR pipeline
+
+
+[INFO]: The compiled kernel cache is in /home/s00929845/.triton/cache/0jiloQcFE7y-XNPCBuyeJY8zRleG3H7TZfNHO-b_Cak
+
+///------------------[ERROR][Triton][END]------------------
+
+[BENCH] baseline2 failed on B4-small: MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]------------------
+[ConvertLinalgRToBinary] encounters error:
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: Failed to run buildFinalHIVMPipelines pipeline
+
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: ub overflow, requires 2097152 bits while 2031616 bits available!
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:45): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:27): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+[ERROR] Failed to run BiShengIR pipeline
+
+
+[INFO]: The compiled kernel cache is in /home/s00929845/.triton/cache/0jiloQcFE7y-XNPCBuyeJY8zRleG3H7TZfNHO-b_Cak
+
+///------------------[ERROR][Triton][END]------------------
+
+[BENCH] baseline2 failed on B1-medium: MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]------------------
+[ConvertLinalgRToBinary] encounters error:
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: Failed to run buildFinalHIVMPipelines pipeline
+
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: ub overflow, requires 2097152 bits while 2031616 bits available!
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:45): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:27): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+[ERROR] Failed to run BiShengIR pipeline
+
+
+[INFO]: The compiled kernel cache is in /home/s00929845/.triton/cache/0jiloQcFE7y-XNPCBuyeJY8zRleG3H7TZfNHO-b_Cak
+
+///------------------[ERROR][Triton][END]------------------
+
+[BENCH] baseline2 failed on B4-medium: MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]------------------
+[ConvertLinalgRToBinary] encounters error:
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: Failed to run buildFinalHIVMPipelines pipeline
+
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: ub overflow, requires 2097152 bits while 2031616 bits available!
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:45): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:27): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+[ERROR] Failed to run BiShengIR pipeline
+
+
+[INFO]: The compiled kernel cache is in /home/s00929845/.triton/cache/0jiloQcFE7y-XNPCBuyeJY8zRleG3H7TZfNHO-b_Cak
+
+///------------------[ERROR][Triton][END]------------------
+
+[BENCH] baseline2 failed on B16-medium: MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]------------------
+[ConvertLinalgRToBinary] encounters error:
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: Failed to run buildFinalHIVMPipelines pipeline
+
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: ub overflow, requires 2097152 bits while 2031616 bits available!
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:45): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:27): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+[ERROR] Failed to run BiShengIR pipeline
+
+
+[INFO]: The compiled kernel cache is in /home/s00929845/.triton/cache/0jiloQcFE7y-XNPCBuyeJY8zRleG3H7TZfNHO-b_Cak
+
+///------------------[ERROR][Triton][END]------------------
+
+[BENCH] baseline2 failed on B8-tallM: MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]------------------
+[ConvertLinalgRToBinary] encounters error:
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: Failed to run buildFinalHIVMPipelines pipeline
+
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: ub overflow, requires 2097152 bits while 2031616 bits available!
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:45): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:27): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+[ERROR] Failed to run BiShengIR pipeline
+
+
+[INFO]: The compiled kernel cache is in /home/s00929845/.triton/cache/0jiloQcFE7y-XNPCBuyeJY8zRleG3H7TZfNHO-b_Cak
+
+///------------------[ERROR][Triton][END]------------------
+
+[BENCH] baseline2 failed on B8-wideN: MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]------------------
+[ConvertLinalgRToBinary] encounters error:
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: Failed to run buildFinalHIVMPipelines pipeline
+
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: ub overflow, requires 2097152 bits while 2031616 bits available!
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:45): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:27): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+[ERROR] Failed to run BiShengIR pipeline
+
+
+[INFO]: The compiled kernel cache is in /home/s00929845/.triton/cache/0jiloQcFE7y-XNPCBuyeJY8zRleG3H7TZfNHO-b_Cak
+
+///------------------[ERROR][Triton][END]------------------
+
+[BENCH] baseline2 failed on B2-nonpow2: MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]------------------
+[ConvertLinalgRToBinary] encounters error:
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: Failed to run buildFinalHIVMPipelines pipeline
+
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: ub overflow, requires 2097152 bits while 2031616 bits available!
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:45): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:27): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+[ERROR] Failed to run BiShengIR pipeline
+
+
+[INFO]: The compiled kernel cache is in /home/s00929845/.triton/cache/0jiloQcFE7y-XNPCBuyeJY8zRleG3H7TZfNHO-b_Cak
+
+///------------------[ERROR][Triton][END]------------------
+
+[BENCH] baseline2 failed on B4-nonpow2: MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]------------------
+[ConvertLinalgRToBinary] encounters error:
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: Failed to run buildFinalHIVMPipelines pipeline
+
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: ub overflow, requires 2097152 bits while 2031616 bits available!
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:45): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:27): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+[ERROR] Failed to run BiShengIR pipeline
+
+
+[INFO]: The compiled kernel cache is in /home/s00929845/.triton/cache/0jiloQcFE7y-XNPCBuyeJY8zRleG3H7TZfNHO-b_Cak
+
+///------------------[ERROR][Triton][END]------------------
+
+[BENCH] baseline2 failed on B8-large: MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]------------------
+[ConvertLinalgRToBinary] encounters error:
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: Failed to run buildFinalHIVMPipelines pipeline
+
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: ub overflow, requires 2097152 bits while 2031616 bits available!
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:45): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:27): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+[ERROR] Failed to run BiShengIR pipeline
+
+
+[INFO]: The compiled kernel cache is in /home/s00929845/.triton/cache/0jiloQcFE7y-XNPCBuyeJY8zRleG3H7TZfNHO-b_Cak
+
+///------------------[ERROR][Triton][END]------------------
+
+[BENCH] baseline2 failed on B1-benchmark: MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]------------------
+[ConvertLinalgRToBinary] encounters error:
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: Failed to run buildFinalHIVMPipelines pipeline
+
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: ub overflow, requires 2097152 bits while 2031616 bits available!
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:45): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:27): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+[ERROR] Failed to run BiShengIR pipeline
+
+
+[INFO]: The compiled kernel cache is in /home/s00929845/.triton/cache/0jiloQcFE7y-XNPCBuyeJY8zRleG3H7TZfNHO-b_Cak
+
+///------------------[ERROR][Triton][END]------------------
+
+[BENCH] baseline2 failed on B4-benchmark: MLIRCompilationError: 
+///------------------[ERROR][Triton][BEG]------------------
+[ConvertLinalgRToBinary] encounters error:
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: Failed to run buildFinalHIVMPipelines pipeline
+
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":17:0): error: ub overflow, requires 2097152 bits while 2031616 bits available!
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:45): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+loc("/home/s00929845/kernel_verify/l1_10_3D_tensor_matrix_multiplication_1781626096/base_10_3D_tensor_matrix_multiplication.py":46:27): error: 'hivm.hir.vcast' op Unsupported op for finding the root alloc.
+[ERROR] Failed to run BiShengIR pipeline
+
+
+[INFO]: The compiled kernel cache is in /home/s00929845/.triton/cache/0jiloQcFE7y-XNPCBuyeJY8zRleG3H7TZfNHO-b_Cak
+
+///------------------[ERROR][Triton][END]------------------
+
+3D_tensor_matmul_perf:
+           label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0       B1-small       0.131494          3.771072               inf          0.105772
+1       B4-small       0.169088          3.782159               inf          0.308818
+2      B1-medium       0.389923          7.517869               inf          0.272894
+3      B4-medium       1.065832         22.460554               inf          0.918551
+4     B16-medium       0.647425         11.302000               inf          1.418292
+5       B8-tallM       2.003259         37.554451               inf          2.220335
+6       B8-wideN       1.961550         37.563553               inf          2.369787
+7     B2-nonpow2       1.629926         33.634533               inf          1.046656
+8     B4-nonpow2       2.282068         42.131115               inf          1.556880
+9       B8-large       1.905757         37.435539               inf          1.798934
+10  B1-benchmark       1.950570         44.782360               inf          1.087630
+11  B4-benchmark       6.836362        149.115585               inf          3.917161
+ERROR conda.cli.main_run:execute(148): `conda run python profile_kernels.py` failed. (See above for error)

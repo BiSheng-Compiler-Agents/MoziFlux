@@ -1,0 +1,21 @@
+=== Unit test ===
+  M256-N256       baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=9.54e-07  maxΔ_base2=9.54e-07  maxΔ_opt=9.54e-07
+  M512-N512       baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=9.54e-07  maxΔ_base2=9.54e-07  maxΔ_opt=9.54e-07
+  M512-N1024      baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=9.54e-07  maxΔ_base2=9.54e-07  maxΔ_opt=9.54e-07
+  M1024-N2048     baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=9.54e-07  maxΔ_base2=9.54e-07  maxΔ_opt=9.54e-07
+  M1024-N4096     baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=9.54e-07  maxΔ_base2=9.54e-07  maxΔ_opt=9.54e-07
+  M4000-N4000     baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=1.91e-06  maxΔ_base2=1.91e-06  maxΔ_opt=1.91e-06
+  M4000-N4000     baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=1.91e-06  maxΔ_base2=1.91e-06  maxΔ_opt=1.91e-06
+  M2**14-N2**14   baseline1 [PASS]  baseline2 [PASS]  optimized [PASS]  maxΔ_base1=1.91e-06  maxΔ_base2=1.91e-06  maxΔ_opt=1.91e-06
+All PASS
+=== Benchmark ===
+crossentropy_perf:
+           label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      M256-N256       0.010440          0.049619          0.048157          0.048028
+1      M512-N512       0.010843          0.047591          0.050047          0.045429
+2     M512-N1024       0.013220          0.051136          0.051941          0.046024
+3    M1024-N2048       0.023967          0.061698          0.060495          0.046761
+4    M1024-N4096       0.041213          0.060698          0.060896          0.046943
+5    M4000-N4000       0.141597          0.172980          0.173093          0.092982
+6    M4000-N4000       0.141614          0.173047          0.172926          0.092930
+7  M2**14-N2**14       1.556188          1.029668          1.029945          0.905632

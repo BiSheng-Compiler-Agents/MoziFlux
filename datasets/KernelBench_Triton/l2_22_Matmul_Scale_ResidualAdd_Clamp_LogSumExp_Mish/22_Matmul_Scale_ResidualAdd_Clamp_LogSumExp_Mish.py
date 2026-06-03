@@ -1,3 +1,7 @@
+import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import triton
 import triton.language as tl
 
@@ -69,3 +73,84 @@ def _post_ops_row_lse_mish(
     out_val = (lse * lse) * tanh_u
 
     tl.store(out_ptr + pid_m * stride_out_m, out_val)
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a matrix multiplication, scales the result, adds a residual connection, clamps the output,
+    applies LogSumExp, and finally applies the Mish activation function.
+    """
+    def __init__(self, input_size, hidden_size, scale_factor, clamp_min, clamp_max):
+        super(ModelNew, self).__init__()
+        self.matmul = nn.Linear(input_size, hidden_size)
+        self.scale_factor = float(scale_factor)
+        self.clamp_min = float(clamp_min)
+        self.clamp_max = float(clamp_max)
+
+    def forward(self, x):
+        return matmul_scale_residualadd_clamp_logsumexp_mish(
+            x,
+            self.matmul.weight,
+            self.matmul.bias,
+            self.scale_factor,
+            self.clamp_min,
+            self.clamp_max,
+        )
+
+
+def _launch_post_ops(y, scale_factor, clamp_min, clamp_max):
+    if y.device.type != "npu":
+        raise RuntimeError("matmul_scale_residualadd_clamp_logsumexp_mish requires NPU tensors")
+
+    y = y.contiguous()
+    B, N = y.shape
+    out = torch.empty((B, 1), device=y.device, dtype=y.dtype)
+
+    if N >= 1024:
+        block_n = 1024
+    elif N >= 512:
+        block_n = 512
+    else:
+        block_n = 1 if N <= 1 else 1 << int(math.ceil(math.log2(N)))
+    num_warps = 8 if block_n >= 512 else 4
+
+    grid = (triton.cdiv(B, 1),)
+    _post_ops_row_lse_mish[grid](
+        y,
+        out,
+        B,
+        N,
+        y.stride(0),
+        y.stride(1),
+        out.stride(0),
+        float(scale_factor),
+        float(clamp_min),
+        float(clamp_max),
+        BLOCK_N=block_n,
+        num_warps=num_warps,
+        num_stages=4,
+    )
+    return out
+
+
+def matmul_scale_residualadd_clamp_logsumexp_mish(
+    x,
+    weight,
+    bias=None,
+    scale_factor=1.0,
+    clamp_min=-10.0,
+    clamp_max=10.0,
+):
+    y = F.linear(x, weight, bias)
+    return _launch_post_ops(y, scale_factor, clamp_min, clamp_max)
+batch_size = 1024
+input_size = 8192
+hidden_size = 8192
+scale_factor = 2.0
+clamp_min = -10.0
+clamp_max = 10.0
+
+def get_inputs():
+    return [torch.rand(batch_size, input_size)]
+def get_init_inputs():
+    return [input_size, hidden_size, scale_factor, clamp_min, clamp_max]

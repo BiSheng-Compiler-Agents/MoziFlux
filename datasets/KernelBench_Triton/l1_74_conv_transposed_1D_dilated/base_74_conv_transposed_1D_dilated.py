@@ -1,0 +1,304 @@
+import torch
+import torch.nn as nn
+import triton
+import triton.language as tl
+
+
+@triton.jit
+def _conv_transpose1d_kernel(
+    x_ptr,            # *f32, [B, Cin, Lin]
+    w_ptr,            # *f32, [Cin, Cout, K]
+    bias_ptr,         # *f32, [Cout] (optional)
+    y_ptr,            # *f32, [B, Cout, Lout]
+    B: tl.constexpr,  # batch size
+    Cin: tl.constexpr,              # in channels
+    Cout,             # out channels
+    Lin,              # input length
+    Lout,             # output length
+    K: tl.constexpr,  # kernel size
+    STRIDE: tl.constexpr,           # stride
+    PADDING: tl.constexpr,          # padding
+    DILATION: tl.constexpr,         # dilation
+    HAS_BIAS: tl.constexpr,         # whether to add bias
+    BLOCK_COUT: tl.constexpr,       # tile size along out-channels
+    BLOCK_T: tl.constexpr,          # tile size along time dimension
+):
+    pid0 = tl.program_id(axis=0)
+    pid1 = tl.program_id(axis=1)
+
+    T_BLOCKS = tl.cdiv(Lout, BLOCK_T)
+    b = pid0 // T_BLOCKS
+    tb = pid0 % T_BLOCKS
+
+    oc_offsets = pid1 * BLOCK_COUT + tl.arange(0, BLOCK_COUT)
+    t_offsets = tb * BLOCK_T + tl.arange(0, BLOCK_T)
+
+    oc_mask = oc_offsets < Cout
+    t_mask = t_offsets < Lout
+
+    acc = tl.zeros((BLOCK_COUT, BLOCK_T), dtype=tl.float32)
+    x_batch_base = (b * Cin) * Lin
+    y_batch_base = (b * Cout) * Lout
+    base_t = t_offsets + PADDING
+
+    for ic in tl.static_range(0, Cin):
+        x_ic_base = x_batch_base + ic * Lin
+        w_ic_base = (ic * Cout) * K
+        w_ptr_ic = w_ptr + w_ic_base + oc_offsets * K
+
+        if STRIDE == 1:
+            for k in tl.static_range(0, K):
+                t_in = base_t - k * DILATION
+                vmask = (t_in >= 0) & (t_in < Lin) & t_mask
+                t_in_safe = tl.where(vmask, t_in, 0)
+                x_vals = tl.load(x_ptr + x_ic_base + t_in_safe, mask=vmask, other=0.0).to(tl.float32)
+                w_vec = tl.load(w_ptr_ic + k, mask=oc_mask, other=0.0).to(tl.float32)
+                acc += w_vec[:, None] * x_vals[None, :]
+        else:
+            for k in tl.static_range(0, K):
+                n_vec = base_t - k * DILATION
+                div_ok = (n_vec % STRIDE) == 0
+                t_in = n_vec // STRIDE
+                vmask = div_ok & (t_in >= 0) & (t_in < Lin) & t_mask
+                t_in_safe = tl.where(vmask, t_in, 0)
+                x_vals = tl.load(x_ptr + x_ic_base + t_in_safe, mask=vmask, other=0.0).to(tl.float32)
+                w_vec = tl.load(w_ptr_ic + k, mask=oc_mask, other=0.0).to(tl.float32)
+                acc += w_vec[:, None] * x_vals[None, :]
+
+    if HAS_BIAS:
+        b_vec = tl.load(bias_ptr + oc_offsets, mask=oc_mask, other=0.0).to(tl.float32)
+        acc += b_vec[:, None]
+
+    y_idx = y_batch_base + oc_offsets[:, None] * Lout + t_offsets[None, :]
+    mask_2d = oc_mask[:, None] & t_mask[None, :]
+    tl.store(y_ptr + y_idx, acc, mask=mask_2d)
+
+
+@triton.jit
+def _conv_transpose1d_kernel_1dgrid(
+    x_ptr,
+    w_ptr,
+    bias_ptr,
+    y_ptr,
+    B: tl.constexpr,
+    Cin: tl.constexpr,
+    Cout: tl.constexpr,
+    Lin,
+    Lout,
+    K: tl.constexpr,
+    STRIDE: tl.constexpr,
+    PADDING: tl.constexpr,
+    DILATION: tl.constexpr,
+    HAS_BIAS: tl.constexpr,
+    BLOCK_COUT: tl.constexpr,
+    BLOCK_T: tl.constexpr,
+):
+    pid0 = tl.program_id(axis=0)
+
+    T_BLOCKS = tl.cdiv(Lout, BLOCK_T)
+    b = pid0 // T_BLOCKS
+    tb = pid0 % T_BLOCKS
+
+    oc_offsets = tl.arange(0, BLOCK_COUT)
+    t_offsets = tb * BLOCK_T + tl.arange(0, BLOCK_T)
+    t_mask = t_offsets < Lout
+
+    acc = tl.zeros((BLOCK_COUT, BLOCK_T), dtype=tl.float32)
+    x_batch_base = (b * Cin) * Lin
+    y_batch_base = (b * Cout) * Lout
+    base_t = t_offsets + PADDING
+
+    for ic in tl.static_range(0, Cin):
+        x_ic_base = x_batch_base + ic * Lin
+        w_ic_base = (ic * Cout) * K
+        w_ptr_ic = w_ptr + w_ic_base + oc_offsets * K
+
+        if STRIDE == 1:
+            for k in tl.static_range(0, K):
+                t_in = base_t - k * DILATION
+                vmask = (t_in >= 0) & (t_in < Lin) & t_mask
+                t_in_safe = tl.where(vmask, t_in, 0)
+                x_vals = tl.load(x_ptr + x_ic_base + t_in_safe, mask=vmask, other=0.0).to(tl.float32)
+                w_vec = tl.load(w_ptr_ic + k).to(tl.float32)
+                acc += w_vec[:, None] * x_vals[None, :]
+        else:
+            for k in tl.static_range(0, K):
+                n_vec = base_t - k * DILATION
+                div_ok = (n_vec % STRIDE) == 0
+                t_in = n_vec // STRIDE
+                vmask = div_ok & (t_in >= 0) & (t_in < Lin) & t_mask
+                t_in_safe = tl.where(vmask, t_in, 0)
+                x_vals = tl.load(x_ptr + x_ic_base + t_in_safe, mask=vmask, other=0.0).to(tl.float32)
+                w_vec = tl.load(w_ptr_ic + k).to(tl.float32)
+                acc += w_vec[:, None] * x_vals[None, :]
+
+    if HAS_BIAS:
+        b_vec = tl.load(bias_ptr + oc_offsets).to(tl.float32)
+        acc += b_vec[:, None]
+
+    y_idx = y_batch_base + oc_offsets[:, None] * Lout + t_offsets[None, :]
+    mask_2d = t_mask[None, :]
+    tl.store(y_ptr + y_idx, acc, mask=mask_2d)
+
+
+def conv_transposed_1d_dilated(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None = None,
+    stride: int = 1,
+    padding: int = 0,
+    dilation: int = 1,
+) -> torch.Tensor:
+    if x.device.type != "npu":
+        raise RuntimeError("conv_transposed_1d_dilated expects x on NPU.")
+    if weight.device.type != "npu":
+        raise RuntimeError("conv_transposed_1d_dilated expects weight on NPU.")
+    if bias is not None and bias.device.type != "npu":
+        raise RuntimeError("conv_transposed_1d_dilated expects bias on NPU.")
+    if x.ndim != 3:
+        raise RuntimeError(f"Expected x to have shape [B, Cin, Lin], got {tuple(x.shape)}.")
+    if weight.ndim != 3:
+        raise RuntimeError(
+            f"Expected weight to have shape [Cin, Cout, K], got {tuple(weight.shape)}."
+        )
+    if x.shape[1] != weight.shape[0]:
+        raise RuntimeError(
+            f"Input channels ({x.shape[1]}) must match weight.shape[0] ({weight.shape[0]})."
+        )
+    if bias is not None and bias.ndim != 1:
+        raise RuntimeError(f"Expected bias to have shape [Cout], got {tuple(bias.shape)}.")
+    if bias is not None and bias.shape[0] != weight.shape[1]:
+        raise RuntimeError(
+            f"Bias size ({bias.shape[0]}) must match weight.shape[1] ({weight.shape[1]})."
+        )
+    supported_dtypes = (torch.float16, torch.bfloat16, torch.float32)
+    if x.dtype not in supported_dtypes:
+        raise RuntimeError(f"Unsupported input dtype: {x.dtype}.")
+    if weight.dtype != x.dtype:
+        raise RuntimeError(
+            f"Expected weight dtype {x.dtype} to match input dtype, got {weight.dtype}."
+        )
+    if bias is not None and bias.dtype != x.dtype:
+        raise RuntimeError(
+            f"Expected bias dtype {x.dtype} to match input dtype, got {bias.dtype}."
+        )
+    if stride < 1 or padding < 0 or dilation < 1:
+        raise RuntimeError(
+            f"Invalid parameters: stride={stride}, padding={padding}, dilation={dilation}."
+        )
+
+    x_c = x.contiguous()
+    weight_c = weight.contiguous()
+    bias_c = bias.contiguous() if bias is not None else None
+
+    B, Cin, Lin = x_c.shape
+    _, Cout, K = weight_c.shape
+    Lout = (Lin - 1) * stride - 2 * padding + dilation * (K - 1) + 1
+    if Lout <= 0:
+        raise RuntimeError(f"Computed invalid output length {Lout}.")
+
+    y = torch.empty((B, Cout, Lout), device=x.device, dtype=x.dtype)
+
+    BLOCK_T = 128
+    BLOCK_COUT = 64
+    has_bias = bias_c is not None
+
+    if Cout == BLOCK_COUT:
+        grid = (triton.cdiv(Lout, BLOCK_T) * B,)
+        _conv_transpose1d_kernel_1dgrid[grid](
+            x_c, weight_c,
+            bias_c if has_bias else y,
+            y,
+            B, Cin, Cout, Lin, Lout, K,
+            stride, padding, dilation,
+            HAS_BIAS=has_bias,
+            BLOCK_COUT=BLOCK_COUT,
+            BLOCK_T=BLOCK_T,
+            num_warps=8,
+            num_stages=2,
+        )
+    else:
+        grid = (triton.cdiv(Lout, BLOCK_T) * B, triton.cdiv(Cout, BLOCK_COUT))
+        _conv_transpose1d_kernel[grid](
+            x_c, weight_c,
+            bias_c if has_bias else y,
+            y,
+            B, Cin, Cout, Lin, Lout, K,
+            stride, padding, dilation,
+            HAS_BIAS=has_bias,
+            BLOCK_COUT=BLOCK_COUT,
+            BLOCK_T=BLOCK_T,
+            num_warps=8,
+            num_stages=3,
+        )
+    return y
+
+
+class ModelNew(nn.Module):
+    """
+    Performs a transposed 1D convolution operation with square input and asymmetric kernel, optionally with dilation.
+
+    Args:
+        in_channels (int): Number of channels in the input tensor.
+        out_channels (int): Number of channels produced by the convolution.
+        kernel_size (int): Size of the convolution kernel.
+        stride (int, optional): Stride of the convolution. Defaults to 1.
+        padding (int, optional): Padding applied to the input. Defaults to 0.
+        dilation (int, optional): Spacing between kernel elements. Defaults to 1.
+        bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
+    """
+    def __init__(
+        self,
+        in_channels: int = 3,
+        out_channels: int = 64,
+        kernel_size: int = 5,
+        stride: int = 1,
+        padding: int = 0,
+        dilation: int = 3,
+        bias: bool = False,
+    ):
+        super(ModelNew, self).__init__()
+        self.conv1d_transpose = nn.ConvTranspose1d(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            bias=bias,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        mod = self.conv1d_transpose
+        stride = mod.stride[0]
+        padding = mod.padding[0]
+        dilation = mod.dilation[0]
+        output_padding = mod.output_padding[0]
+
+        if mod.groups != 1:
+            raise RuntimeError("ModelNew only supports groups=1.")
+        if output_padding != 0:
+            raise RuntimeError("ModelNew only supports output_padding=0.")
+
+        return conv_transposed_1d_dilated(
+            x,
+            mod.weight,
+            mod.bias,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+        )
+batch_size = 32
+in_channels = 32
+out_channels = 64
+kernel_size = 5
+length = 131072
+stride = 1
+padding = 0
+dilation = 3
+
+def get_inputs():
+    x = torch.rand(batch_size, in_channels, length)
+    return [x]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, stride, padding, dilation]

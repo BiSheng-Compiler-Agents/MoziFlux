@@ -1,3 +1,5 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
 
@@ -86,3 +88,117 @@ def conv2d_nchw_fp32_kernel(
                y_out[:, None]) * W_OUT + x_out[:, None]
     store_mask = p_mask[:, None] & oc_mask[None, :]
     tl.store(y_ptr + y_index, acc, mask=store_mask)
+
+
+def _conv2d_triton_nchw(x: torch.Tensor,
+                        weight: torch.Tensor,
+                        bias: torch.Tensor | None,
+                        stride: tuple[int, int],
+                        padding: tuple[int, int],
+                        dilation: tuple[int, int]) -> torch.Tensor:
+    # Assumes x and weight are float32 and contiguous in NCHW / OIHW layouts.
+    if x.device.type != "npu" or weight.device.type != "npu":
+        raise AssertionError("Triton kernel requires NPU tensors")
+    N, C, H, W = x.shape
+    OC, Cw, KH, KW = weight.shape
+    assert C == Cw, "Input channels mismatch"
+    sh, sw = stride
+    ph, pw = padding
+    dh, dw = dilation
+
+    H_OUT = (H + 2 * ph - dh * (KH - 1) - 1) // sh + 1
+    W_OUT = (W + 2 * pw - dw * (KW - 1) - 1) // sw + 1
+
+    y = torch.empty((N, OC, H_OUT, W_OUT), device=x.device, dtype=torch.float32)
+
+    x_ = x.contiguous().to(torch.float32)
+    # Pack weights to [K, OC] where K=C*KH*KW for coalesced OC loads
+    K = C * KH * KW
+    w_packed = weight.permute(1, 2, 3, 0).reshape(K, OC).contiguous().to(torch.float32)
+    # Guarantee a valid bias pointer: zeros if module has no bias
+    b_ = (bias.contiguous().to(torch.float32)
+          if bias is not None
+          else torch.zeros(OC, device=x.device, dtype=torch.float32))
+
+    BLOCK_P = 64
+    BLOCK_OC = 32
+    grid = (triton.cdiv(N * H_OUT * W_OUT, BLOCK_P), triton.cdiv(OC, BLOCK_OC))
+    conv2d_nchw_fp32_kernel[grid](
+        x_, w_packed, b_,
+        y,
+        N, C, H, W,
+        OC, KH, KW,
+        sh, sw,
+        ph, pw,
+        dh, dw,
+        H_OUT, W_OUT,
+        BLOCK_P, BLOCK_OC,
+    )
+    return y.to(dtype=x.dtype) if x.dtype != torch.float32 else y
+
+
+def conv2d_triton_nchw(x: torch.Tensor,
+                       weight: torch.Tensor,
+                       bias: torch.Tensor | None = None,
+                       stride: int | tuple[int, int] = 1,
+                       padding: int | tuple[int, int] = 0,
+                       dilation: int | tuple[int, int] = 1) -> torch.Tensor:
+    if isinstance(stride, int):
+        stride = (stride, stride)
+    if isinstance(padding, int):
+        padding = (padding, padding)
+    if isinstance(dilation, int):
+        dilation = (dilation, dilation)
+    return _conv2d_triton_nchw(x, weight, bias, stride, padding, dilation)
+
+
+class ModelNew(nn.Module):
+    """
+    Performs a standard 2D convolution operation with square input and asymmetric kernel, with dilation and padding.
+
+    Args:
+        in_channels (int): Number of channels in the input tensor.
+        out_channels (int): Number of channels produced by the convolution.
+        kernel_size (tuple): Size of the convolution kernel (height, width). 
+        stride (int, optional): Stride of the convolution. Defaults to 1.
+        padding (tuple, optional): Padding applied to the input (top/bottom, left/right). Defaults to (0, 0).
+        dilation (tuple, optional): Spacing between kernel elements (height, width). Defaults to (1, 1).
+        bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
+    """
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: tuple, stride: int = 1, padding: tuple = (0, 0), dilation: tuple = (1, 1), bias: bool = False):
+        super(ModelNew, self).__init__()
+        self.conv2d = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, bias=bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Performs the 2D convolution.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_channels, height, width).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, out_channels, height_out, width_out).
+        """
+        # Extract parameters
+        weight = self.conv2d.weight
+        bias = self.conv2d.bias
+        stride = self.conv2d.stride if isinstance(self.conv2d.stride, tuple) else (self.conv2d.stride, self.conv2d.stride)
+        padding = self.conv2d.padding if isinstance(self.conv2d.padding, tuple) else (self.conv2d.padding, self.conv2d.padding)
+        dilation = self.conv2d.dilation if isinstance(self.conv2d.dilation, tuple) else (self.conv2d.dilation, self.conv2d.dilation)
+
+        return conv2d_triton_nchw(x, weight, bias, stride, padding, dilation)
+batch_size = 8
+in_channels = 32
+out_channels = 64
+kernel_size = (5, 9)
+width = 512
+height = 512
+stride = 1
+padding = (2, 4)
+dilation = (2, 3)
+
+def get_inputs():
+    x = torch.rand(batch_size, in_channels, height, width)
+    return [x]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, stride, padding, dilation]

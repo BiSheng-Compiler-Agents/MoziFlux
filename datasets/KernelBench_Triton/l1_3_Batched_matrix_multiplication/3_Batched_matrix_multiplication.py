@@ -1,3 +1,6 @@
+import torch
+import torch.nn as nn
+
 import triton
 import triton.language as tl
 
@@ -119,3 +122,76 @@ def _bmm_kernel(
                             offs_n[None, :] * stride_cn)
     c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
     tl.store(c_ptrs, acc, mask=c_mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Performs batched matrix multiplication (C = A * B) where A, B, and C have the same batch dimension.
+    """
+    def __init__(self):
+        super(ModelNew, self).__init__()
+
+    def forward(self, A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+        """
+        Performs batched matrix multiplication.
+
+        Args:
+            A: Input tensor of shape (batch_size, m, k).
+            B: Input tensor of shape (batch_size, k, n).
+
+        Returns:
+            C: Output tensor of shape (batch_size, m, n).
+        """
+        if A.dim() != 3 or B.dim() != 3:
+            raise ValueError("A and B must both be 3D batched matrices")
+        if A.dtype != B.dtype:
+            raise TypeError("A and B must have the same dtype")
+        if A.device.type != "npu" or B.device.type != "npu":
+            raise ValueError("ModelNew expects Ascend NPU tensors")
+        if A.device != B.device:
+            raise ValueError("A and B must be on the same device")
+        if A.dtype not in (torch.float16, torch.bfloat16, torch.float32):
+            raise TypeError("ModelNew supports float16, bfloat16, and float32 inputs")
+
+        BATCH, M, K = A.shape
+        BATCH_B, K_B, N = B.shape
+        if BATCH != BATCH_B or K != K_B:
+            raise ValueError("A and B must satisfy A.shape == (batch, m, k) and B.shape == (batch, k, n)")
+
+        # Make contiguous for predictable strides/coalescing
+        A_ = A.contiguous()
+        B_ = B.contiguous()
+
+        # Allocate output
+        C = torch.empty((BATCH, M, N), device=A.device, dtype=A.dtype)
+
+        # Strides in elements
+        stride_ab, stride_am, stride_ak = A_.stride()
+        stride_bb, stride_bk, stride_bn = B_.stride()
+        stride_cb, stride_cm, stride_cn = C.stride()
+
+        # Grid: all tiles across (M, N) for each batch
+        grid = lambda META: (
+            triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
+            BATCH,
+        )
+
+        _bmm_kernel[grid](
+            A_, B_, C,
+            BATCH, M, N, K,
+            stride_ab, stride_am, stride_ak,
+            stride_bb, stride_bk, stride_bn,
+            stride_cb, stride_cm, stride_cn,
+        )
+        return C
+batch_size = 128
+m = 128 * 4
+k = 256 * 4
+n = 512 * 4
+
+def get_inputs():
+    A = torch.rand(batch_size, m, k)
+    B = torch.rand(batch_size, k, n)
+    return [A, B]
+def get_init_inputs():
+    return []  # No special initialization inputs needed

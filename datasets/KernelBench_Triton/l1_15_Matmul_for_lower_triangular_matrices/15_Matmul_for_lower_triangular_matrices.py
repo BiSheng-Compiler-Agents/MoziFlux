@@ -1,3 +1,8 @@
+import os
+
+import torch
+import torch.nn as nn
+
 import triton
 import triton.language as tl
 
@@ -99,3 +104,73 @@ def _lower_tri_matmul_kernel(
         store_mask = (rm[:, None] >= rn[None, :]) & m_in[:,
                                                          None] & n_in[None, :]
         tl.store(c_ptrs, acc.to(C_ptr.dtype.element_ty), mask=store_mask)
+
+
+def _require_supported_runtime(tensor: torch.Tensor) -> None:
+    if tensor.is_cuda:
+        return
+    if tensor.device.type == "npu":
+        return
+    if os.environ.get("TRITON_INTERPRET") == "1":
+        return
+    raise RuntimeError(
+        "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1 for Triton interpreter mode."
+    )
+
+
+def _validate_inputs(a: torch.Tensor, b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    if a.ndim != 2 or b.ndim != 2:
+        raise ValueError("ModelNew expects two 2D tensors.")
+    if a.shape != b.shape or a.shape[0] != a.shape[1]:
+        raise ValueError("ModelNew expects square matrices of the same shape.")
+    if a.device != b.device:
+        raise ValueError("Inputs must be on the same device.")
+    if a.dtype != b.dtype:
+        raise ValueError("Inputs must have the same dtype.")
+    if a.dtype not in {torch.float16, torch.float32}:
+        raise TypeError(f"Unsupported dtype for lower triangular matmul: {a.dtype}.")
+    _require_supported_runtime(a)
+    return a.contiguous(), b.contiguous()
+
+
+class ModelNew(nn.Module):
+    """
+    Performs lower-triangular matrix multiplication for square inputs.
+    """
+
+    def __init__(self):
+        super(ModelNew, self).__init__()
+
+    def forward(self, A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+        A, B = _validate_inputs(A, B)
+        N = A.shape[0]
+        C = torch.zeros((N, N), device=A.device, dtype=A.dtype)
+
+        grid = lambda META: (
+            triton.cdiv(N, META["BLOCK_M"]),
+            triton.cdiv(N, META["BLOCK_N"]),
+        )
+        _lower_tri_matmul_kernel[grid](
+            A,
+            B,
+            C,
+            N,
+            A.stride(0),
+            A.stride(1),
+            B.stride(0),
+            B.stride(1),
+            C.stride(0),
+            C.stride(1),
+        )
+        return C
+M = 4096
+
+def get_inputs():
+    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    A = torch.rand(M, M, device=device)
+    B = torch.rand(M, M, device=device)
+    A = torch.tril(A)
+    B = torch.tril(B)
+    return [A, B]
+def get_init_inputs():
+    return []  # No special initialization inputs needed

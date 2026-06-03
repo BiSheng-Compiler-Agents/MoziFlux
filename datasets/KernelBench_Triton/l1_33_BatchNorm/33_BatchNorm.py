@@ -1,3 +1,5 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
 
@@ -165,3 +167,138 @@ def _bn_apply_nhw(
         x = tl.load(x_row + w_idx * stride_wx, mask=mask, other=0.0)
         y = x * scale_c + shift_c
         tl.store(y_row + w_idx * stride_wy, y, mask=mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs Batch Normalization using Triton-optimized kernels.
+    """
+    def __init__(self, num_features: int = 64):
+        super(ModelNew, self).__init__()
+        self.bn = nn.BatchNorm2d(num_features=num_features)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not getattr(x, "is_npu", False):
+            raise ValueError("ModelNew expects an NPU tensor input")
+        if x.dtype != torch.float32:
+            raise TypeError("ModelNew only supports float32 inputs")
+        if not x.is_contiguous():
+            raise ValueError("ModelNew expects contiguous inputs")
+
+        bn = self.bn
+        N, C, H, W = x.shape
+        eps = bn.eps
+
+        # Compute exponential_average_factor following PyTorch semantics
+        if bn.momentum is None:
+            exponential_average_factor = 0.0
+        else:
+            exponential_average_factor = bn.momentum
+
+        if bn.training and bn.track_running_stats:
+            if bn.num_batches_tracked is not None:
+                bn.num_batches_tracked.add_(1)
+                if bn.momentum is None:
+                    exponential_average_factor = 1.0 / float(bn.num_batches_tracked.item())
+            else:
+                exponential_average_factor = 1.0
+
+        # use_batch_stats matches PyTorch: training or not tracking
+        use_batch_stats = bn.training or (not bn.track_running_stats)
+        update_stats = bn.training and bn.track_running_stats
+
+        x_fp32 = x  # already float32 & contiguous per guard
+        stride_n, stride_c, stride_h, stride_w = x_fp32.stride()
+        # Triton uses element-wise strides
+        NH = N * H
+        M = N * H * W
+
+        BLOCK_W = 256
+        NUM_W_CHUNKS = (W + BLOCK_W - 1) // BLOCK_W
+        # Larger block for NH reduction to cut down loop trips in finalize
+        BLOCK_NH = 2048
+        NUM_NH_CHUNKS = (NH + BLOCK_NH - 1) // BLOCK_NH
+
+        # Prepare scale/shift buffers
+        scale = torch.empty(C, device=x.device, dtype=torch.float32)
+        shift = torch.empty(C, device=x.device, dtype=torch.float32)
+
+        # Running stats pointers (may be dummy if not tracked)
+        if bn.track_running_stats and (bn.running_mean is not None) and (bn.running_var is not None):
+            running_mean = bn.running_mean
+            running_var = bn.running_var
+        else:
+            # dummy tensors to satisfy kernel signature; not used unless needed
+            running_mean = torch.zeros(C, device=x.device, dtype=torch.float32)
+            running_var = torch.ones(C, device=x.device, dtype=torch.float32)
+
+        affine_flag = int(bn.affine and (bn.weight is not None) and (bn.bias is not None))
+        if affine_flag:
+            weight = bn.weight.to(dtype=torch.float32)
+            bias = bn.bias.to(dtype=torch.float32)
+        else:
+            # dummy
+            weight = torch.empty(1, device=x.device, dtype=torch.float32)
+            bias = torch.empty(1, device=x.device, dtype=torch.float32)
+
+        # If we use batch stats, first compute per-(c, nh) partial reductions without atomics
+        if use_batch_stats:
+            partial_sum = torch.empty((C, NH), device=x.device, dtype=torch.float32)
+            partial_sumsq = torch.empty((C, NH), device=x.device, dtype=torch.float32)
+            grid_rows = (C, NH)
+            _bn_row_reduce_nhw_store[grid_rows](
+                x_fp32,
+                partial_sum, partial_sumsq,
+                N, H, W,
+                stride_n, stride_c, stride_h, stride_w,
+                NH,
+                BLOCK_W=BLOCK_W,
+                NUM_W_CHUNKS=NUM_W_CHUNKS,
+                num_warps=2,
+                num_stages=2,
+            )
+        else:
+            # allocate dummy to satisfy kernel signature
+            partial_sum = torch.empty(1, device=x.device, dtype=torch.float32)
+            partial_sumsq = torch.empty(1, device=x.device, dtype=torch.float32)
+
+        # Finalize params (mean/var/scale/shift), and optionally update running stats
+        _bn_finalize_params[(C,)](
+            partial_sum, partial_sumsq,
+            scale, shift,
+            running_mean, running_var,
+            weight, bias,
+            NH, M, eps, exponential_average_factor,
+            int(use_batch_stats), int(update_stats), affine_flag,
+            BLOCK_NH=BLOCK_NH,
+            NUM_NH_CHUNKS=NUM_NH_CHUNKS,
+            num_warps=4,
+            num_stages=2,
+        )
+
+        # Apply normalization + affine with Triton
+        y = torch.empty_like(x_fp32)
+        grid_apply = (C, NH)
+        _bn_apply_nhw[grid_apply](
+            x_fp32, y,
+            scale, shift,
+            N, H, W,
+            stride_n, stride_c, stride_h, stride_w,
+            stride_n, stride_c, stride_h, stride_w,
+            BLOCK_W=BLOCK_W,
+            NUM_W_CHUNKS=NUM_W_CHUNKS,
+            num_warps=4,
+            num_stages=2,
+        )
+
+        return y
+batch_size = 64
+features = 64
+dim1 = 512
+dim2 = 512
+
+def get_inputs():
+    x = torch.rand(batch_size, features, dim1, dim2)
+    return [x]
+def get_init_inputs():
+    return [features]

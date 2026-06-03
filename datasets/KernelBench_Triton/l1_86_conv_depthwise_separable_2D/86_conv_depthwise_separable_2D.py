@@ -1,19 +1,34 @@
+import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import triton
 import triton.language as tl
 
 
+DEFAULT_BATCH_SIZE = 16
+DEFAULT_IN_CHANNELS = 64
+DEFAULT_OUT_CHANNELS = 128
+DEFAULT_KERNEL_SIZE = 3
+DEFAULT_WIDTH = 512
+DEFAULT_HEIGHT = 512
+DEFAULT_STRIDE = 1
+DEFAULT_PADDING = 1
+DEFAULT_DILATION = 1
+
+
+def _ceil_div(a, b):
+    return (a + b - 1) // b
+
+
 @triton.jit
 def _depthwise_conv2d_fwd(
-    x_ptr,  # *f32, [N, C, H, W]
-    w_ptr,  # *f32, [C, 1, K, K] -> flattened as [C*K*K]
-    b_ptr,  # *f32, [C] or dummy
-    y_ptr,  # *f32, [N, C, H_OUT, W_OUT]
-    N,
-    C,
-    H,
-    W,  # int32
-    H_OUT,
-    W_OUT,  # int32
+    x_ptr,        # *f32, [N, C, H, W]
+    w_ptr,        # *f32, [C, 1, K, K] -> flattened as [C*K*K]
+    b_ptr,        # *f32, [C] or dummy
+    y_ptr,        # *f32, [N, C, H_OUT, W_OUT]
+    N, C, H, W,   # int32
+    H_OUT, W_OUT, # int32
     STRIDE: tl.constexpr,
     PADDING: tl.constexpr,
     DILATION: tl.constexpr,
@@ -62,15 +77,11 @@ def _depthwise_conv2d_fwd(
 
 @triton.jit
 def _pointwise_1x1_conv_fwd(
-    x_ptr,  # *f32, input from depthwise, [N, C_IN, H_OUT, W_OUT]
-    w_ptr,  # *f32, weight, [C_OUT, C_IN] row-major
-    b_ptr,  # *f32, bias, [C_OUT] or dummy
-    y_ptr,  # *f32, output, [N, C_OUT, H_OUT, W_OUT]
-    N,
-    C_IN,
-    C_OUT,
-    H_OUT,
-    W_OUT,  # int32
+    x_ptr,        # *f32, input from depthwise, [N, C_IN, H_OUT, W_OUT]
+    w_ptr,        # *f32, weight, [C_OUT, C_IN] row-major
+    b_ptr,        # *f32, bias, [C_OUT] or dummy
+    y_ptr,        # *f32, output, [N, C_OUT, H_OUT, W_OUT]
+    N, C_IN, C_OUT, H_OUT, W_OUT,  # int32
     BM: tl.constexpr,
     BN: tl.constexpr,
     HAS_BIAS: tl.constexpr,
@@ -103,8 +114,7 @@ def _pointwise_1x1_conv_fwd(
         # Load A: [BM] elements at channel k (stride HW across channel)
         a = tl.load(x_ptr + in_base + k * HW, mask=m_mask, other=0.0)  # [BM]
         # Load B: [BN] weights at channel k across output channels
-        b = tl.load(w_ptr + n_offsets * C_IN + k, mask=n_mask,
-                    other=0.0)  # [BN]
+        b = tl.load(w_ptr + n_offsets * C_IN + k, mask=n_mask, other=0.0)  # [BN]
         acc += a[:, None] * b[None, :]
 
     if HAS_BIAS:
@@ -118,18 +128,13 @@ def _pointwise_1x1_conv_fwd(
 
 @triton.jit
 def _dw_pw_fused_fwd(
-    x_ptr,  # *f32, [N, C_IN, H, W]
-    wdw_ptr,  # *f32, [C_IN*K*K] flattened
-    bdw_ptr,  # *f32, [C_IN] or dummy
-    wpw_ptr,  # *f32, [C_OUT, C_IN] row-major
-    bpw_ptr,  # *f32, [C_OUT] or dummy
-    y_ptr,  # *f32, [N, C_OUT, H_OUT, W_OUT]
-    N,
-    C_OUT,
-    H,
-    W,
-    H_OUT,
-    W_OUT,  # int32
+    x_ptr,          # *f32, [N, C_IN, H, W]
+    wdw_ptr,        # *f32, [C_IN*K*K] flattened
+    bdw_ptr,        # *f32, [C_IN] or dummy
+    wpw_ptr,        # *f32, [C_OUT, C_IN] row-major
+    bpw_ptr,        # *f32, [C_OUT] or dummy
+    y_ptr,          # *f32, [N, C_OUT, H_OUT, W_OUT]
+    N, C_OUT, H, W, H_OUT, W_OUT,   # int32
     STRIDE: tl.constexpr,
     PADDING: tl.constexpr,
     DILATION: tl.constexpr,
@@ -204,3 +209,118 @@ def _dw_pw_fused_fwd(
     out_base = n_idx * (C_OUT * HW_OUT) + hw_idx
     store_offs = out_base[:, None] + n_offsets[None, :] * HW_OUT
     tl.store(y_ptr + store_offs, acc, mask=(m_mask[:, None] & n_mask[None, :]))
+
+
+class ModelNew(nn.Module):
+    """
+    Performs a depthwise-separable 2D convolution operation using Triton-accelerated kernels.
+
+    Args:
+        in_channels (int): Number of channels in the input tensor.
+        out_channels (int): Number of channels produced by the convolution.
+        kernel_size (int): Size of the convolution kernel.
+        stride (int, optional): Stride of the convolution. Defaults to 1.
+        padding (int, optional): Padding applied to the input. Defaults to 0.
+        dilation (int, optional): Spacing between kernel elements. Defaults to 1.
+        bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
+    """
+    def __init__(
+        self,
+        in_channels: int = DEFAULT_IN_CHANNELS,
+        out_channels: int = DEFAULT_OUT_CHANNELS,
+        kernel_size: int = DEFAULT_KERNEL_SIZE,
+        stride: int = DEFAULT_STRIDE,
+        padding: int = DEFAULT_PADDING,
+        dilation: int = DEFAULT_DILATION,
+        bias: bool = False,
+    ):
+        super(ModelNew, self).__init__()
+        # Keep nn.Conv2d modules to replicate exact parameter initialization and semantics
+        self.depthwise = nn.Conv2d(
+            in_channels, in_channels, kernel_size,
+            stride=stride, padding=padding, dilation=dilation,
+            groups=in_channels, bias=bias
+        )
+        self.pointwise = nn.Conv2d(
+            in_channels, out_channels, kernel_size=1, bias=bias
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Performs the depthwise-separable 2D convolution on Ascend NPU.
+        """
+        if x.device.type != "npu":
+            raise RuntimeError(
+                f"ModelNew expects Ascend NPU input, but got device '{x.device.type}'."
+            )
+
+        # Extract parameters
+        N, C_in, H, W = x.shape
+        K = self.depthwise.kernel_size[0]
+        stride = self.depthwise.stride[0]
+        padding = self.depthwise.padding[0]
+        dilation = self.depthwise.dilation[0]
+
+        # Output spatial dims after depthwise
+        H_out = math.floor((H + 2 * padding - dilation * (K - 1) - 1) / stride + 1)
+        W_out = math.floor((W + 2 * padding - dilation * (K - 1) - 1) / stride + 1)
+
+        # Prepare buffers and dtypes
+        x_c = x.contiguous()
+        device = x.device
+        compute_dtype = torch.float32
+
+        w_dw = self.depthwise.weight.contiguous()  # [C_in, 1, K, K]
+        b_dw = self.depthwise.bias
+        has_bias_dw = b_dw is not None
+        if has_bias_dw:
+            b_dw = b_dw.contiguous()
+
+        # Flatten depthwise weight to [C_in*K*K]
+        w_dw_flat = w_dw.view(C_in * K * K).to(device=device, dtype=compute_dtype)
+
+        # Input to fp32 for compute
+        x_fp32 = x_c.to(compute_dtype)
+        b_dw_buf = (b_dw.to(device=device, dtype=compute_dtype) if has_bias_dw else torch.empty(1, device=device, dtype=compute_dtype))
+
+        # Pointwise 1x1 convolution parameters
+        C_out = self.pointwise.out_channels
+        w_pw = self.pointwise.weight.view(C_out, C_in).contiguous().to(device=device, dtype=compute_dtype)  # [C_OUT, C_IN]
+        b_pw = self.pointwise.bias
+        has_bias_pw = b_pw is not None
+        b_pw_buf = (b_pw.contiguous().to(device=device, dtype=compute_dtype) if has_bias_pw else torch.empty(1, device=device, dtype=compute_dtype))
+
+        # Allocate final output (fp32)
+        y_out_fp32 = torch.empty((N, C_out, H_out, W_out), device=device, dtype=compute_dtype)
+
+        # Launch fused depthwise + pointwise kernel
+        BM, BN = 64, 32
+        M = N * H_out * W_out
+        grid = (_ceil_div(M, BM), _ceil_div(C_out, BN))
+        _dw_pw_fused_fwd[grid](
+            x_fp32, w_dw_flat, b_dw_buf, w_pw, b_pw_buf, y_out_fp32,
+            N, C_out, H, W, H_out, W_out,
+            STRIDE=stride, PADDING=padding, DILATION=dilation,
+            K=K, C_IN=C_in, BM=BM, BN=BN,
+            HAS_BIAS_DW=has_bias_dw, HAS_BIAS_PW=has_bias_pw,
+            num_warps=4, num_stages=2,
+        )
+
+        # Cast back to original dtype
+        y_out = y_out_fp32.to(dtype=x.dtype)
+        return y_out
+batch_size = 16
+in_channels = 64
+out_channels = 128
+kernel_size = 3
+width = 512
+height = 512
+stride = 1
+padding = 1
+dilation = 1
+
+def get_inputs():
+    x = torch.rand(batch_size, in_channels, height, width)
+    return [x]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, stride, padding, dilation]

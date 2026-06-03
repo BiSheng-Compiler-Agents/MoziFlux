@@ -1,4 +1,0 @@
-latency-case-1: 15090.136
-# raw-op-statistic-case-1: {"ops":[{"op_type":"_matmul_bias_relu_kernel","avg_time_us":15090.136},{"op_type":"Transpose","avg_time_us":340.286},{"op_type":"DSARandomNormal","avg_time_us":2378.934},{"op_type":"Cast","avg_time_us":26.036}]}
-# resolved-kernels-case-1: _matmul_bias_relu_kernel
-# kernel-source-case-1: metadata+operator

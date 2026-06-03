@@ -1,3 +1,6 @@
+import math
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
 
@@ -48,3 +51,64 @@ def _cross_entropy_rowwise_kernel(
 
     # Write output
     tl.store(out_ptr + pid, nll, mask=row_in_bounds)
+
+
+class ModelNew(nn.Module):
+    """
+    A model that computes Cross Entropy Loss for multi-class classification tasks.
+
+    Parameters:
+        None
+    """
+    def __init__(self):
+        super(ModelNew, self).__init__()
+
+    def forward(self, predictions, targets):
+        if predictions.device.type != "npu" or targets.device.type != "npu":
+            raise RuntimeError("ModelNew expects predictions and targets on Ascend NPU")
+        if predictions.ndim != 2:
+            raise ValueError(f"predictions must be 2D [N, C], got shape {tuple(predictions.shape)}")
+        if targets.ndim != 1:
+            raise ValueError(f"targets must be 1D [N], got shape {tuple(targets.shape)}")
+        if predictions.shape[0] != targets.shape[0]:
+            raise ValueError("predictions batch dimension must match targets length")
+
+        # Shapes
+        N, C = predictions.shape
+        x = predictions
+        t = targets.to(torch.int64)
+
+        # Ensure proper dtypes and memory layout
+        x = x.contiguous()
+        t = t.contiguous()
+
+        # Allocate output buffer for per-sample losses
+        out = torch.empty(N, device=x.device, dtype=x.dtype)
+
+        # Next power-of-two block size for classes dimension
+        BLOCK_SIZE = 1 << (C - 1).bit_length()
+
+        grid = lambda meta: (N,)
+
+        _cross_entropy_rowwise_kernel[grid](
+            x,
+            t,
+            out,
+            x.stride(0),
+            x.stride(1),
+            N,
+            C,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Mean reduction to match torch.nn.functional.cross_entropy default
+        return out.mean()
+batch_size = 32768
+num_classes = 4096
+input_shape = (num_classes,)
+dim = 1
+
+def get_inputs():
+    return [torch.rand(batch_size, *input_shape), torch.randint(0, num_classes, (batch_size,))]
+def get_init_inputs():
+    return []

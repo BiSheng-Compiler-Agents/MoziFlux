@@ -131,13 +131,14 @@ int main(int argc, char *argv[]) {
   args.gridY = gridY;
   args.gridZ = gridZ;
 
+  printf("[HOST] Launching kernel (grid=%u, blockNum=%u)...\n",
+         gridX * gridY * gridZ, blockNum);
   CHECK_RT(rtKernelLaunch(&funcStub, blockNum, static_cast<void *>(&args),
                           sizeof(args), nullptr, stream),
-           "rtKernelLaunch failed.");
+           "rtKernelLaunch failed.\n");
 
-  // 5. Synchronize
-  CHECK_RT(rtStreamSynchronize(stream), "rtStreamSynchronize failed.");
-  printf("[INFO] Kernel launched and synced (blockNum=%u)\n", blockNum);
+  CHECK_RT(rtStreamSynchronize(stream), "rtStreamSynchronize failed.\n");
+  printf("[HOST] Kernel completed\n");
 
   // 6. Copy results back
   CHECK_RT(rtMemcpy(outHost.data(), dataSize, outDev, dataSize,
@@ -154,7 +155,7 @@ int main(int argc, char *argv[]) {
     }
   }
   if (correct)
-    printf("[PASS] All %d elements are 3.0\n", N);
+    printf("[HOST] PASS — All %d elements are 3.0\n", N);
 
   // 8. Cleanup
   rtFree(xDev);

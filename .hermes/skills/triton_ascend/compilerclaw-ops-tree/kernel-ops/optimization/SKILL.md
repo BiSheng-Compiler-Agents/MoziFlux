@@ -1,4 +1,12 @@
+---
+name: optimization
+description: Optimize Ascend NPU-native Triton operator performance. Use when diagnosing bottlenecks from cannsim traces and applying optimization patterns. Covers UB overflow detection, Cube utilization improvement, tiling strategy design, and pattern application.
+tags: [triton, ascend, optimization, performance]
+---
+
 # Triton Kernel Performance Optimization [LEAF NODE]
+
+> **Skill content policy**: This SKILL.md contains only general, reusable knowledge for any agent/user/platform. Per-kernel case studies, session-specific trace data, and dated findings go in `references/` or episodes — not here. Keep concise and task-focused.
 
 Optimize Ascend NPU-native Triton operator performance. Use when diagnosing bottlenecks
 from cannsim traces and applying optimization patterns. Covers UB overflow detection,
@@ -11,6 +19,16 @@ Cube utilization improvement, tiling strategy design, and pattern application.
 
 **Performance Ratio Definition**: `Ratio = torch_npu time / Triton time`. Ratio > 1.0 means Triton is faster.
 **Priority**: Correctness > Generalization > Performance.
+
+### Generalization Rules (mandatory — violations are P0)
+
+- **Never read shapes from benchmark files, perf reports, or other operator files** when writing the optimized kernel. The source of truth is the original kernel's function signature, problem name, docstring/comments, `get_inputs()`, and mathematical definition.
+- **Preserve the operator's stated regime while optimizing**. Large-K kernels should use/block/tune for large K; small-K kernels for small K; tall-skinny matmul for `M >> N` or `N >> M`; irregular kernels for non-power-of-two/boundary dimensions. Do not optimize for unrelated square/control shapes and then claim success.
+- **Multiple kernel variants dispatched by the host are fine** (e.g. a fast no-mask path for power-of-2 C alongside a general masked path for all other C). What is not allowed is a variant that only handles specific shapes and leaves other shapes broken or unhandled.
+- **Every dispatch path must be correct and tested** — if you write a C=16 fast path and a generic path, both must have unit tests. Never ship an untested code path.
+- **Never add new runtime guards that the baseline did not have** (e.g. `if out_channels > 256: raise`, `if sum_dim != 1: raise`). If the baseline kernel accepted a parameter freely, the optimized kernel must too.
+- **Do not compare invalid kernels**: benchmark speedups are meaningless unless both providers produce the same outputs. If an editable baseline/input kernel fails correctness, investigate and fix the root cause before trusting latency comparisons; if a non-editable/golden provider cannot run, keep it as `inf` with explicit rationale.
+- **Cover all parameter combinations in unit tests inside the required regime**: small/large/non-power-of-2 sizes for every free dimension in the signature, while preserving the problem's shape class. Never test only the benchmark shape.
 
 ---
 
@@ -27,17 +45,13 @@ Before writing any code, query episodes for relevant patterns:
 
 ```python
 episode_retrieve(query="<kernel_type> <bottleneck>", target="ascend950", limit=5)
-# Examples:
-episode_retrieve(query="matmul cube utilization dot pad static range", target="ascend950")
-episode_retrieve(query="softmax wide rows MTE online reduction", target="ascend950")
-episode_retrieve(query="norm scalar overhead two-pass single-pass", target="ascend950")
-episode_retrieve(query="elementwise FFTS dispatch persistent grid", target="ascend950")
 ```
 
 ### Phase 2: Hierarchical Evaluation
 
 1. **Quick Screening**: If real NPU hardware available, measure end-to-end with `time.time()`.
-2. **Precise Diagnosis**: Use `cannsim_remote_run(gen_report=True)` to get `trace_core0.json`. Then run:
+2. **Precise Diagnosis**: Use `cannsim_remote_run(gen_report=True)` with a **sub-kernel host**
+   (grid=1, M=BLOCK_M, K=1×BLOCK_K — see simulation skill Rule 1). Then run:
    ```bash
    python <tree_root>/kernel-ops/simulation/scripts/aggregate_trace.py \
        /path/to/report/trace_core0.json
@@ -92,15 +106,35 @@ Use floor rounding: `1 << (n.bit_length() - 1)`.
 ## Core Optimization Rules
 
 ### Rule 1: Block Sizing
+
 - Vector ops: BLOCK_SIZE 1024–2048 for FP16 to fit UB with headroom
 - Matrix ops: BLOCK_M/N/K multiples of 16. Safe starting point: M=128, N=256, K=64–256
 - Use `@triton.autotune` to sweep block sizes
 - Grid: 1D preferred, equal to physical core count
 
+**CRITICAL: Grid must cover the smallest autotune BLOCK size.** When the ModelNew host
+code hardcodes `ceil(M / 128)` for the grid but autotune selects `BLOCK_M=64` or `256`,
+the grid provides too few programs → tiles go unwritten → silent wrong output.
+
+**Fix pattern:** Use a conservative grid that covers the smallest BLOCK in your configs.
+Extra programs are harmless (all masks evaluate to false — no-op).
+
+```python
+smallest_m = 64  # smallest BLOCK_M across all autotune configs
+smallest_n = 64  # smallest BLOCK_N across all autotune configs
+grid_m = triton.cdiv(M, smallest_m)
+grid_n = triton.cdiv(N, smallest_n)
+grid = (grid_m * grid_n, B)
+```
+
+For batched matmul with broadcasting (B≠1), the safest approach is a per-batch
+sequential loop calling a 2D kernel with conservative grid. This avoids batch-stride
+issues in the 3D kernel when expanded/contiguous tensors have unexpected strides.
+
 ### Rule 2: Memory Access Contiguity (highest-impact rule)
 
 Contiguous access enables the compiler to merge many small transactions into large-block DMA.
-Non-contiguous patterns force many tiny MTE instructions (can cause 86× more DMA ops).
+Non-contiguous patterns force many tiny MTE instructions.
 
 ```python
 # Good: contiguous, compiler can merge into large DMA
@@ -110,19 +144,21 @@ offsets = block_start + tl.arange(0, BLOCK_SIZE)
 offsets = block_start + tl.arange(0, BLOCK_SIZE) * stride
 
 # Bad: 2D broadcast creates non-contiguous pattern
-off = row_off[:, None] + col_off[None, :]   # prevents DMA merging
+off = row_off[:, None] + col_off[None, :]
 
 # Good: host-side expand+contiguous eliminates broadcast stride
 cos_flat = cos.expand(x_shape).contiguous().reshape(total_rows, D)
-# Now row * D + col is contiguous — DMA engine runs at full speed
 ```
+
+For auxiliary tensors (cos/sin, etc.), always prefer host-side `expand().contiguous()`
+over in-kernel broadcasting. Contiguity > data reuse count.
 
 ### Rule 3: Single Pass Over Multi-Pass
 
 Loading the same data multiple times multiplies scalar overhead. When the whole row fits in UB:
 
 ```python
-# Bad: 3 loads of x, huge scalar overhead
+# Bad: multiple loads of x
 # Good: load once, all computation in UB
 x = tl.load(x_ptr + tot_off, mask=mask, other=0.0).to(tl.float32)
 sum_x  = tl.sum(x, 1)
@@ -148,7 +184,7 @@ Eliminating intermediate GM round-trips transforms memory-bound → compute-boun
 # After: 1 GM round-trip (load x → relu → softmax → store w)
 x = tl.load(x_ptr + offsets, mask=mask)
 w = tl.softmax(tl.where(x > 0, x, 0.0).to(tl.float32))
-tl.store(w_ptr + offsets, w.to(tl.float16), mask=mask)
+tl.store(y_ptr + offsets, w.to(tl.float16), mask=mask)
 ```
 
 ### Rule 5: Precision Rules
@@ -184,6 +220,78 @@ for sub_start in range(0, BLOCK_SIZE, SUB_BLOCK_SIZE):
     tl.store(y_ptr + offsets, process(x_chunk), mask=mask)
 ```
 
+### Rule 8: Two-Path Dispatch for Elementwise Kernels (MANDATORY)
+
+**The trap:** "use a persistent grid" is a common elementwise recommendation.
+It is **only a win when the natural tile count exceeds the FFTS grid cap (65535)**.
+Below that threshold it is a regression.
+
+| n_tiles (BLOCK=4096) | n_elements | Best path | Why |
+|---|---|---|---|
+| ≤ 65,535 | ≤ 268,431,360 (~256M) | **direct** (one program per tile) | Fastest dispatch; JUMPC overhead has no upside |
+| > 65,535 | > 256M | **persistent** (work-stealing while loop) | Direct would crash (coredim > UINT16_MAX) or saturate FFTS |
+
+**Implementation:**
+
+```python
+_MAX_PROGRAMS = 65535  # Ascend FFTS grid cap
+
+class ModelNew(nn.Module):
+    def forward(self, x):
+        n_tiles = triton.cdiv(x.numel(), BLOCK_SIZE)
+        if n_tiles > _MAX_PROGRAMS:
+            n_programs = _MAX_PROGRAMS
+            _kernel_persistent[(n_programs,)](..., n_programs=n_programs, BLOCK_SIZE=BLOCK_SIZE)
+        else:
+            _kernel_direct[(n_tiles,)](..., BLOCK_SIZE=BLOCK_SIZE)
+```
+
+**Routing threshold:** Use `cdiv(n_elements, BLOCK_SIZE) > _MAX_PROGRAMS`, NOT a raw element count.
+If using `@triton.autotune` with multiple `BLOCK_SIZE` configs, the routing threshold
+MUST use the **smallest** BLOCK in the configs.
+
+**Sub-kernel trace is identical for direct vs persistent** at grid=1 — the
+benefit is purely at full-shape FFTS dispatch level.
+
+**`BLOCK_SIZE` conflict with `@triton.autotune`:** When calling an autotuned
+kernel, NEVER pass `BLOCK_SIZE=<int>` as a keyword argument. This raises
+`ValueError: Conflicting meta-parameter: BLOCK_SIZE`. The autotune decorator
+clears non-config kwargs before setting config values, so explicit BLOCK_SIZE
+creates a conflict. Only pass `grid` and non-constexpr parameters:
+
+```python
+# WRONG
+_kernel_autotuned[grid](x, y, n, BLOCK_SIZE=256)
+
+# CORRECT
+_kernel_autotuned[grid](x, y, n)
+```
+
+The grid must be conservative (cover smallest BLOCK in configs); autotune
+selects the actual `BLOCK_SIZE` at compile time.
+
+**Persistent path must use a SEPARATE `@triton.jit` function, NOT the same one
+decorated with `@triton.autotune`.** Reasons:
+
+1. `@triton.autotune` compiles multiple variants with different `BLOCK_SIZE`.
+2. The persistent kernel's `n_programs` is a runtime arg, not `tl.constexpr`.
+3. The work loop `for tile_id in range(pid, n_tiles, n_programs)` needs
+   `n_programs` from Python launch time.
+
+Pattern:
+```python
+@triton.jit
+def _kernel_persistent(x_ptr, y_ptr, n_elements, n_programs, BLOCK_SIZE: tl.constexpr):
+    pid = tl.program_id(axis=0)
+    n_tiles = tl.cdiv(n_elements, BLOCK_SIZE)
+    for tile_id in range(pid, n_tiles, n_programs):
+        offs = tile_id * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offs < n_elements
+        # ... compute and store ...
+```
+
+n_programs is passed at launch: `_kernel_persistent[(grid_n,)](x, y, n, grid_n, BLOCK_SIZE=4096)`
+
 ---
 
 ## Ascend-Specific Compiler Hints
@@ -199,7 +307,7 @@ a = al.multibuffer(a, size=2)  # only size=2 supported
 
 # Type conversion with overflow control
 y = al.cast(x, tl.float16, fp_downcast_rounding="rtne")
-y = al.cast(x, tl.int8,    overflow_mode="saturate")
+y = al.cast(x, tl.int8, overflow_mode="saturate")
 ```
 
 **Cube-Vector pipeline sync:**
@@ -221,6 +329,27 @@ for s in al.parallel(0, 2, bind_sub_block=True):
 ```
 
 **`num_warps` / `num_stages` on Ascend**: silently ignored. Use `NPUOptions` instead.
+
+**`al.multibuffer` pitfalls** — `al.multibuffer(tensor, size=2)` is a side-effect hint only.
+Do NOT reassign its return. Call `al.compile_hint` BEFORE `al.multibuffer` on the same tensor.
+When using `tl.dot(a, b, acc)` in-place accumulation, prefer it over `al.multibuffer` —
+larger gain, eliminates UB overflow risk.
+
+---
+
+## Compounding Effects — Matmul Optimizations Are Multiple
+
+When applied together, matmul optimization effects **compound multiplicatively** because
+they free different pipeline resources:
+
+| Optimization | Frees | Pipeline |
+|-------------|-------|----------|
+| `tl.dot(a, b, acc)` in-place | 64 KB UB temp + RVEC LD/ST/ADD | RVECEX, RVECST, RVECLD |
+| `tl.range` vs `while` | Dynamic exit checks + SET_INTRA_BLOCKI | FLOWCTRL, PUSHQ |
+| Native dtype loads (no fp32 upcast) | VCVT_F2F ops + UB bandwidth | RVECEX, MTE3 |
+| `compile_hint("dot_pad_only_k")` | Cube M/N padding cycles | CUBE |
+
+When applying a cocktail of matmul optimizations, expect 4–8× total improvement.
 
 ---
 
@@ -257,7 +386,7 @@ for block_idx in range(pid, NUM_BLOCKS_M * NUM_BLOCKS_N, tl.num_programs(0)):
 ## Common Bottleneck Quick Reference
 
 | cannsim Metric | Bottleneck | Typical Optimization |
-|---------------|------------|----------------------|
+|---------------|------------|---------------------|
 | aiv_scalar > 80% | Scalar Bound | Check two-pass / per-row loop; change to single-pass `tl.sum(x,1)` |
 | aiv_mte2 > 50% | Memory Bound | Contiguous memory access, expand+contiguous, increase BLOCK |
 | aiv_vec > 50% | Compute Bound | Algorithm optimization, reduce redundant computation |
@@ -265,34 +394,14 @@ for block_idx in range(pid, NUM_BLOCKS_M * NUM_BLOCKS_N, tl.num_programs(0)):
 
 ---
 
-## Case Studies
+### Two-phase reduction: tile-count threshold
 
-### RoPE (npu_rotary_mul) — Contiguous Access Wins
-
-| Version | Task Time | Bottleneck |
-|---|---|---|
-| per-row loop (div/mod) | 3605 µs | MTE3 95.6% (183K MTE2 ops) |
-| 2D Tiling RPT=64 | 1362 µs | scalar 85% |
-| Incremental pointer tracking | ~17800 µs | branch divergence (**anti-pattern**) |
-| Contiguous access (expand) | **752 µs** | memory BW |
-
-**Key insight**: `expand().contiguous()` on host eliminates broadcast stride entirely.
-Contiguity > data reuse count. Even re-loading `cos`/`sin` with contiguous access
-beats broadcasting with strided access.
-
-**Pitfall**: 2D broadcast `row_off[:, None] + col_off[None, :]` appears non-contiguous to the
-compiler even though each tile is 8KB. The compiler cannot merge these into large-block DMA.
-
-### GroupNorm+Swish — Single-Pass Reduces 8.4× to 0.77×
-
-| Version | Avg (µs) | vs torch_npu |
-|---|---|---|
-| Two-pass | 36.3 | 8.4× slower |
-| Single pass | 3.3 | 0.77× (faster) |
-
-Two-pass fix: load full row once when `NBLOCK = next_power_of_2(D)` fits in UB.
-`tl.sum(x, 1)` performs axis=1 reduction; compiler keeps `x` in UB without re-reading.
-NBLOCK up to 8192 is safe.
+Two-phase reduction (private partial sums + single reduce) is the canonical fix for
+`tl.atomic_add` serialization. **It has a tile-count sweet spot — it regresses on
+small n_tiles.** Each two-phase call is 2 launches (+~0.92 µs overhead). Atomic
+serialization at n_tiles < 64 costs less. Only deploy two-phase when n_tiles > 64.
+Rule: `NUM_PARTS = min(32, n_tiles)` — never launch more programs than tiles.
+See `references/two_phase_reduction_threshold.md` for full data.
 
 ---
 
@@ -307,9 +416,12 @@ NBLOCK up to 8192 is safe.
 - Use if branches inside loops to modify variables (Triton compiles to masked operations, catastrophic performance degradation)
 - Calculate UB only for data buffer in 2D tiling (must include offset/mask/index arrays)
 - Use precomputed offset tensors for 2D broadcasting (triggers compiler addptr multi-user assertion)
-- Use broadcast stride to access auxiliary tensors (cos/sin, etc.) inside kernel — change to host-side expand+contiguous
+- Use broadcast stride to access auxiliary tensors inside kernel — change to host-side expand+contiguous
 - Two-pass mode for reduction operators — use single pass, compute everything within UB after one load
 - Not using diagonal scheduling for large matrices (L2 cache thrashing, must enable above BLOCK_THRESHOLD)
+- **ALWAYS gate persistent-grid dispatch on `cdiv(n, BLOCK_SIZE) > 65535` (see Rule 8). Applying persistent grid unconditionally is a regression at the bench shape.**
+
+---
 
 ## Verification Checklist
 
@@ -321,50 +433,48 @@ NBLOCK up to 8192 is safe.
 - [ ] Reduction upcast to FP32, matrix multiplication BLOCK multiples of 16
 - [ ] Is the reduction operator single-pass? (Required when D ≤ UB)
 - [ ] Diagonal scheduling enabled for large matrices
+- [ ] Elementwise kernel uses two-path dispatch (direct + persistent) — see Rule 8
 
 ## Constraints
+
+- **Skill name disambiguation**: When loading skills by short name (e.g., `skill_view(name='optimization')`), plugin-registered skills may cause ambiguity (4+ matches). Always use the fully qualified name: `triton_ascend/compilerclaw-ops-tree/kernel-ops/optimization`.
 - Always use `episode_retrieve` before applying any optimization pattern
 - Always use `episode_write` after every successful optimization
 - Precision (rtol=1e-3, atol=1e-3) is non-negotiable — roll back if not met
 - Always verify with cannsim before declaring optimization complete
+- For elementwise kernels, ALWAYS implement two-path dispatch (Rule 8) — never apply persistent grid unconditionally
+- Prefer `@triton.testing.perf_report` for benchmarks. If `do_bench` is unavailable or unreliable, use the `time.perf_counter` + `torch.*.synchronize()` fallback (see profiling skill).
+- For hardware verification after optimization, use `remote_verify` (see profiling skill).
 
 ---
+## Reference files
 
-## Full API & Compiler References
+### Local references
+- `references/kernel-status-flag-timing.md` — When to set kernel_status flags (verified/recorded) without them being reset by pipeline advances
+- `references/trace_comparison_methodology.md` — Sub-kernel trace comparison methodology
+- `references/two_phase_reduction_threshold.md` — Two-phase reduction tile-count sweet spot
+- `references/grid-autotune-mismatch.md` — Grid/autotune BLOCK size mismatch pitfalls
+- `references/pushq_vf_bottleneck_matmul.md` — PUSHQ/VF bottleneck patterns in matmul
+- `references/row_scale_diagonal_matmul.md` — Row-scale diagonal matmul patterns
 
-These files are part of this tree and must be consulted for full API details:
+### Shared references (in `../../shared/references/`)
 
-- **`../../shared/references/optimization-patterns.md`** (487 lines) — authoritative optimization reference; the patterns in this leaf are a subset. Contains:
-  - Rule 3b: `care_padding=False` — ~5–10% free speedup when masked positions are unused downstream
-  - `num_warps`/`num_stages` are **silently ignored** on Ascend NPU (no warp model); use NPUOptions instead
-  - `next_power_of_2` trap: `triton.next_power_of_2(48) = 64` may exceed UB — use floor rounding when needed
-  - Section 3 — Reference kernel implementations with full runnable code: GEMM (with diagonal grid scheduling + `al.parallel` multi-vector-core post-dot), LayerNorm, Online Softmax, Flash Attention
-  - Section 4.1 pitfalls G3–G7: integer comparison in `tl.where` (cast to float32 first); multi-dim grid overhead; Cube never activated (`aic_cube_ratio ≈ 0` check); FP16 intermediate overflow; `.item()` CPU-NPU sync in hot path
-  - RoPE case study: full 7-pitfall breakdown (MTE granularity, scalar overhead of 2D tiling, conditional branches catastrophic, precomputed offset table assertion, UB overflow from offset arrays, MTE instruction granularity, broadcast stride vs expand+contiguous)
-  - GroupNorm+Swish case study: two-pass 36.3µs → single-pass 3.3µs (0.77× vs torch_npu 4.3µs); detailed `tl.sum(x, 1)` single-pass explanation
+Agents MUST read the relevant shared reference file(s) with `read_file` before coding or reviewing patterns that depend on them; mentions in this SKILL.md are only an index, not the full procedure.
 
-- **`./references/`** — 10 before/after operator implementations with perf measurements (use as lookup when working on the same operator type):
-  - `l1_19_ReLU/` — ReLU: baseline + optimized (fp32 upcast fix)
-  - `l1_23_Softmax/` — Softmax: baseline + optimized
-  - `l1_26_GELU_/` — GELU: baseline + optimized
-  - `l1_36_RMSNorm_/` — RMSNorm: baseline + optimized
-  - `l1_41_Max_Pooling_1D/` — MaxPool1D: baseline + optimized
-  - `l1_100_HingeLoss/` — HingeLoss: baseline + optimized
-  - `l1_1_Square_matrix_multiplication_/` — Square MatMul: baseline + optimized
-  - `l2_9_Matmul_Subtract_Multiply_ReLU/` — Matmul+Sub+Mul+ReLU: baseline + optimized
-  - `l2_18_Matmul_Sum_Max_AvgPool_LogSumExp_LogSumExp/` — complex matmul fusion: baseline + optimized
-  - `l2_76_Gemm_Add_ReLU/` — Gemm+Add+ReLU: baseline + optimized
-  - Each directory: `{name}.py` (baseline), `opt_{name}.py` (optimized), `{name}_perf.txt`, `opt_{name}_perf.txt`
+- **`optimization-patterns.md`** — Read before applying non-trivial performance patterns. Contains all core rules, reference kernel implementations (GEMM with diagonal scheduling + `al.parallel`, LayerNorm, Online Softmax, Flash Attention), pitfalls G1-G7 (Python-style slices, return/break in loops, integer comparison in `tl.where`, multi-dim grid, Cube never activated, FP16 overflow, `.item()` sync), and detailed case studies. The patterns in this skill are a subset; consult this doc for full details.
+- **`triton-api-reference.md`** — Read when using or changing any non-basic Triton-Ascend API: `al.*`, `bl.*`, `NPUOptions`, `tl.dot` options, synchronization, buffer management, custom ops, or compiler flags. Section 4: AL extension (`al.compile_hint`, `al.multibuffer`, `al.cast`, `al.sync_block_set/wait`, `al.parallel`, `al.extract_slice`, `al.insert_slice`, etc.). Section 5: BL extension. Section 7: NPUOptions.
+- **`tiling-strategies.md`** — Read before changing `BLOCK_*`, grid shape, swizzle/grouping, persistent-grid loops, reductions, or any schedule that affects UB/L1 usage. Includes inter-core patterns, intra-core UB budget calculation with alignment, operator case studies (LayerNorm, Softmax, MatMul), diagonal scheduling, and common errors (UB overflow, alignment, load imbalance, precision loss).
+- **`ascend-terminology.md`** — Read when interpreting cannsim traces or hardware terms: AI Core (Cube + Vector), GM/UB/L1, UB constraints, alignment rules, HIVM IR mapping table, pipeline stages.
+- **`hardware-architecture.md`** — Read when choosing core type, reasoning about memory hierarchy/platform differences, using `TRITON_ALL_BLOCKS_PARALLEL`, or avoiding INT64/hardware-specific hazards.
 
-- **`../../shared/references/triton-api-reference.md`** — Complete Triton-Ascend API reference:
-  - Section 4 (AL extension): Full enumerations (CORE, PIPE, MODE, FixpipeDMAMode, SYNC_IN_VF), all ops: `al.copy`, `al.fixpipe`, `al.debug_barrier`, `al.sync_block_set/wait`, `al.scope`, `al.custom`/`@register_custom_op`, math ops (`al.atan2`, `al.isfinited`), auxiliary ops (`al.parallel`, `al.compile_hint`, `al.multibuffer`), vector ops (`al.insert_slice`, `al.extract_slice`, `al.get_element`, `al.sort`, `al.flip`, `al.cast`), memory ops (`al.index_put`, `al.gather_out_to_ub`, `al.scatter_ub_to_out`, `al.index_select_simd`)
-  - Section 5 (BL extension): `bl.alloc`, `bl.to_buffer`, `bl.to_tensor`, `bl.subview` — explicit on-chip memory management for advanced UB control
-  - Section 7 (NPUOptions): All compiler flags: `sync_solver`, `enable_vf_fusion`, `vf_merge_level`, `add_auto_scheduling`, `enable_hivm_auto_cv_balance`, `enable_mixed_cv`, `multibuffer`, `enable_ubuf_saving`, `enable_preload`, `num_stages`, `mix_mode`, `compile_mode`, `debug`, `bisheng_options`, precision flags, layout flags, SIMT flags
-
-- **`../../shared/references/tiling-strategies.md`** — Detailed tiling methodology:
-  - Full UB budget calculation with all buffer types, alignment overhead, 2D tiling formula
-  - All inter-core patterns with load balancing code, diagonal scheduling implementation
-  - Operator case studies: LayerNorm, Softmax, MatMul with exact UB requirements
-
-- **`../../shared/references/ascend-terminology.md`** — Hardware terminology:
-  - HIVM IR mapping table, pipeline stages, memory hierarchy, alignment rules
+### Per-kernel examples (in `references/`)
+- `references/l1_19_ReLU/` — ReLU
+- `references/l1_23_Softmax/` — Softmax
+- `references/l1_26_GELU_/` — GELU
+- `references/l1_36_RMSNorm_/` — RMSNorm
+- `references/l1_41_Max_Pooling_1D/` — MaxPool1D
+- `references/l1_100_HingeLoss/` — HingeLoss
+- `references/l1_1_Square_matrix_multiplication_/` — Square MatMul
+- `references/l2_9_Matmul_Subtract_Multiply_ReLU/` — Matmul+Sub+Mul+ReLU
+- `references/l2_18_Matmul_Sum_Max_AvgPool_LogSumExp_LogSumExp/` — Complex matmul fusion
+- `references/l2_76_Gemm_Add_ReLU/` — Gemm+Add+ReLU

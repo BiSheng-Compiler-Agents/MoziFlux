@@ -1,32 +1,50 @@
 #!/bin/bash
-# cannsim wrapper for fused_softmax.
-# Compiles the kernel + C++ host binary on the remote (if not already done).
-# cannsim record wraps the binary directly — this script is the build step only.
-# Uses $(dirname "$0") so paths are correct regardless of upload location.
+# run_kernel.sh — Build-and-run wrapper for cannsim_local_run
+set -euo pipefail
 
-set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# Step 1: compile the Triton kernel → npubin (skipped if npubin already present)
-if [ ! -f "$SCRIPT_DIR/cannsim_host/fused_softmax.npubin" ]; then
-    echo "[BUILD] Compiling fused_softmax_kernel → npubin..."
-    python "$SCRIPT_DIR/fused_softmax.py"
-    echo "[BUILD] Kernel compile done."
+echo "[RUNNER] Starting build+run in: $SCRIPT_DIR"
+
+# Source CANN environment — required for both compile (torch_npu/ASCEND_HOME_PATH)
+# and cmake (include paths for runtime/rt.h). CANNSIM_SETENV_PATH is set by the
+# cannsim-local plugin; fall back to the standard CANN path if not set.
+if [ -n "${CANNSIM_SETENV_PATH:-}" ] && [ -f "$CANNSIM_SETENV_PATH" ]; then
+    echo "[RUNNER] Sourcing CANN env from CANNSIM_SETENV_PATH: $CANNSIM_SETENV_PATH"
+    source "$CANNSIM_SETENV_PATH"
+elif [ -n "${ASCEND_HOME_PATH:-}" ] && [ -f "$ASCEND_HOME_PATH/bin/setenv.bash" ]; then
+    echo "[RUNNER] Sourcing CANN env from ASCEND_HOME_PATH: $ASCEND_HOME_PATH/bin/setenv.bash"
+    source "$ASCEND_HOME_PATH/bin/setenv.bash"
+else
+    echo "[RUNNER] WARNING: No CANN env found — compile or cmake may fail"
 fi
 
-# Step 2: build the C++ host binary (skipped if already built)
-if [ ! -f "$SCRIPT_DIR/test_fused_softmax" ]; then
-    echo "[BUILD] Compiling test_fused_softmax on remote..."
-    cd "$SCRIPT_DIR/cannsim_host"
-    mkdir -p build && cd build
-    cmake .. -DCMAKE_CXX_COMPILER=g++ -DCMAKE_SKIP_RPATH=TRUE -DCMAKE_BUILD_TYPE=Release 2>&1
-    make -j$(nproc) 2>&1
-    cp bin/test_fused_softmax "$SCRIPT_DIR/test_fused_softmax"
-    cd "$SCRIPT_DIR"
-    echo "[BUILD] Done."
-fi
+# Step 1: Compile the kernel (ttir -> ttadapter -> npubin)
+echo "[RUNNER] Compiling kernel..."
+python fused_softmax.py
+echo "[RUNNER] Kernel compiled OK"
 
-# Step 3: ensure the npubin sits next to the host binary (binary resolves via dirname(argv[0]))
-if [ ! -f "$SCRIPT_DIR/fused_softmax.npubin" ] && [ -f "$SCRIPT_DIR/cannsim_host/fused_softmax.npubin" ]; then
-    cp "$SCRIPT_DIR/cannsim_host/fused_softmax.npubin" "$SCRIPT_DIR/fused_softmax.npubin"
+# Step 2: Verify npubin exists
+if [ ! -f "cannsim_host/fused_softmax.npubin" ]; then
+    echo "[RUNNER] ERROR: npubin not found!"
+    exit 1
 fi
+echo "[RUNNER] npubin size: $(stat -c%s cannsim_host/fused_softmax.npubin) bytes"
+
+# Step 3: Build C++ host
+echo "[RUNNER] Building C++ host..."
+mkdir -p cannsim_host/build
+cd cannsim_host/build
+cmake .. -DCMAKE_CXX_COMPILER=g++ -DCMAKE_SKIP_RPATH=TRUE \
+         -DCMAKE_EXE_LINKER_FLAGS="-Wl,--allow-shlib-undefined"
+make -j$(nproc) 2>&1
+cp test_fused_softmax "$SCRIPT_DIR/"
+cd "$SCRIPT_DIR"
+echo "[RUNNER] Build OK, binary at: $SCRIPT_DIR/test_fused_softmax"
+
+# Step 4: Copy npubin to same dir as binary
+cp cannsim_host/fused_softmax.npubin "$SCRIPT_DIR/fused_softmax.npubin"
+
+# Step 5: Done (cannsim will wrap this binary)
+echo "[RUNNER] Ready for cannsim"

@@ -1,3 +1,6 @@
+import torch
+import torch.nn as nn
+import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
@@ -33,3 +36,55 @@ def _relu_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr,
         y = tl.where(nan_mask, x, y)
 
     tl.store(y_ptr + offsets, y, mask=mask)
+
+
+class ModelNew(nn.Module):
+    """
+    Simple model that performs a ReLU activation.
+    """
+    def __init__(self):
+        super(ModelNew, self).__init__()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Applies ReLU activation to the input tensor.
+
+        Args:
+            x (torch.Tensor): Input tensor of any shape.
+
+        Returns:
+            torch.Tensor: Output tensor with ReLU applied, same shape as input.
+        """
+        if x.device.type != "npu":
+            raise ValueError("ModelNew expects an Ascend NPU tensor input")
+        if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
+            raise TypeError(
+                "ModelNew supports only float16, bfloat16, and float32 tensors"
+            )
+        if x.numel() == 0:
+            return torch.empty_like(x)
+
+        n_elements = x.numel()
+
+        # Ensure contiguous memory for efficient kernel execution
+        x_contig = x.contiguous()
+        y = torch.empty_like(x_contig)
+
+        is_fp = x_contig.dtype in (torch.float16, torch.bfloat16, torch.float32)
+
+        grid = lambda meta: ((n_elements + meta["BLOCK_SIZE"] - 1) // meta["BLOCK_SIZE"],)
+        _relu_kernel[grid](
+            x_contig.view(-1),
+            y.view(-1),
+            n_elements=n_elements,
+            IS_FP=is_fp,
+        )
+        return y.view_as(x)
+batch_size = 4096
+dim = 393216
+
+def get_inputs():
+    x = torch.rand(batch_size, dim)
+    return [x]
+def get_init_inputs():
+    return []  # No special initialization inputs needed

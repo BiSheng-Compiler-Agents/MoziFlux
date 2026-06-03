@@ -1,27 +1,31 @@
+import torch
+import torch.nn as nn
+import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
 
+DEFAULT_IN_CHANNELS = 32
+DEFAULT_OUT_CHANNELS = 64
+DEFAULT_KERNEL_SIZE = 3
+DEFAULT_STRIDE = 1
+DEFAULT_PADDING = 1
+
+
+def _is_npu_tensor(x: torch.Tensor) -> bool:
+    return bool(getattr(x, "is_npu", False))
+
+
 @triton.jit
 def _pool_lse_relu_stream_kernel(
-        x_ptr,  # *input  (N, C, D, H, W)
-        y_ptr,  # *output (N, 1, DO, HO, WO)
-        M,  # total positions over (N, DO, HO, WO)
-        DO,
-        HO,
-        WO,  # pooled spatial sizes
-        sxn,
-        sxc,
-        sxd,
-        sxh,
-        sxw,  # input strides
-        syn,
-        syc,
-        syd,
-        syh,
-        syw,  # output strides
-        C: tl.constexpr,  # channels to reduce over (compile-time)
-        BLOCK: tl.constexpr,  # vector width
+    x_ptr,           # *input  (N, C, D, H, W)
+    y_ptr,           # *output (N, 1, DO, HO, WO)
+    M,               # total positions over (N, DO, HO, WO)
+    DO, HO, WO,      # pooled spatial sizes
+    sxn, sxc, sxd, sxh, sxw,  # input strides
+    syn, syc, syd, syh, syw,  # output strides
+    C: tl.constexpr,          # channels to reduce over (compile-time)
+    BLOCK: tl.constexpr,      # vector width
 ):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK + tl.arange(0, BLOCK)
@@ -76,9 +80,9 @@ def _pool_lse_relu_stream_kernel(
     o7 = sxd + sxh + sxw
 
     # Streaming logsumexp across channels in float32
-    neg_inf = tl.full((BLOCK, ), float("-inf"), tl.float32)
+    neg_inf = tl.full((BLOCK,), float("-inf"), tl.float32)
     m = neg_inf
-    s = tl.zeros((BLOCK, ), dtype=tl.float32)
+    s = tl.zeros((BLOCK,), dtype=tl.float32)
 
     p0 = x_ptr + base_x
     # Iterate channels; for each channel compute maxpool(2x2x2) then update running LSE
@@ -110,21 +114,28 @@ def _pool_lse_relu_stream_kernel(
     tl.store(y_ptr + base_y, out, mask=mask)
 
 
+def _pool_lse_relu_triton(x: torch.Tensor) -> torch.Tensor:
+    # x: (N, C, D, H, W)
+    assert x.ndim == 5
+    if not _is_npu_tensor(x):
+        raise ValueError("_pool_lse_relu_triton requires an Ascend NPU tensor input")
+    pooled = torch.nn.functional.max_pool3d(x, kernel_size=2, stride=2)
+    return _lse_relu_triton(pooled)
+
+
 @triton.jit
 def _lse_relu_reduce_c_kernel(
-        x_ptr,  # input pointer (N, C, Z, Y, X)
-        out_ptr,  # output pointer (N, 1, Z, Y, X)
-        M,  # total number of (N, Z, Y, X) positions
-        Z,
-        Y,
-        X,  # spatial dims after pooling
-        stride_n,  # strides of input
-        stride_c,
-        stride_z,
-        stride_y,
-        stride_x,
-        C: tl.constexpr,  # number of channels to reduce over (compile-time)
-        BLOCK: tl.constexpr,  # vector width per program
+    x_ptr,            # input pointer (N, C, Z, Y, X)
+    out_ptr,          # output pointer (N, 1, Z, Y, X)
+    M,                # total number of (N, Z, Y, X) positions
+    Z, Y, X,          # spatial dims after pooling
+    stride_n,         # strides of input
+    stride_c,
+    stride_z,
+    stride_y,
+    stride_x,
+    C: tl.constexpr,  # number of channels to reduce over (compile-time)
+    BLOCK: tl.constexpr,  # vector width per program
 ):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK + tl.arange(0, BLOCK)
@@ -162,10 +173,9 @@ def _lse_relu_reduce_c_kernel(
     base_out = n64 * ZYX64 + z64 * YX64 + y64 * X64 + x64
 
     # Streaming log-sum-exp across channel dimension in float32
-    neg_inf = tl.full((BLOCK, ), float("-inf"), tl.float32)
+    neg_inf = tl.full((BLOCK,), float("-inf"), tl.float32)
     m = neg_inf  # running max
-    s = tl.zeros((BLOCK, ),
-                 dtype=tl.float32)  # running sum of exp shifted by max
+    s = tl.zeros((BLOCK,), dtype=tl.float32)  # running sum of exp shifted by max
 
     # Pointer to the first channel and prefetch pipeline
     p = x_ptr + base_in
@@ -193,3 +203,78 @@ def _lse_relu_reduce_c_kernel(
 
     # Store to output (same spatial/N index but channel dimension is size=1)
     tl.store(out_ptr + base_out, out_f32, mask=mask)
+
+
+def _lse_relu_triton(x: torch.Tensor) -> torch.Tensor:
+    # x shape: (N, C, Z, Y, X)
+    if not _is_npu_tensor(x):
+        raise ValueError("_lse_relu_triton requires an Ascend NPU tensor")
+
+    orig_dtype = x.dtype
+    if x.dtype != torch.float32:
+        x = x.float()
+    if not x.is_contiguous():
+        x = x.contiguous()
+
+    N, C, Z, Y, X = x.shape
+    out = torch.empty((N, 1, Z, Y, X), device=x.device, dtype=torch.float32)
+
+    # Strides in elements (contiguous guaranteed)
+    sN, sC, sZ, sY, sX = x.stride()
+
+    # Total positions over (N, Z, Y, X)
+    M = N * Z * Y * X
+
+    grid = lambda META: (triton.cdiv(M, META["BLOCK"]),)
+    _lse_relu_reduce_c_kernel[grid](
+        x, out,
+        M, Z, Y, X,
+        sN, sC, sZ, sY, sX,
+        C=C,
+        BLOCK=256,
+    )
+    if orig_dtype != torch.float32:
+        out = out.to(orig_dtype)
+    return out
+
+
+class ModelNew(nn.Module):
+    """
+    Model that performs a 3D convolution, max pooling, log sum exp, and ReLU activation.
+    The MaxPool3d + LogSumExp(dim=1, keepdim=True) + ReLU are fused into a single Triton kernel on CUDA.
+    """
+    def __init__(
+        self,
+        in_channels=DEFAULT_IN_CHANNELS,
+        out_channels=DEFAULT_OUT_CHANNELS,
+        kernel_size=DEFAULT_KERNEL_SIZE,
+        stride=DEFAULT_STRIDE,
+        padding=DEFAULT_PADDING,
+    ):
+        super(ModelNew, self).__init__()
+        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        self.max_pool = nn.MaxPool3d(kernel_size=2, stride=2)
+
+    def forward(self, x):
+        """
+        Args:
+            x: Input tensor of shape (batch_size, in_channels, depth, height, width)
+        Returns:
+            Output tensor of shape (batch_size, 1, depth', height', width')
+        """
+        x = self.conv(x)
+        if not _is_npu_tensor(x):
+            raise ValueError("ModelNew.forward requires Ascend NPU inputs and weights")
+        return _pool_lse_relu_triton(x)
+batch_size = 4
+in_channels = 32
+out_channels = 64
+depth, height, width = 32, 128, 128
+kernel_size = 3
+stride = 1
+padding = 1
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, depth, height, width)]
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, stride, padding]

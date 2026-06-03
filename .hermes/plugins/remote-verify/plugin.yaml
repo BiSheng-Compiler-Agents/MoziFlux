@@ -1,0 +1,22 @@
+name: remote-verify
+version: 1.0.2
+description: >
+  Transfer kernel files to a remote Ascend machine via SSH/SFTP, run
+  profile_kernels.py for correctness and benchmark results, and download
+  results back. Used for hardware verification after cannsim optimization.
+  Requires CANN toolkit environment to be available on the remote machine.
+author: "Hermes Agent & Shayan"
+# Only HOST/USER/PASS are truly required (see check_fn in __init__.py).
+# The rest are OPTIONAL and have code defaults — do NOT list them here,
+# otherwise a set-but-empty value (KEY="" in .env) reads as "missing":
+#   REMOTE_VERIFY_PORT          (default: 22)
+#   REMOTE_VERIFY_BASE_DIR      (default: ~/kernel_verify)
+#   REMOTE_VERIFY_CONDA_ENV     (default: compilerclaw)
+#   REMOTE_VERIFY_CANN_ENV      (default: ~/miniconda3/envs/compilerclaw/Ascend/cann/set_env.sh)
+#   REMOTE_VERIFY_PROXY_COMMAND (default: none)
+requires_env:
+  - REMOTE_VERIFY_HOST
+  - REMOTE_VERIFY_USER
+  - REMOTE_VERIFY_PASS
+provides_tools:
+  - remote_verify

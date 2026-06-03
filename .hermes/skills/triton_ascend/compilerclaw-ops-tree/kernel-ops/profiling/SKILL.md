@@ -1,345 +1,154 @@
+---
+name: profiling
+description: "Write and run `profile_kernels.py` for Triton kernels on Ascend NPU hardware. Covers multi-line comparison (torch_ref vs 1-2 baselines vs optimized), weight-init matching between torch_ref and baseline models, lazy NPU model init, and `@perf_report` benchmark decorator usage."
+---
+
 # Kernel Hardware Profiling [LEAF NODE]
 
 Write and run `profile_kernels.py` for Triton kernels on Ascend NPU hardware.
-Covers the full workflow: script structure, `@perf_report` usage, three-way comparison
-(torch_ref vs baseline vs optimized), correctness test, grid overflow guard.
+Covers the full workflow: script structure, `@perf_report` usage, multi-line
+comparison (torch_ref vs baselines vs optimized), correctness test with
+matching weight initialization, lazy NPU model init, and grid overflow guard.
 Runs on a **real Ascend NPU** (not cannsim) — for final wall-clock latency measurement.
 
-## When to generate this script
+## Remote Execution
+
+This script is designed to run on a remote Ascend machine via the `remote_verify` tool.
+The agent should NOT run profile_kernels.py locally — it requires a physical NPU.
+
+Workflow:
+1. Generate `profile_kernels.py` in the workspace directory
+2. Call `remote_verify(local_dir=workspace, run_test=True, run_bench=True)`
+3. The tool uploads all files, runs correctness then benchmark, downloads results
+4. Analyze results from `workspace/remote_results/` directory
+
+Required env vars for remote execution:
+```
+REMOTE_VERIFY_HOST=192.168.1.10
+REMOTE_VERIFY_USER=username
+REMOTE_VERIFY_PASS=password
+```
+
+### CANN Environment on Remote (Critical)
+
+The remote machine must source the CANN toolkit environment **before** running
+`torch_npu`. Without it: `ImportError: libhccl.so` or
+`RuntimeError: Failed to load the backend extension: torch_npu`.
+
+The `remote_verify` plugin (v1.0.1+) handles this automatically. If NOT using
+`remote_verify`, source manually:
+```bash
+source ~/miniconda3/envs/compilerclaw/Ascend/cann-9.0.0/set_env.sh
+export TRITON_NPU_COMPILER_PATH=.../Ascend/cann-9.0.0/x86_64-linux/bin/bisheng
+conda run -n compilerclaw python profile_kernels.py --test
+```
+
+See `references/remote_execution_lessons.md` for pitfalls: per-variant
+resilience, correctness checking every variant against torch_ref, upload exclusion,
+and the `if __name__ == "__main__"` entry-point requirement.
+
+## When to Generate
 
 Generate `profile_kernels.py` **after** the optimized kernel is written and its correctness
 has been validated via cannsim. It belongs alongside the kernel files:
 
 ```
 l2_<N>_<KernelName>/
-├── <N>_<KernelName>.py          ← baseline Triton kernel (extracted, jit-only)
-├── opt_<N>_<KernelName>.py      ← optimized kernel (all shapes)
-└── profile_kernels.py           ← this script (generated last)
+├── <N>_<KernelName>.py              ← baseline1 Triton kernel
+├── base_<N>_<KernelName>.py         ← baseline2 Triton kernel (optional)
+├── opt_<N>_<KernelName>.py          ← optimized kernel
+└── profile_kernels.py               ← this script (generated last)
 ```
 
----
+## Script Structure
 
-## Workflow
+Use `templates/profile_kernels.py` as the canonical template.
+Adapt it for your kernel — change file names, shapes, input construction, and torch_ref logic.
 
-### Step 1: Load sibling files via `importlib`
+Key structural requirements (all enforced in the template):
 
-Never copy kernel code into `profile_kernels.py`. Load from the sibling files:
+1. **Load via `importlib`** — never copy-paste kernel code. Use the `_load()` helper with `k_` prefix.
+2. **Lazy NPU model init** — do NOT instantiate `ModelNew(...)` at module level. Use `_model(key)` cache.
+3. **Runner wrappers** — `_run_torch_ref()`, `_run_provider(key, x)`. Never call models directly.
+4. **Shape table** — `_BENCH_SHAPES` with `(label, dims...)` tuples. Labels MUST contain NO spaces. Shapes must match the kernel's stated requirement/name and the original `get_inputs()` contract; do not benchmark unrelated regimes.
+   - `large_K` / "large K dimension" kernels: every benchmark shape must keep K large relative to M/N, plus include the exact required benchmark shape.
+   - `small_K` / "small K dimension" kernels: every benchmark shape must keep K small relative to M/N.
+   - `tall_skinny` kernels: preserve the original skinny dimension from `get_inputs()`. If `get_inputs()` is `A=(M,K), B=(K,M)` with `M >> K`, keep K small and N=M; do not accidentally make both output dimensions huge without guarding grid limits.
+   - irregular-shape kernels: include non-powers-of-two and boundary shapes, not only square powers of two.
+   - Before launching any Triton provider, compute the most conservative possible launch grid from the smallest autotune block sizes; if it exceeds `coreDim <= 65535`, pre-skip that provider/shape and return `inf` rather than poisoning the NPU context.
+5. **All baselines** — include every existing provider: PyTorch / ACL, `<N>_*.py` as `Baseline Triton1`, `base_<N>_*.py` as `Baseline Triton2` when present, and `opt_<N>_*.py` as `Optimized Triton`. Do not silently drop `base_*.py`.
+6. **Correctness coverage is gating** — run correctness for EVERY provider on EVERY shape in `_BENCH_SHAPES`; benchmark-only shapes are forbidden unless explicitly skipped with a printed reason. Benchmark numbers are meaningful only for providers that produce the same outputs as `PyTorch / ACL`. If an editable provider fails correctness, investigate and fix the root cause before trusting or comparing its benchmark numbers. Only if a comparison provider cannot be fixed or is intentionally read-only should it remain in the table with `inf`/skip timing. Gate `UNIT_TEST PASS/FAIL` on optimized correctness and reference construction, but do not hide broken comparison baselines behind `INFO`: fix them. After any fix, run `remote_verify` yourself and require real `test_passed=true` + `bench_passed=true` before saying the profiler is correct.
+7. **Benchmark** — use `@triton.testing.perf_report` with `x_names=["label"]`. Fall back to manual `time.perf_counter` + `torch.npu.synchronize()` if `do_bench` is unavailable.
+8. **Resilience / NPU context poisoning** — use the standard single-process profiling template; do **not** wrap providers in subprocesses. Wrap provider calls in try/except and return `float("inf")` on benchmark failure. Guard launches known to poison the current process before executing them: Ascend runtime errors such as `coreDim > 65535` can make later providers fail or report bogus timings. If a provider is known to MLIR-abort for all shapes, keep the column and return `inf` with `INFO` wording, not `ERROR`/`FAIL`, so parser-driven verification can still pass when optimized correctness passes. Do not use subprocess isolation to make aborts catchable unless the user explicitly asks. If the user says a provider is editable and should be comparable, find and fix the provider root cause instead of masking it as `INFO`/`inf`.
+9. **Input construction must match the source kernel** — derive tensors from the original `<N>_*.py` `get_inputs()` contract: shape, dtype, layout/contiguity, and distribution (`torch.rand` vs `torch.randn`). Do not use fp32 test tensors when the source kernel only accepts fp16/bf16; do not change random distribution when comparing correctness.
+10. **Fix editable provider correctness before trusting timing** — if `Baseline Triton1` (`<N>_*.py`) or another editable comparison provider produces NaNs/large errors, find and fix the root cause before accepting benchmark numbers. Common Ascend matmul cause: fp16/bf16 operands were upcast with `.to(tl.float32)` before `tl.dot`; keep operands native and use an fp32 accumulator (`acc += tl.dot(a, b)` or `tl.dot(a, b, acc)`).
+11. **No subprocess wrappers** — `profile_kernels.py` must follow the canonical profiling template in a single Python process with importlib-loaded providers, per-provider try/except cells, and `perf_report`. Do not wrap each provider/shape in subprocesses unless the user explicitly asks; subprocess isolation breaks the template/parser expectations and hides normal profiler structure.
+12. **Entry point** — `if __name__ == "__main__": main()` block is REQUIRED. Keep process exit code zero even when correctness fails so benchmark output/results artifacts are still produced and downloadable; print `UNIT_TEST_FAILED` instead of `sys.exit(1)`.
 
-```python
-import importlib.util
-from pathlib import Path
+## Benchmark Column Names — HARD RULE
 
-_DIR = Path(__file__).parent
-
-def _load(fname):
-    spec = importlib.util.spec_from_file_location(fname.stem, fname)
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    return m
-
-_baseline  = _load(_DIR / "<N>_<KernelName>.py")
-_optimized = _load(_DIR / "opt_<N>_<KernelName>.py")
+```
+line_names[0] = "PyTorch / ACL"          # reference (fixed, never change)
+line_names[1] = "Baseline Triton1"       # <N>_<KernelName>.py
+line_names[2] = "Baseline Triton2"       # base_<N>_<KernelName>.py (if exists)
+line_names[3] = "Optimized Triton"       # opt_<N>_<KernelName>.py
 ```
 
-### Step 2: Three runner functions
+For single-baseline (3-line): `"Baseline Triton"` instead of `"Baseline Triton1"`.
 
-One per implementation:
+Forbidden reference names: `"torch_npu"`, `"torch.matmul"`, `"PyTorch ref"`, `"Reference"`, `"Ref"`, `"acl"`, `"ACL"`, `"baseline"`.
 
-```python
-def _run_torch_ref(x, ...):
-    """PyTorch built-in / ACL path — the hardware vendor reference."""
-    return torch.nn.functional.relu(x) + bias
+## Parser Contract
 
-def _run_baseline(x, ...):
-    """Original Triton kernel, dispatched exactly as the baseline file intends."""
-    N, C, H, W = x.shape
-    y = torch.empty_like(x)
-    # Guard: Ascend FFTS caps any grid dim at 65535
-    if N * C * H <= 65535:
-        _baseline._kernel[(N * C * H, w_grid)](x, y, ..., BLOCK_W=block_w)
-    else:
-        for n in range(N):
-            _baseline._kernel[(C * H, w_grid)](x[n:n+1], y[n:n+1], ..., BLOCK_W=block_w)
-    return y
+`results.txt` is consumed by `generate_report.py`. A profile that runs fine on hardware
+can still produce **0 parsed records** if the format is wrong. See
+`references/generate_report_parser_contract.md` for the 5 hard requirements:
 
-def _run_optimized(x, ...):
-    return _optimized._dispatch_fn(x, ...)
-```
+1. `x_names=["label"]` only (no multi-column shapes)
+2. Header first token must be `label` or `N`
+3. Method names must match the alias table exactly
+4. Geomean speedup needs both `Baseline Triton1` AND `Optimized Triton`
+5. Label strings must contain NO spaces
 
-**Always add the 65535 grid overflow guard for the baseline.**
-Ascend's FFTS scheduler raises `coredim=X can't be greater than UINT16_MAX` if any
-grid dimension exceeds 65535. Loop over N and launch sub-grids of `C*H` when `N*C*H > 65535`.
-
-### Step 3: Shape table
-
-Cover **all dispatch paths** of the optimized kernel — not just the benchmark shape.
-
-```python
-_BENCH_SHAPES = [
-    # label              N    C   H_out  W_out
-    ("N1-C256-14x14",    1,  256,   14,    14),  # HW=196   small → persistent path
-    ("N1-C128-28x28",    1,  128,   28,    28),  # HW=784   small → persistent path
-    ("N8-C64-14x14",     8,   64,   14,    14),  # N>1 small
-    ("N1-C64-56x56",     1,   64,   56,    56),  # HW=3136  large → loop path
-    ("N1-C96-56x56",     1,   96,   56,    56),  # non-pow2 C
-    ("N1-C32-224x224",   1,   32,  224,   224),  # HW=50176 large, many tiles
-    ("N128-C128-126x126",128, 128,  126,   126),  # benchmark shape
-]
-```
-
-Include at minimum:
-- One small-HW shape (tests the persistent/startup-amortised path)
-- One large-HW shape (tests the tiled loop path)
-- One non-power-of-2 dimension (tests that `pid % C` is safe)
-- The exact benchmark shape from the bench file
-
-### Step 4: `@triton.testing.perf_report` — always use this decorator
-
-**Never** hand-roll a benchmark loop:
-
-```python
-@triton.testing.perf_report(
-    triton.testing.Benchmark(
-        x_names=["label"],
-        x_vals=[s[0] for s in _BENCH_SHAPES],
-        line_arg="mode",
-        line_vals=["torch_ref", "baseline", "optimized"],
-        line_names=["PyTorch / ACL", "Baseline Triton", "Optimized Triton"],
-        styles=[("blue", "-"), ("red", "-"), ("green", "-")],
-        ylabel="Latency (ms)",
-        plot_name="<kernel_name>_perf",
-        args={},
-    )
-)
-def benchmark(label, mode):
-    _, N, C, H_out, W_out = next(s for s in _BENCH_SHAPES if s[0] == label)
-    x    = torch.rand(N, C, H_out, W_out, device="npu", dtype=torch.float16)
-    bias = torch.rand(C, 1, 1, device="npu", dtype=torch.float16)
-    bias_flat = bias.reshape(-1)
-
-    if mode == "torch_ref":
-        fn = lambda: _run_torch_ref(x, bias)
-    elif mode == "baseline":
-        fn = lambda: _run_baseline(x, bias_flat)
-    else:
-        fn = lambda: _run_optimized(x, bias)
-
-    # do_bench returns seconds — perf_report labels y-axis as the ylabel above
-    return triton.testing.do_bench(fn, warmup=25, rep=200, return_mode="mean")
-```
-
-**Do NOT multiply by 1e3.** `do_bench` returns seconds. `perf_report` handles
-axis labelling using the `ylabel` string — just return the raw seconds value.
-
-**Do NOT use hex colour codes or composite linestyles.** The `perf_report` style parser only accepts:
-- Plain named colours: `"blue"`, `"red"`, `"green"`, `"orange"`, etc.
-- Simple linestyles: `"-"`, `"--"`, `"-."`, `":"`
-- NOT accepted: `"#4C72B0"` (hex), `"-o"` (linestyle+marker combined)
-
-Correct: `styles=[("blue", "-"), ("red", "-"), ("green", "-")]`
-
-### Step 5: Unit test
-
-Always include a correctness check:
-
-```python
-def unit_test():
-    torch.manual_seed(42)
-    any_fail = False
-    for label, N, C, H_out, W_out in _BENCH_SHAPES:
-        x         = torch.rand(N, C, H_out, W_out, device="npu", dtype=torch.float16) * 4 - 2
-        bias      = torch.rand(C, 1, 1, device="npu", dtype=torch.float16) * 0.5
-        bias_flat = bias.reshape(-1)
-        ref  = _run_torch_ref(x, bias)
-        base = _run_baseline(x.clone(), bias_flat)
-        opt  = _run_optimized(x.clone(), bias)
-        ok_b = torch.allclose(ref, base, atol=1e-2, rtol=1e-2)
-        ok_o = torch.allclose(ref, opt,  atol=1e-2, rtol=1e-2)
-        print(f"  {label:<24}  baseline [{'PASS' if ok_b else 'FAIL'}]  "
-              f"optimized [{'PASS' if ok_o else 'FAIL'}]  "
-              f"maxΔ_base={(ref-base).abs().max():.2e}  "
-              f"maxΔ_opt={(ref-opt).abs().max():.2e}")
-        if not ok_b or not ok_o:
-            any_fail = True
-    if any_fail:
-        raise AssertionError("Correctness check failed")
-```
-
-Use `atol=1e-2, rtol=1e-2` for fp16 (1 ULP ≈ 1e-3 relative).
-
-### Step 6: `main()` and entry point
-
-```python
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--test",  action="store_true", help="Correctness check only")
-    parser.add_argument("--bench", action="store_true", help="Benchmark only")
-    args = parser.parse_args()
-
-    run_test  = args.test  or not args.bench
-    run_bench = args.bench or not args.test
-
-    if run_test:
-        unit_test()
-    if run_bench:
-        benchmark.run(save_path=str(_DIR), print_data=True)
-        # → prints table + saves <kernel_name>_perf.png automatically
-
-if __name__ == "__main__":
-    main()
-```
-
----
-
-## Complete File Template
-
-```python
-"""
-profile_kernels.py — <KernelName>
-
-Compares three implementations on Ascend NPU hardware:
-  torch_ref  : PyTorch / ACL built-in path
-  baseline   : original Triton kernel (<N>_<KernelName>.py)
-  optimized  : trace-optimized kernel (opt_<N>_<KernelName>.py)
-
-Usage:
-    python profile_kernels.py           # unit test + benchmark + saved figure
-    python profile_kernels.py --test    # correctness only
-    python profile_kernels.py --bench   # benchmark only
-"""
-import argparse
-import importlib.util
-import sys
-from pathlib import Path
-
-import torch
-import torch_npu  # noqa: F401
-import triton
-
-_DIR = Path(__file__).parent
-
-def _load(fname):
-    spec = importlib.util.spec_from_file_location(fname.stem, fname)
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    return m
-
-_baseline  = _load(_DIR / "<N>_<KernelName>.py")
-_optimized = _load(_DIR / "opt_<N>_<KernelName>.py")
-
-# ── runner functions ───────────────────────────────────────────────────────────
-
-def _run_torch_ref(x, bias):
-    return torch.nn.functional.relu(x) + bias
-
-def _run_baseline(x, bias_flat):
-    N, C, H, W = x.shape
-    y       = torch.empty_like(x)
-    block_w = 128 if W >= 128 else (64 if W >= 64 else 32)
-    w_grid  = triton.cdiv(W, block_w)
-    if N * C * H <= 65535:
-        _baseline._kernel[(N * C * H, w_grid)](
-            x, y, bias_flat, N, C, H, W, BLOCK_W=block_w, num_warps=4)
-    else:
-        for n in range(N):
-            _baseline._kernel[(C * H, w_grid)](
-                x[n:n+1], y[n:n+1], bias_flat, 1, C, H, W,
-                BLOCK_W=block_w, num_warps=4)
-    return y
-
-def _run_optimized(x, bias):
-    return _optimized._dispatch_fn(x, bias)
-
-# ── shapes ─────────────────────────────────────────────────────────────────────
-
-_BENCH_SHAPES = [
-    ("N1-C256-14x14",    1, 256,  14,  14),
-    ("N1-C128-28x28",    1, 128,  28,  28),
-    ("N8-C64-14x14",     8,  64,  14,  14),
-    ("N1-C64-56x56",     1,  64,  56,  56),
-    ("N1-C96-56x56",     1,  96,  56,  56),
-    ("N1-C32-224x224",   1,  32, 224, 224),
-    ("N128-C128-126x126",128,128, 126, 126),
-]
-
-# ── benchmark ──────────────────────────────────────────────────────────────────
-
-@triton.testing.perf_report(
-    triton.testing.Benchmark(
-        x_names=["label"],
-        x_vals=[s[0] for s in _BENCH_SHAPES],
-        line_arg="mode",
-        line_vals=["torch_ref", "baseline", "optimized"],
-        line_names=["PyTorch / ACL", "Baseline Triton", "Optimized Triton"],
-        styles=[("blue", "-"), ("red", "-"), ("green", "-")],
-        ylabel="Latency (ms)",
-        plot_name="<kernel_name>_perf",
-        args={},
-    )
-)
-def benchmark(label, mode):
-    _, N, C, H, W = next(s for s in _BENCH_SHAPES if s[0] == label)
-    x         = torch.rand(N, C, H, W, device="npu", dtype=torch.float16)
-    bias      = torch.rand(C, 1, 1, device="npu", dtype=torch.float16)
-    bias_flat = bias.reshape(-1)
-    fn = (_run_torch_ref  if mode == "torch_ref"  else
-          _run_baseline   if mode == "baseline"   else _run_optimized)
-    call = (lambda: fn(x, bias)) if mode != "baseline" else (lambda: fn(x, bias_flat))
-    return triton.testing.do_bench(call, warmup=25, rep=200, return_mode="mean")
-
-# ── unit test ──────────────────────────────────────────────────────────────────
-
-def unit_test():
-    torch.manual_seed(42)
-    any_fail = False
-    for label, N, C, H, W in _BENCH_SHAPES:
-        x         = torch.rand(N, C, H, W, device="npu", dtype=torch.float16) * 4 - 2
-        bias      = torch.rand(C, 1, 1, device="npu", dtype=torch.float16) * 0.5
-        bias_flat = bias.reshape(-1)
-        ref  = _run_torch_ref(x, bias)
-        base = _run_baseline(x.clone(), bias_flat)
-        opt  = _run_optimized(x.clone(), bias)
-        ok_b = torch.allclose(ref, base, atol=1e-2, rtol=1e-2)
-        ok_o = torch.allclose(ref, opt,  atol=1e-2, rtol=1e-2)
-        print(f"  {label:<24}  baseline [{'PASS' if ok_b else 'FAIL'}]  "
-              f"optimized [{'PASS' if ok_o else 'FAIL'}]")
-        if not ok_b or not ok_o:
-            any_fail = True
-    if any_fail:
-        sys.exit(1)
-    print("All PASS")
-
-# ── entry point ────────────────────────────────────────────────────────────────
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--test",  action="store_true")
-    parser.add_argument("--bench", action="store_true")
-    args = parser.parse_args()
-    run_test  = args.test  or not args.bench
-    run_bench = args.bench or not args.test
-    if run_test:
-        unit_test()
-    if run_bench:
-        benchmark.run(save_path=str(_DIR), print_data=True)
-
-if __name__ == "__main__":
-    main()
-```
-
----
+Quick self-check: run captured output through `generate_report.py` and confirm `recs > 0`.
 
 ## Pitfalls
 
 - **Wrong kernel args** — always read the `@triton.jit` signature directly from the source file
-- **Grid overflow `coredim > UINT16_MAX`** — guard: if `N*C*H > 65535`, loop over N with sub-grids of `C*H`
-- **`* 1e3` scaling** — `do_bench` returns seconds; the table will show values like `0.045` ms
-- **Style format** — use plain named colours (`"blue"`, `"red"`, `"green"`) and simple linestyles (`"-"`, `"--"`, `"-."`)
-- **Shapes must cover ALL dispatch paths** — include small-HW, large-HW, non-power-of-2, and benchmark shape
-- **Load via importlib, never copy-paste** — if you inline kernel code into `profile_kernels.py`, the profile diverges from the file on disk
+- **Grid overflow / `coreDim > 65535`** — guard before launching the invalid variant in both unit tests and benchmarks; a failed Ascend launch can poison the NPU context and make later providers return bogus errors/timings. For fixable kernels, loop over the overflowing dimension with sub-grids.
+- **MLIR abort / invalid-provider handling** — Python try/except cannot catch an abort from MLIR. If investigation shows a provider aborts for every shape, do not use subprocess isolation in `profile_kernels.py`; keep the provider column and return `inf` for that provider with a clear printed reason. For expected/handled provider-wide `inf`, avoid printing `ERROR`/`FAIL` in unit-test output if the verifier treats those tokens as failure; use `INFO`/`SKIP`/`INF` wording and keep exit code zero. Never hide correctness failures for an editable provider: if baseline/input code is part of the deliverable and is wrong, find and fix the root cause before trusting benchmark numbers.
+- **Autotune grid mismatch** — if the kernel uses `@triton.autotune`, the host `grid` must be derived from the selected `META` when possible. A conservative min-block grid is correctness-safe but may overlaunch many extra program instances and make the optimized path slower than a grouped baseline; inspect `optimization/references/grid-autotune-mismatch.md` before accepting those timings.
+- **`do_bench` returns miliseconds** — do NOT multiply by 1e3; `perf_report` handles axis labelling
+- **`do_bench` + `@triton.autotune` warmup** — `do_bench` warms up the kernel by running it `warmup` times before timing. During warmup, autotune runs all configs and selects the fastest; only the winning config is timed. So autotune overhead is paid during warmup and is NOT included in the reported latency. However, if `do_bench` fails or is unavailable, the `time.perf_counter` fallback must manually implement warmup+rep.
+- **Autotune key params must match kernel signature** — if `@triton.autotune(key=['n_elements_pow2'])` is used, EVERY kernel decorated by it (including persistent kernels) must declare `n_elements_pow2: tl.constexpr` in its signature. Missing constexpr param causes `RuntimeError: No valid triton configs. NoneType: None` on large shapes that trigger the affected dispatch path.
+- **`get_init_inputs()` returning `[()]`** — some kernels return `[()]` (a list with one empty tuple) from `get_init_inputs()`, meaning "no constructor args". The profile's `_model()` must detect this and treat it as `[]`, otherwise `ModelNew(*[()])` passes the empty tuple as a positional arg and raises `TypeError: ModelNew.__init__() takes 1 positional argument but 2 were given`. Fix pattern: `if init == [()]: init = []` before calling `ModelNew(*init)`.
+- **Persistent kernel tile loop** — in a persistent (grid-capped) kernel, the work loop must iterate over **tiles**, not elements. Use `n_tiles = tl.cdiv(n_elements, BLOCK_SIZE)` then `for tile_id in range(pid, n_tiles, n_programs)`. Using `n_elements` instead of `n_tiles` in the range causes each program to skip by `n_elements` instead of processing consecutive tiles, producing wrong output or OOB access.
+- **`base_*.py` pre-existing bugs** — the golden reference `base_*.py` file may itself contain bugs (e.g., using `tl.tanh` which doesn't exist in triton-ascend, or other API mismatches). Since `base_*.py` is read-only, the profile cannot fix it. The profile should catch these errors with try/except, mark them as `INFO` in output, and still produce a valid `UNIT_TEST PASS` if the optimized kernel passes. Do not count a read-only base failure as an optimized failure. In benchmarks, the broken baseline gets `inf`.
+- **Module-level model instantiation** — never instantiate `ModelNew(...)` at module level in `profile_kernels.py`. It creates on CPU and breaks when called with NPU input. Always use a lazy `_model()` cache that evaluates on first use and moves to NPU.
+- **2D kernel input construction** — some kernels (GELU, LogSoftmax, cumsum, etc.) operate on 2D tensors where `shape[-1]` is the reduction/feature dim. Read the kernel's `forward()` to understand input expectations before writing `_make_inputs()`. If the kernel does `M, N = x.shape` expecting truly 2D input, pass `(M, N)` tensors. If it flattens to 1D internally, 1D input is fine. Mismatched dimensionality causes wrong grid dims or incorrect results.
+- **Style format** — plain named colours (`"blue"`, `"red"`, `"green"`, `"black"`), simple linestyles (`"-"`, `"--"`)
+- **Shapes and tensors must match the operator requirement** — derive `_BENCH_SHAPES` and `_make_inputs()` from the kernel name/problem statement and original `get_inputs()` dimensions, dtype, layout, and data distribution. For large-K kernels keep K large; for small-K keep K small; for tall-skinny preserve the source skinny dimension; for irregular kernels include non-power-of-two/boundary shapes. `_BENCH_SHAPES` is the single source of truth for both unit tests and benchmark; run correctness on all benchmarked shapes, including the required benchmark shape, and cover both dispatch paths if the kernel has them.
+- **Device mismatch at import time** — module-level `ModelNew(...)` is CPU. Must be lazily moved to NPU
+- **Duplicated torch_ref logic** — call `_run_torch_ref()`, don't rebuild inline in unit_test
+- **baseline2 must map to `base_*.py`** — the golden reference, not a second copy of the input. If both `<N>_<KernelName>.py` and `base_<N>_<KernelName>.py` exist, `profile_kernels.py` MUST be a 4-line comparison: `PyTorch / ACL`, `Baseline Triton1` (`<N>_*.py`), `Baseline Triton2` (`base_*.py`), `Optimized Triton`. The `base_*.py` file remains read-only: do not edit it, but importing/executing it as a comparison provider is required.
+- **Triton kernel name collision** — when loading multiple sibling files with same-named `@triton.autotune` kernels, use unique `k_<provider>_<stem>` module names, insert the module into `sys.modules` before `exec_module`, and load input before reference
+- **Autotune decorator vs benchmark args** — keep `warmup`, `rep`, and `quantiles` in `triton.testing.do_bench` / `perf_report`, not in `@triton.autotune`. Passing benchmark-only kwargs to `@triton.autotune` can produce runtime errors such as `missing required positional argument: 'quantiles'`.
+- **`inf`/`NaN` in speedup ratios** — filter with `np.isfinite() & (vals > 0)` before geomean. Use median-based ymax for bar charts. See `references/generate_report_robustness.md`
+- **Weight-init matching** — torch_ref must replicate the EXACT same construction order with the SAME `torch.manual_seed(0)` as the baseline's `ModelNew.__init__`
+- **Broadcasting mismatch** — for matmul kernels, use `torch.matmul()` directly instead of manual `unsqueeze`/`expand`
+
+## Reference files
+
+- `templates/profile_kernels.py` — Complete working template (3-line single-baseline format)
+- `references/generate_report_parser_contract.md` — Strict format rules for `results.txt`
+- `references/remote_execution_lessons.md` — Per-variant resilience, upload exclusion, entry-point requirement
+- `references/profile-template-pitfalls.md` — Canonical single-process profiler shape, input-contract matching, correctness-gated benchmarking, `coreDim` poison handling, provider-wide `inf`, and Ascend `tl.dot` dtype pitfalls
 
 ## Constraints
+
 - Generate this script AFTER optimized kernel is validated via cannsim
 - This script runs on real NPU hardware, not cannsim
-- Always use `@triton.testing.perf_report` — never hand-roll benchmark loops
+- Prefer `@triton.testing.perf_report` over manual benchmark loops. If `do_bench` is unavailable or unreliable, use the `time.perf_counter` + `torch.*.synchronize()` fallback
 - Return `triton.testing.do_bench(fn, warmup=25, rep=200, return_mode="mean")` directly (no scaling)
+- **Concise output** — diagnosis and fix in 2-3 sentences
+- **Do NOT modify `base_*.py` files** — they are the golden reference. Surface bugs via per-variant ERROR cells

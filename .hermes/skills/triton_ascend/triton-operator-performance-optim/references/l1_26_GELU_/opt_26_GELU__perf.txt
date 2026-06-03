@@ -1,4 +1,0 @@
-latency-case-1: 7537.104
-# raw-op-statistic-case-1: {"ops":[{"op_type":"_gelu_fwd_kernel_even","avg_time_us":7537.104},{"op_type":"DSARandomNormal","avg_time_us":152100.459},{"op_type":"Cast","avg_time_us":7818.136}]}
-# resolved-kernels-case-1: _gelu_fwd_kernel,_gelu_fwd_kernel_even
-# kernel-source-case-1: metadata+operator

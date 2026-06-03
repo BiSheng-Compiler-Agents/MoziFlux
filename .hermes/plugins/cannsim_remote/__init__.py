@@ -38,6 +38,14 @@ Important lessons:
     build first (outside cannsim scope), then point cannsim at the binary.
   - cannsim.log cycle counts are not actionable. Use trace_core0.json from
     `cannsim report -n 0 --timeline` for optimization decisions.
+  - CANN 9.0.0 cleanup bug: cannsim record exits with code 1 after a successful
+    simulation due to a FileNotFoundError in _cleanup_user_env(os.getcwd()).
+    The plugin detects this pattern and continues to the report step rather than
+    treating it as a failure. Signature: "current_dir = os.getcwd()" +
+    "FileNotFoundError" + "_cleanup_user_env" in stderr, combined with
+    "all tasks are finished!" in stdout confirming the simulation completed.
+  - Default timeout is 1800s. Large GEMM kernels (4096×4096) take ~1500s to
+    simulate. The old 600s default would kill mid-simulation.
 """
 
 from __future__ import annotations
@@ -45,6 +53,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shlex
 import tempfile
 import time
 from typing import Any
@@ -176,6 +185,101 @@ def _apply_remote_patches(ssh, conda_env: str) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 
+def _cannsim_record_completed(log: str) -> bool:
+    """Return True when the simulation ran to completion despite a non-zero exit.
+
+    CANN 9.0.0 cannsim has a Python bug in record.py _cleanup_user_env():
+    after the simulation finishes it calls os.getcwd() on a directory that it
+    already deleted, raising FileNotFoundError and exiting with code 1 even
+    though every kernel program ran successfully and instr.bin / log_ca are
+    fully written.  We detect this by confirming:
+      1. The kernel actually ran:  "all tasks are finished!" appears in the log
+      2. The failure is only the known cleanup bug:
+             current_dir = os.getcwd()
+             FileNotFoundError
+    """
+    has_completion = "all tasks are finished!" in log
+    is_cleanup_bug = ("current_dir = os.getcwd()" in log
+                      and "FileNotFoundError" in log
+                      and "_cleanup_user_env" in log)
+    return has_completion and is_cleanup_bug
+
+
+def _ssh_cannsim_record(
+    ssh,
+    setenv: str,
+    remote_job_dir: str,
+    remote_binary: str,
+    soc: str,
+    timeout: int,
+) -> tuple[int, str, str]:
+    """Run cannsim record on remote via SSH, with early-kill on trace completion.
+
+    CANN runtime atexit handlers hang the binary after the simulation completes
+    (see pitfall #23 — simulation/SKILL.md).  This wrapper runs a bash script
+    on the remote that:
+      1. Launches cannsim record in the background
+      2. Polls cannsim.log every 3s for completion markers
+      3. Kills the record process as soon as the trace is complete (``Result
+         copied back`` or ``all tasks are finished!``), avoiding the atexit
+         teardown hang
+      4. Returns exit code 0 on early-kill, 1 on timeout
+
+    Returns the same shape as _ssh_exec: (exit_code, stdout, stderr).
+    """
+    wrapper_script = (
+        'set -o pipefail\n'
+        f'cd {remote_job_dir} || exit 1\n'
+        f'cannsim record -s {soc} -- {remote_binary} 2>&1 &\n'
+        'RECORD_PID=$!\n'
+        'trap "kill -9 $RECORD_PID 2>/dev/null; exit 0" EXIT\n'
+        'POLL_LOG="cannsim.log"\n'
+        'START_SEC=$SECONDS\n'
+        'while kill -0 $RECORD_PID 2>/dev/null; do\n'
+        '  ELAPSED=$((SECONDS - START_SEC))\n'
+        '  if [ $ELAPSED -gt MAX_SEC ]; then\n'
+        '    echo "[WRAPPER] Timeout after ${ELAPSED}s"\n'
+        '    kill -9 $RECORD_PID 2>/dev/null\n'
+        '    exit 1\n'
+        '  fi\n'
+        '  if [ -f "$POLL_LOG" ]; then\n'
+        '    if grep -q "Result copied back" "$POLL_LOG" 2>/dev/null || '
+        'grep -q "all tasks are finished" "$POLL_LOG" 2>/dev/null; then\n'
+        # CRITICAL: the completion marker fires BEFORE cannsim flushes instr.bin
+        # to disk (the write happens during the atexit/teardown phase the kill
+        # skips). Killing on the marker + a blind sleep races that write and, for
+        # teardown-hanging kernels (al.multibuffer), usually wins — leaving an
+        # experiment dir with no instr.bin so `cannsim report` fails with
+        # "instr log file is not found". Wait for a non-empty, size-stable
+        # instr.bin in the newest experiment subdir before killing.
+        '      echo "[WRAPPER] Trace marker seen; waiting for instr.bin to stabilize"\n'
+        '      LAST=-1\n'
+        '      for i in $(seq 1 40); do\n'
+        '        EXP=$(ls -1dt cannsim_*/ 2>/dev/null | head -1)\n'
+        '        SZ=$(stat -c%s "${EXP}instr.bin" 2>/dev/null || echo 0)\n'
+        '        if [ "$SZ" -gt 0 ] && [ "$SZ" = "$LAST" ]; then\n'
+        '          echo "[WRAPPER] instr.bin stable at ${SZ} bytes"\n'
+        '          break\n'
+        '        fi\n'
+        '        LAST=$SZ\n'
+        '        sleep 3\n'
+        '      done\n'
+        '      echo "[WRAPPER] Trace complete, killing record process"\n'
+        '      kill -9 $RECORD_PID 2>/dev/null\n'
+        '      exit 0\n'
+        '    fi\n'
+        '  fi\n'
+        '  sleep 3\n'
+        'done\n'
+        'wait $RECORD_PID 2>/dev/null\n'
+        'EXIT_CODE=${?:-0}\n'
+        'echo "[WRAPPER] cannsim record exited naturally with code $EXIT_CODE"\n'
+        'exit $EXIT_CODE\n').replace("MAX_SEC", str(timeout))
+
+    full_cmd = f"source {setenv} && bash -c {shlex.quote(wrapper_script)}"
+    return _ssh_exec(ssh, full_cmd, timeout=timeout + 30)
+
+
 def _cannsim_remote_run(
     local_dir: str,
     run_script: str,
@@ -185,7 +289,7 @@ def _cannsim_remote_run(
     soc_version: str | None = None,
     cannsim_output_subdir: str = "output",
     gen_report: bool = True,
-    timeout: int = 600,
+    timeout: int = 1800,
     report_timeout: int = 300,
 ) -> dict[str, Any]:
     """
@@ -330,34 +434,40 @@ def _cannsim_remote_run(
         #    subdir and log_ca/ can't be found, producing a tiny instr.bin and no
         #    valid trace. Instead, cd into remote_job_dir and let cannsim create
         #    its own `cannsim_<ts>_<bin>/` subdir there.
-        #    Do NOT use `-g`: A/B tested empirically — `-g` only triggers cannsim's
-        #    auto-report. The instr.bin we feed to `cannsim report` is byte-identical
-        #    with or without `-g`, and so is the resulting trace_core0.json. Since
-        #    we always call `cannsim report` ourselves below, `-g` is redundant.
+        #    `-g` is normally redundant because we always call `cannsim report`
+        #    ourselves below. BUT instr.bin is only flushed during cannsim's
+        #    atexit/teardown phase. For teardown-hanging kernels (al.multibuffer),
+        #    the early-kill wrapper waits for a size-stable instr.bin before
+        #    killing (see _ssh_cannsim_record) — otherwise the kill races the
+        #    write and `cannsim report` fails with "instr log file is not found".
         remote_binary = remote_job_dir.rstrip("/") + "/" + binary_name
 
-        cannsim_record_cmd = (
-            f"source {setenv} && "
-            f"cd {remote_job_dir} && "
-            f"cannsim record -s {soc} -- {remote_binary}").strip()
-
-        logger.info(f"cannsim_remote: running: {cannsim_record_cmd}")
-        rc, record_out, record_err = _ssh_exec(ssh,
-                                               cannsim_record_cmd,
-                                               timeout=timeout)
+        logger.info(
+            "cannsim-remote: running cannsim record with early-kill wrapper")
+        rc, record_out, record_err = _ssh_cannsim_record(
+            ssh, setenv, remote_job_dir, remote_binary, soc, timeout)
         record_log = (record_out + "\n" + record_err).strip()
 
         if rc != 0:
-            return {
-                "success": False,
-                "error":
-                f"cannsim record failed (exit {rc}):\n{record_log[-3000:]}",
-                "job_name": job_name,
-                "remote_job_dir": remote_job_dir,
-                "patch_log": patch_log,
-                "build_log": build_log,
-                "cannsim_log_tail": record_log[-4000:],
-            }
+            if _cannsim_record_completed(record_log):
+                # CANN 9.0.0 cleanup bug: cannsim exited non-zero after a
+                # successful simulation.  Log a warning and continue — instr.bin
+                # and log_ca are intact so cannsim report will succeed normally.
+                logger.warning(
+                    f"cannsim-remote: cannsim record exited {rc} but simulation "
+                    "completed (CANN 9.0.0 os.getcwd() cleanup bug) — continuing "
+                    "to report step")
+            else:
+                return {
+                    "success": False,
+                    "error":
+                    f"cannsim record failed (exit {rc}):\n{record_log[-3000:]}",
+                    "job_name": job_name,
+                    "remote_job_dir": remote_job_dir,
+                    "patch_log": patch_log,
+                    "build_log": build_log,
+                    "cannsim_log_tail": record_log[-4000:],
+                }
 
         # 8. Run cannsim report to produce trace_core0.json
         #    cannsim record (without -o) creates a `cannsim_<ts>_<binname>/` subdir
@@ -535,7 +645,7 @@ def register(ctx) -> None:
                         "type":
                         "integer",
                         "description":
-                        "SSH timeout for the cannsim record step in seconds (default: 600).",
+                        "SSH timeout for the cannsim record step in seconds (default: 1800). Large GEMM kernels (e.g. 4096×4096) can take 1500+ seconds to simulate — set this higher if the run is killed mid-simulation.",
                     },
                     "report_timeout": {
                         "type":
@@ -558,7 +668,7 @@ def register(ctx) -> None:
                 cannsim_output_subdir=args.get("cannsim_output_subdir",
                                                "output"),
                 gen_report=args.get("gen_report", True),
-                timeout=args.get("timeout", 600),
+                timeout=args.get("timeout", 1800),
                 report_timeout=args.get("report_timeout", 300),
             )),
         check_fn=lambda: bool(
@@ -567,7 +677,13 @@ def register(ctx) -> None:
                 "CANNSIM_REMOTE_PASS") and os.environ.get("CANNSIM_REMOTE_PORT"
                                                           )),
         requires_env=[
-            "CANNSIM_REMOTE_HOST", "CANNSIM_REMOTE_USER",
-            "CANNSIM_REMOTE_PASS", "CANNSIM_REMOTE_PORT"
+            "CANNSIM_REMOTE_HOST",
+            "CANNSIM_REMOTE_USER",
+            "CANNSIM_REMOTE_PASS",
+            "CANNSIM_REMOTE_PORT",
+            "CANNSIM_REMOTE_BASE_DIR",
+            "CANNSIM_REMOTE_CONDA_ENV",
+            "CANNSIM_SOC_VERSION",
+            "CANNSIM_SETENV_PATH",
         ],
     )
