@@ -8,10 +8,26 @@ description: >
 tags: [triton, ascend, npu, cannsim, cann, simulation]
 required_plugins:
   - cannsim-remote
+  - cannsim-local
+required_environment_variables:
+  # cannsim-local plugin
+  - CANNSIM_BIN
+  - CANNSIM_SOC_VERSION
+  - CANNSIM_SETENV_PATH
+  - CONDA_BIN
+  - CONDA_ENV
+  # cannsim-remote plugin
+  - CANNSIM_REMOTE_HOST
+  - CANNSIM_REMOTE_USER
+  - CANNSIM_REMOTE_PASS
+  - CANNSIM_REMOTE_PORT
+  - CANNSIM_REMOTE_BASE_DIR
+  - CANNSIM_REMOTE_CONDA_ENV
 metadata:
   hermes:
     requires_tools:
       - cannsim_remote_run
+      - cannsim_local_run
     related_skills:
       - triton-ascend-optimization-patterns
       - kernel-episode-memory
@@ -156,6 +172,13 @@ rtStreamDestroy(stream); rtDeviceReset(0);
 | CANN | 9.0.0 |
 | cannsim | ships with CANN 9.0.0 |
 | Host RAM on remote | ≥ 32 GB (Ascend950 camodel is heavy) |
+| System build tools | `cmake`, `make`, `g++` (needed to compile C++ host launcher) |
+
+> **Docker image**: System build tools must be installed via `apt-get` in the
+> Dockerfile. The `compilerclaw` conda env does not include them. See
+> `references/local_cannsim_plugin.md` for the UID/GID mismatch fix needed in
+> the Dockerfile and `run_container.sh` so the hermes user inside the container
+> can write to the conda env.
 
 ---
 
@@ -546,12 +569,16 @@ representative trace. Core 0 is not guaranteed to be representative.
 The trace_core0.json file contains a full execution trace for all events, which is too large of a data dump.
 So, DO NOT attempt to read that fully into your context. Instead, run the accompanying aggregation/ summarizing script as below,
 which will output a condensed summary of the key metrics in a human/LLM readable format.
-```bash 
+```bash
 python scripts/aggregate_trace.py /path/to/trace_core0.json
 ```
 
-Output is written to `/tmp/trace_summary.txt` — always at that fixed path, NOT next to the input file.
-Read /tmp/trace_summary.txt after running the script.
+The script writes its output to a `trace_summary.txt` file **next to the input file** (same
+directory as the input). Read that file after running.
+
+> **Note**: Earlier versions of this skill incorrectly stated the output always goes to
+> `/tmp/trace_summary.txt`. The actual behavior is: output goes to the same directory as
+> the input file. Always check next to your input.
 
 ### Reading the trace summary and information about the Ascend 910_95 / A5-class NPU architecture
 
@@ -605,6 +632,81 @@ Note on annotations BOTTLENECK and CRITICAL:
 * BOTTLENECK: the pipeline with the highest busy_cyc (most occupied pipeline in the trace window).
 * CRITICAL: an instruction that either has the highest total_cyc across all top instructions, 
   or whose per-event average duration (avg_cyc) is ≥ 25% of total wall-clock cycles.
+
+---
+
+## Local cannsim execution via `cannsim-local` Hermes plugin
+
+**Required plugin:** `cannsim-local`
+
+Use this when cannsim runs on the same machine (no SSH). The plugin:
+1. Auto-applies the triton patches locally (idempotent, skips if already applied)
+2. Sources CANN environment from `CANNSIM_SETENV_PATH` (the CANN set_env.sh script)
+3. Resolves `cannsim` from the sourced PATH — no hardcoded paths
+4. Copies sources into a temp job dir (`/tmp/cannsim_local/<job_name>/`)
+5. Runs the build step inside `run_kernel.sh` via `conda run -n <CONDA_ENV>`
+6. Runs `cannsim record -s <soc>` locally
+7. Runs `cannsim report -e <exp_dir> -o <exp_dir>/report -n 0` to produce `trace_core0.json`
+8. Returns `trace_core0.json` content inline and its local path
+
+> **⛑️ NO HARDCODED PATHS in the plugin.** After sourcing `CANNSIM_SETENV_PATH`, `cannsim`
+> is on PATH — just use `shutil.which("cannsim")`. The conda env bin path is derived from
+> `CONDA_BIN` (via `dirname(dirname(CONDA_BIN))/envs/{env}/bin`). The `check_fn` only checks
+> `shutil.which("cannsim")` and the `CANNSIM_BIN` env var. Never hardcode `/opt/miniconda3/...`
+> or any other absolute path in plugin code. See
+> `references/cannsim_local_no_hardcoded_paths.md` for the full before/after diff.
+
+### Tool: `cannsim_local_run`
+
+| Parameter | Required | Default | Description |
+|---|---|---|---|
+| `local_dir` | yes | — | Dir with sources/binary + npubin + run_kernel.sh |
+| `run_script` | yes | — | Shell wrapper filename (e.g. `run_kernel.sh`) |
+| `binary_name` | no | `test_kernel` | Name of compiled binary cannsim wraps |
+| `build_cmd` | no | `bash <run_script> build` | Custom build command |
+| `job_name` | no | basename+timestamp | Temp subdirectory name under /tmp/cannsim_local/ |
+| `soc_version` | no | Ascend950 | cannsim -s value |
+| `gen_report` | no | true | When True, runs `cannsim report` and returns trace_core0.json |
+| `timeout` | no | 1800 | Timeout for cannsim record step (seconds) |
+| `report_timeout` | no | 300 | Timeout for cannsim report step (seconds) |
+
+### Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `CANNSIM_SETENV_PATH` | **yes** | Path to CANN set_env.sh — sources CANN env including cannsim on PATH |
+| `CONDA_BIN` | **yes** | Path to conda binary — used to derive env bin path and run build |
+| `CONDA_ENV` | no (default: `compilerclaw`) | Conda env name with triton-ascend installed |
+| `CANNSIM_BIN` | no | Override path to cannsim binary (auto-detected from PATH if not set) |
+| `CANNSIM_SOC_VERSION` | no (default: `Ascend950`) | cannsim -s value |
+
+### Resolving cannsim binary
+
+The plugin resolves cannsim in order:
+1. `CANNSIM_BIN` env var (if set)
+2. `shutil.which("cannsim")` using the PATH from the sourced CANN environment
+
+That's it. No hardcoded fallback paths. If cannsim is not on PATH after sourcing
+`CANNSIM_SETENV_PATH`, set `CANNSIM_BIN` explicitly.
+
+### Local vs remote: when to use which
+
+| Factor | `cannsim_local_run` | `cannsim_remote_run` |
+|---|---|---|
+| Machine | Local only | Remote SSH |
+| RAM needed | ~8 GB (camodel in-process) | ≥ 32 GB recommended |
+| Speed | No SSH overhead | SFTP upload + SSH exec |
+| Use when | Quick iterations, small kernels | Large kernels, repeated runs |
+
+### Pitfalls specific to local cannsim
+
+- **cannsim binary not found** — ensure `CANNSIM_SETENV_PATH` points to a valid CANN
+  set_env.sh. The plugin sources it and searches PATH. No hardcoded paths anywhere.
+- **conda env not on PATH** — the plugin derives the env bin path from `CONDA_BIN`
+  (not from a hardcoded `/opt/miniconda3/...` path). Ensure `CONDA_BIN` is set.
+- **triton patches not applied** — the plugin applies them automatically. If you get
+  `do_issue_vector_instr not support mix task type` or `rtGetSocVersion failed`
+  when running manually, see "Required patches to triton-ascend 3.2.1" section above.
 
 ---
 

@@ -151,9 +151,16 @@ def register(ctx) -> None:
         },
         handler=lambda args, **kw: my_tool_handler(args.get("param", "")),
         check_fn=lambda: True,   # return False to hide tool when unavailable
-        requires_env=[],
+        requires_env=["MY_VAR"],  # ALL env vars this tool reads via os.environ
     )
 ```
+
+**Every `register_tool()` call MUST include `requires_env` and `check_fn`.**
+List every env var the tool reads via `os.environ.get()`. If multiple tools share the
+same env vars, define `_requires_env` and `_check_fn` once and pass to each call.
+
+See `references/plugin-dev-learnings.md` for the no-hardcoded-paths rule and complete
+env var audit pattern.
 
 ---
 
@@ -377,6 +384,10 @@ with open(env_path) as f:
 ```
 
 ## 12. SSH plugins — pitfalls with paramiko
+
+**⛔ Never hardcode absolute paths in plugin code.** All paths must come from env vars.
+After sourcing a `set_env.sh`, binaries are on PATH — use `shutil.which()`. Derive conda
+paths from `CONDA_BIN` env var.
 
 When writing plugins that SSH into remote machines via paramiko:
 

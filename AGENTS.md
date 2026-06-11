@@ -9,3 +9,8 @@ Failure to read ROOT.md first is a critical error. Do not proceed with any task,
 4. Only after routing is complete, proceed with the user's task
 
 This applies to ALL tasks: research, code, editing, questions — everything.
+
+## File Creation Convention
+- **Project directory** (this repo, `.hermes/skills/`, `.hermes/plugins/`): Only create or modify files here when the user explicitly asks.
+- **Home directory** (`~/`): All unrelated work, temporary files, experiments, notes, and anything not specifically requested for the project goes here.
+- **Do not pollute the project directory** with unrelated files, scratch work, or experiments.

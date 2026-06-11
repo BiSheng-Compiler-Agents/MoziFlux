@@ -2,7 +2,17 @@
 name: simulation
 description: Run Triton-Ascend kernels without a physical NPU using cannsim. Covers compilation, host C++ launcher, cannsim invocation, and trace analysis.
 tags: [triton, ascend, cannsim, simulation, npu]
----
+required_plugins:
+  - cannsim-local
+required_environment_variables:
+  # cannsim-local plugin
+  - CANNSIM_BIN
+  - CANNSIM_SOC_VERSION
+  - CANNSIM_SETENV_PATH
+  - CONDA_BIN
+  - CONDA_ENV
+  # kernel-episodes plugin (used by optimization/episode-memory)
+  - KERNEL_EPISODES_DB
 
 # Cannsim Simulation [LEAF NODE]
 
@@ -81,10 +91,15 @@ invocation. Tested with triton-ascend==3.2.1 + CANN 9.0.0 + Ascend910_9589 targe
 | triton-ascend | 3.2.1 |
 | CANN | 9.0.0 |
 | cannsim | ships with CANN 9.0.0 |
-| Host RAM on remote | ≥ 32 GB (Ascend950 camodel is heavy) |
+| Host RAM | ≥ 32 GB (Ascend950 camodel is heavy) |
 
-Remote machine: 184.150.234.220, port 2021, user s00929845, conda env `compilerclaw`.
-Remote has GCC 11.4 (GLIBCXX up to 3.4.30) — always build on remote.
+CANN toolkit must be installed and `CANNSIM_SETENV_PATH` must point to the CANN set_env.sh
+script. The cannsim binary will be on PATH after sourcing. Conda env name defaults to
+`compilerclaw` but should be set via `CONDA_ENV`.
+
+Remote machine (if using `cannsim_remote_run`): set `CANNSIM_REMOTE_HOST`,
+`CANNSIM_REMOTE_USER`, `CANNSIM_REMOTE_PASS` in `~/.hermes/.env`. Remote should have
+GCC 11.4+ (GLIBCXX up to 3.4.30) — always build on remote.
 
 ---
 
@@ -93,8 +108,9 @@ Remote has GCC 11.4 (GLIBCXX up to 3.4.30) — always build on remote.
 These two patches must be applied once to any fresh triton-ascend 3.2.1 installation.
 They allow compilation and execution without a physical NPU.
 
-### Patch 1 — `get_ascend_devices.py`: honour `TRITON_ASCEND_ARCH` env var
-
+> Both patches are idempotent. The `cannsim-remote` Hermes plugin applies them
+> automatically on the remote machine before each run. The `cannsim-local` plugin
+> also applies them automatically on the local machine.
 File: `$(python -c "import triton; print(triton.__file__.replace('__init__.py',''))")tools/get_ascend_devices.py`
 
 ```python
@@ -340,7 +356,9 @@ make -j$(nproc)
 
 ---
 
-## Step 3 — Run with cannsim_remote_run
+## Step 3 — Run with cannsim (remote or local)
+
+### Option A: Remote (`cannsim_remote_run`) — requires SSH access
 
 Local directory layout:
 ```
@@ -368,26 +386,51 @@ result = cannsim_remote_run(
 # result["cannsim_log_tail"]  — last 4000 chars of cannsim.log
 ```
 
-### `cannsim_remote_run` parameter reference
+### Option B: Local (`cannsim_local_run`) — no SSH needed
+
+Same workflow but runs entirely on the local machine. Requires CANN toolkit
+installed and `CANNSIM_SETENV_PATH` set to the CANN set_env.sh script, plus the
+conda env with triton-ascend installed (`CONDA_BIN` and `CONDA_ENV`).
+
+```python
+result = cannsim_local_run(
+    local_dir="path/to/local_dir",
+    run_script="run_kernel.sh",
+    binary_name="test_my_kernel",
+    job_name="my_kernel",
+    gen_report=True,
+    timeout=1800,
+)
+# Same return shape as cannsim_remote_run, plus "patch_log" and "job_dir"
+```
+
+The local plugin (`cannsim-local`) automatically:
+- Sources `CANNSIM_SETENV_PATH` (the CANN set_env.sh) for CANN env vars
+- Applies the same triton patches (get_ascend_devices.py + compiler.py) so
+  compilation works without a physical NPU
+- Detects the CANN 9.0.0 cleanup bug (exit code 1 after successful simulation)
+- Resolves cannsim from the sourced PATH (no hardcoded paths)
+
+### `cannsim_remote_run` / `cannsim_local_run` parameter reference
 
 | Parameter | Required | Default | Description |
 |---|---|---|---|
 | `local_dir` | yes | — | Dir with sources/binary + npubin + run_kernel.sh |
 | `run_script` | yes | — | Shell wrapper filename (e.g. `run_kernel.sh`) |
 | `binary_name` | no | `test_kernel` | Name of compiled binary cannsim wraps |
-| `job_name` | no | basename+timestamp | Remote subdirectory name |
+| `job_name` | no | basename+timestamp | Subdirectory name |
 | `soc_version` | no | Ascend950 | cannsim -s value |
-| `gen_report` | no | false | When True, runs `cannsim report` after record and downloads trace_core0.json |
-| `timeout` | no | 600 | SSH timeout for cannsim record step |
-| `report_timeout` | no | 300 | SSH timeout for cannsim report step |
+| `gen_report` | no | True | When True, runs `cannsim report` and returns trace_core0.json |
+| `timeout` | no | 1800 | Timeout for cannsim record step (seconds) |
+| `report_timeout` | no | 300 | Timeout for cannsim report step (seconds) |
 
 > `local_dir` is the upload root — `run_script` must resolve inside it.
 > Set `local_dir` to the directory that *contains* `run_kernel.sh`,
 > and set `run_script` to just `"run_kernel.sh"`.
 
-Returns: `success`, `job_name`, `remote_job_dir`, `remote_experiment_dir`, `patch_log`,
-`build_log`, `cannsim_log_tail`, `report_log`, `trace_local_path`, `trace_json`,
-`trace_truncated`.
+Returns: `success`, `job_name`, `job_dir`/`remote_job_dir`, `experiment_dir`,
+`patch_log`, `build_log`, `cannsim_log_tail`, `report_log`, `trace_local_path`,
+`trace_json`, `trace_truncated`.
 
 ---
 
@@ -402,9 +445,12 @@ Instead, run the aggregation script:
 python scripts/aggregate_trace.py /path/to/trace_core0.json
 ```
 
-The script writes its output to `/tmp/trace_summary.txt` (NOT next to the input file — it
-always writes to /tmp regardless of where the input lives). Read /tmp/trace_summary.txt
-after running the script.
+The script writes its output to a `trace_summary.txt` file **next to the input file** (same
+directory as the input, with `.txt` extension replacing `.json`). Read that file after running.
+
+> **Note**: Earlier versions of this skill incorrectly stated the output always goes to
+> `/tmp/trace_summary.txt`. The actual behavior is: output goes to the same directory as
+> the input file. Always check next to your input.
 
 The `aggregate_trace.py` script is available at:
 `./scripts/aggregate_trace.py` (tree-internal, relative to this SKILL.md)
@@ -536,13 +582,13 @@ Threshold empirically: HW ≤ 1024 → persistent; HW > 1024 → loop kernel.
 
 **cannsim compile/build setup pitfalls (must get right):**
 - `TRITON_ASCEND_ARCH` for compile: MUST be `Ascend910_9589` (not `Ascend950` — the triton libdevice.py validates this and only accepts Ascend910_xxx values)
-- `soc_version` for cannsim_remote_run: MUST be `Ascend950` (cannsim only supports Ascend950, not Ascend910_9589)
+- `soc_version` for cannsim_remote_run / cannsim_local_run: MUST be `Ascend950` (cannsim only supports Ascend950, not Ascend910_9589)
 - Must clear triton cache before compile: `shutil.rmtree(os.path.expanduser("~/.triton/cache"), ignore_errors=True)` before `import triton` — otherwise cache hits bypass `TRITON_KERNEL_DUMP` and no .npubin is written
 - Use PID-unique DUMP_DIR: `_triton_dump_<os.getpid()>` pattern to avoid stale hits across runs
 - Binary must be at job root for cannsim: add `cp "$BUILD_DIR/binary" "$SCRIPT_DIR/binary"` in run_kernel.sh after make
 
 - **`run_kernel.sh` must NOT call `conda activate` — the plugin already runs the script inside the right env.**
-  The `cannsim-remote` plugin invokes `run_kernel.sh` via `conda run -n compilerclaw bash run_kernel.sh build`.
+  The plugins invoke `run_kernel.sh` via `conda run -n compilerclaw bash run_kernel.sh build`.
   If the script also calls `conda activate compilerclaw` (or `source conda.sh && conda activate`), the inner
   activation silently shadows the outer env and `triton` is not found:
   ```
@@ -558,14 +604,15 @@ Threshold empirically: HW ≤ 1024 → persistent; HW > 1024 → loop kernel.
   # conda activate compilerclaw
   ```
 
-Handled automatically by the `cannsim-remote` plugin (no action needed when using `cannsim_remote_run`):
-- `-o <dir>` on `cannsim record` — plugin never passes `-o`
-- `conda: command not found` in SSH — plugin finds conda via full path
-- `~` not expanded by paramiko SFTP — plugin resolves `$HOME` over SSH
-- Stale remote job dir — plugin does `rm -rf` before each upload
-- GLIBCXX version mismatch — plugin never uploads pre-built binaries
-- triton patches — plugin auto-applies both patches (idempotent)
-- **CANN 9.0.0 false failure** — cannsim record exits code 1 after a successful simulation because `_cleanup_user_env` calls `os.getcwd()` on a directory it already deleted (`FileNotFoundError`). Plugin detects this via the `current_dir = os.getcwd()` + `FileNotFoundError` + `_cleanup_user_env` + `all tasks are finished!` pattern and auto-recovers by continuing to the report step. Fixed in plugin v2 (June 2026).
+Handled automatically by both `cannsim-remote` and `cannsim-local` plugins (no action needed):
+- `-o <dir>` on `cannsim record` — plugins never pass `-o` (causes CWD issues and broken instr.bin)
+- `-g` flag on `cannsim record` — plugins never pass `-g` (redundant; we always call report ourselves)
+- `conda: command not found` — plugins find conda via full path
+- `~` not expanded by paramiko SFTP (remote) — plugin resolves `$HOME` over SSH
+- Stale job dir — plugins do `rm -rf` before each run
+- GLIBCXX version mismatch (remote) — plugins never upload pre-built binaries
+- triton patches — plugins auto-apply both patches (idempotent)
+- **CANN 9.0.0 false failure** — cannsim record exits code 1 after a successful simulation because `_cleanup_user_env` calls `os.getcwd()` on a directory it already deleted (`FileNotFoundError`). Plugins detect this via the `current_dir = os.getcwd()` + `FileNotFoundError` + `_cleanup_user_env` + `all tasks are finished!` pattern and auto-recovers by continuing to the report step. Fixed in plugin v2 (June 2026).
 - **Timeout** — with sub-kernel hosts (grid=1, M=BLOCK_M) simulation takes seconds; default 1800s is always sufficient. If you ever run a full-shape host (not recommended), 4096×4096 GEMM takes ~1500s — pass `timeout=3600`.
 
 Kernel/host code pitfalls (still require attention):
@@ -625,7 +672,14 @@ Kernel/host code pitfalls (still require attention):
     error pointing at line 34 of CMakeLists.txt. Fix: remove the stray quote so the line
     reads `set(ASCEND_PATH $ENV{ASCEND_HOME_PATH})`. The else-branch (env unset) works
     because the bug is only on the if-branch line.
-21. **`rtFunctionRegister` KERNEL_NAME mismatch → error `0x7bc78` and segfault** —
+21. **cannsim-local plugin: no hardcoded paths** — The cannsim-local plugin must NOT
+    hardcode any filesystem paths. After sourcing `CANNSIM_SETENV_PATH`, `cannsim` will be
+    on PATH — just use `shutil.which("cannsim")`. The conda env bin path must be derived
+    from `CONDA_BIN` (via `dirname(dirname(CONDA_BIN))/envs/{env}/bin`), not hardcoded as
+    `/opt/miniconda3/envs/...`. The `check_fn` must also avoid hardcoded paths — only check
+    `shutil.which("cannsim")` and the `CANNSIM_BIN` env var. See
+    `references/cannsim_local_no_hardcoded_paths.md` for the full before/after diff.
+22. **`rtFunctionRegister` KERNEL_NAME mismatch → error `0x7bc78` and segfault** —
     `rtFunctionRegister(handle, &stub, "name", (void*)"name", 0)` requires the name to
     match the **Python function name** of the `@triton.jit` kernel you passed to
     `triton.compiler.ASTSource(fn=...)`. The `.npubin` filename is irrelevant — what
@@ -661,9 +715,13 @@ Kernel/host code pitfalls (still require attention):
 ## Constraints
 - **Always use a sub-kernel host** — grid=(1,1,1), M=BLOCK_M, K=2×BLOCK_K. Full-shape runs are impractical (minutes to hours). Sub-kernel gives identical bottleneck diagnosis in seconds.
 - Always use `gen_report=True` — cycle counts alone are not actionable
-- Never upload pre-built binaries — always build on remote
+- Never upload pre-built binaries — always build on remote (with `cannsim_remote_run`) or locally (with `cannsim_local_run`)
 - Only `parallel_mode = "simd"` kernels work in cannsim; simt is broken
-- Remote cannsim machine: 184.150.234.220, port 2021, user s00929845, env `compilerclaw`
+- Local CANN install: set `CANNSIM_SETENV_PATH` to the CANN set_env.sh script, set
+  `CONDA_BIN` to the conda binary path, set `CONDA_ENV` to the conda env name.
+  The cannsim binary will be on PATH after sourcing set_env.sh — do not hardcode its path.
+- Remote cannsim machine: set `CANNSIM_REMOTE_HOST`, `CANNSIM_REMOTE_USER`, `CANNSIM_REMOTE_PASS`
+  in `~/.hermes/.env`.
 
 ---
 

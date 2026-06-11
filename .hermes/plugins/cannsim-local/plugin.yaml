@@ -1,0 +1,10 @@
+name: cannsim-local
+version: 2.0.0
+description: "Build a Triton test binary locally, run cannsim record, generate trace_core0.json via cannsim report, and return the trace for optimization analysis. No remote machine needed. Set CANNSIM_SETENV_PATH to the CANN set_env.sh script."
+author: "Hermes Agent & Shayan"
+requires_env:
+  - CANNSIM_SETENV_PATH
+  - CONDA_BIN
+  - CONDA_ENV
+provides_tools:
+  - cannsim_local_run

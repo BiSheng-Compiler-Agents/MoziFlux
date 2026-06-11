@@ -553,5 +553,14 @@ def register(ctx) -> None:
             and os.environ.get("CANNSIM_REMOTE_PASS")
             and os.environ.get("CANNSIM_REMOTE_PORT")
         ),
-        requires_env=["CANNSIM_REMOTE_HOST", "CANNSIM_REMOTE_USER", "CANNSIM_REMOTE_PASS", "CANNSIM_REMOTE_PORT"],
+        requires_env=[
+            "CANNSIM_REMOTE_HOST",
+            "CANNSIM_REMOTE_USER",
+            "CANNSIM_REMOTE_PASS",
+            "CANNSIM_REMOTE_PORT",
+            "CANNSIM_REMOTE_BASE_DIR",
+            "CANNSIM_REMOTE_CONDA_ENV",
+            "CANNSIM_SOC_VERSION",
+            "CANNSIM_SETENV_PATH",
+        ],
     )

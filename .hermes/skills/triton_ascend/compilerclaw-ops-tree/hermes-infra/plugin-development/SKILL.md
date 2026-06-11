@@ -313,6 +313,55 @@ with open(env_path) as f:
             os.environ[k.strip()] = v.strip()
 ```
 
+### `requires_env` — keep it complete and in sync
+
+**`requires_env` must be complete in BOTH `plugin.yaml` AND `ctx.register_tool()`.**
+Both lists must match and must include **every** env var the code actually reads
+via `os.environ.get()`. If a var is in code but not in `requires_env`, the plugin
+load check silently passes but the tool fails at runtime with a confusing error.
+
+Audit checklist when creating or reviewing a plugin:
+1. Grep `__init__.py` for all `os.environ.get("VAR_NAME"` calls
+2. Every unique VAR_NAME must appear in `plugin.yaml` → `requires_env`
+3. Every unique VAR_NAME must appear in `register_tool()` → `requires_env=[...]`
+4. Prefer "no default" (`""`) for truly required vars — don't silently fall through
+
+### Never hardcode paths in plugin code
+
+Derive all paths from env vars. For tools that need to find binaries, source the
+appropriate `set_env.sh` first and then use `shutil.which()` on the resulting PATH
+— do not hardcode fallback candidate paths.
+
+**Pattern — binary that appears on PATH after sourcing an env script:**
+```python
+def _find_bin(env: dict[str, str] | None = None) -> str:
+    env_bin = os.environ.get("MY_BIN", "")
+    if env_bin and os.path.isfile(env_bin):
+        return env_bin
+    search_env = env if env is not None else os.environ
+    on_path = shutil.which("mybinary", path=search_env.get("PATH", ""))
+    if on_path:
+        return on_path
+    raise FileNotFoundError("mybinary not found. Set MY_BIN or source set_env.sh.")
+```
+
+**Pattern — deriving conda paths from CONDA_BIN env var (never hardcode /opt/miniconda3/):**
+```python
+conda_bin = os.environ.get("CONDA_BIN", "")
+if conda_bin:
+    conda_root = os.path.dirname(os.path.dirname(conda_bin))
+    env_lib = os.path.join(conda_root, "envs", env_name, "lib")
+    env_bin_path = os.path.join(conda_root, "envs", env_name, "bin")
+```
+
+**`check_fn` must also avoid hardcoding paths.** Use `shutil.which()` on the current
+PATH or check env vars — do not hardcode `os.path.isfile("/opt/...")`.
+
+### Plugin descrips and docstrings — no hardcoded paths either
+
+Plugin `description` fields, `schema` descriptions, and module docstrings should
+also avoid hardcoding absolute paths. Use env var names or relative terms instead.
+
 ---
 
 ## SSH plugins — pitfalls with paramiko
@@ -557,3 +606,4 @@ def register(ctx) -> None:
 - `on_session_end` and `on_session_finalize` are NOT fired by `AIAgent.run_conversation()`
   in embedder/library mode. The entrypoint must invoke them manually via `invoke_hook`
   if any plugin depends on them. See the "Library / embedder usage" section above.
+- **File creation**: Only create files in the project directory (`/opt/nexusopt/`, `.hermes/skills/`, `.hermes/plugins/`) when the user explicitly asks. All unrelated work, experiments, and temporary files go to `~/`. Do not pollute the project directory.

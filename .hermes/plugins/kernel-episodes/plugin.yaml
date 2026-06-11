@@ -7,6 +7,8 @@ description: >
   the approach, what was changed, and the outcome. Namespaced by kernel_name
   and target hardware for precise recall.
 author: "Hermes Agent & Shayan"
+requires_env:
+  - KERNEL_EPISODES_DB
 provides_tools:
   - episode_write
   - episode_update

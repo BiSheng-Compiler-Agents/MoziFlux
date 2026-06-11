@@ -50,6 +50,19 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
+# ── Ensure HERMES_HOME is set for AIAgent .env discovery ──────────────────────
+# run_agent.py loads .env from <HERMES_HOME>/.env at import time.
+# Without this, it falls back to ~/.hermes/ which may not exist.
+_HERMES_HOME = os.environ.get("HERMES_HOME", "/opt/data")
+os.environ.setdefault("HERMES_HOME", _HERMES_HOME)
+
+# ── CRITICAL: cd to project root so project plugins (.hermes/plugins/) ────
+# Plugin discovery uses Path.cwd() to find .hermes/plugins/. Without this,
+# cannsim_local_run and other project plugins won't be visible to the agent.
+_PROJECT_DIR = Path(__file__).parent.resolve()
+os.chdir(_PROJECT_DIR)
+sys.path.insert(0, str(_PROJECT_DIR))
+
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -64,14 +77,24 @@ DATASET_DIR = ROOT / "datasets" / "KernelBench_Triton"
 STATE_FILE  = ROOT / "optimize_state.json"
 
 # ── Agent config ───────────────────────────────────────────────────────────────
-MODEL    = "owl-alpha"
+MODEL    = "deepseek/deepseek-v4-flash"
 PROVIDER = "openrouter"
 
 # ── Per-kernel task prompt ─────────────────────────────────────────────────────
 TASK_PROMPT = """
 Optimize the Triton kernel in the directory: {kernel_dir}
+
 The baseline kernel file that you should start optimizing is: {baseline_file}
-write the final optimized kernel in opt_{baseline_filename} in the same directory.
+
+Use cannsim_local_run to simulate the kernel and get trace data.
+Write the final optimized kernel in opt_{baseline_filename} in the same directory.
+
+Required deliverables (all 5 must be produced):
+1. opt_{baseline_filename}       — Optimized kernel + ModelNew host interface
+2. profile_kernels.py             — @perf_report benchmark, all dispatch paths, unit test
+3. Optimizations.md               — Each optimization applied, with code snippets and rationale
+4. performance_report.md          — cannsim trace tables (baseline vs optimized), hardware latency
+5. review.md                      — Static P0/P1/P2 review of the optimized kernel
 
 Do not modify the baseline file.
 """
@@ -272,6 +295,7 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
         model=MODEL,
         provider=PROVIDER,
         quiet_mode=True,
+        enabled_toolsets=["hermes-cli", "triton_ascend"],
         # Each kernel gets its own isolated task_id so tool calls,
         # working directories and sessions don't bleed across kernels.
         session_id=f"kernelbench-{name}",
