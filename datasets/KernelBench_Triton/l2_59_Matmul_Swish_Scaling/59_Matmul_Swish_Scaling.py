@@ -1,8 +1,10 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
-def _swish_scale_kernel(x_ptr, y_ptr, n_elements, scale, BLOCK_SIZE: tl.constexpr):
+def _swish_scale_kernel(x_ptr, y_ptr, n_elements, scale,
+                        BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     mask = offs < n_elements

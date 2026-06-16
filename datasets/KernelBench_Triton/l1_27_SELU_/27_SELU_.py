@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _selu_kernel(
     x_ptr,
@@ -19,7 +20,10 @@ def _selu_kernel(
 
     mask = offsets < n_elements
     # Streaming load hint: we don't reuse x, prefer evict-first
-    x = tl.load(x_ptr + offsets, mask=mask, other=0.0, eviction_policy='evict_first')
+    x = tl.load(x_ptr + offsets,
+                mask=mask,
+                other=0.0,
+                eviction_policy='evict_first')
     x32 = x.to(tl.float32)
 
     # Precompute constants

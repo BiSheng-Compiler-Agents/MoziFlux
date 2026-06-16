@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config({}, num_warps=2, num_stages=1),
@@ -16,13 +17,16 @@ import triton.language as tl
 )
 @triton.jit
 def _scale_softmax_row_kernel(
-    x_ptr,         # *[B, N]
-    s_ptr,         # *[1] or *[N]
-    out_ptr,       # *[B, N]
-    stride_xm, stride_xn,
-    stride_om, stride_on,
-    N,             # number of columns
-    HAS_VECTOR_SCALE: tl.constexpr,  # 0 for scalar scale, 1 for per-column scale
+    x_ptr,  # *[B, N]
+    s_ptr,  # *[1] or *[N]
+    out_ptr,  # *[B, N]
+    stride_xm,
+    stride_xn,
+    stride_om,
+    stride_on,
+    N,  # number of columns
+    HAS_VECTOR_SCALE: tl.
+    constexpr,  # 0 for scalar scale, 1 for per-column scale
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -38,13 +42,15 @@ def _scale_softmax_row_kernel(
     tl.multiple_of(offs, 16)
 
     # Load logits to fp32
-    x = tl.load(x_row_ptr, mask=mask, other=0.0, cache_modifier=".cg").to(tl.float32)
+    x = tl.load(x_row_ptr, mask=mask, other=0.0,
+                cache_modifier=".cg").to(tl.float32)
 
     LOG2E = 1.4426950408889634  # for exp2
 
     if HAS_VECTOR_SCALE:
         # Per-column scale; masked lanes neutral
-        s = tl.load(s_ptr + offs, mask=mask, other=1.0, cache_modifier=".cg").to(tl.float32)
+        s = tl.load(s_ptr + offs, mask=mask, other=1.0,
+                    cache_modifier=".cg").to(tl.float32)
         z = x * s
         # Ensure masked lanes don't affect reductions
         z = tl.where(mask, z, -float("inf"))

@@ -1,13 +1,25 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _min_reduce_dim2_kernel(
-    x_ptr,                # *f32 [B, C, D, H, W]
-    y_ptr,                # *f32 [B, C, H, W]
-    B, C, D, H, W,
-    stride_n, stride_c, stride_d, stride_h, stride_w,
-    out_stride_n, out_stride_c, out_stride_h, out_stride_w,
+    x_ptr,  # *f32 [B, C, D, H, W]
+    y_ptr,  # *f32 [B, C, H, W]
+    B,
+    C,
+    D,
+    H,
+    W,
+    stride_n,
+    stride_c,
+    stride_d,
+    stride_h,
+    stride_w,
+    out_stride_n,
+    out_stride_c,
+    out_stride_h,
+    out_stride_w,
     BLOCK_W: tl.constexpr,
     BLOCK_D: tl.constexpr,
 ):
@@ -39,13 +51,23 @@ def _min_reduce_dim2_kernel(
     out_ptrs = y_ptr + n_idx * out_stride_n + c_idx * out_stride_c + h_idx * out_stride_h + w_offsets * out_stride_w
     tl.store(out_ptrs, min_vals, mask=w_offsets < W)
 
+
 @triton.jit
 def _softmax_dim1_kernel(
-    x_ptr,                # *f32 [B, C, H, W]
-    y_ptr,                # *f32 [B, C, H, W]
-    B, C, H, W,
-    stride_n, stride_c, stride_h, stride_w,
-    out_stride_n, out_stride_c, out_stride_h, out_stride_w,
+    x_ptr,  # *f32 [B, C, H, W]
+    y_ptr,  # *f32 [B, C, H, W]
+    B,
+    C,
+    H,
+    W,
+    stride_n,
+    stride_c,
+    stride_h,
+    stride_w,
+    out_stride_n,
+    out_stride_c,
+    out_stride_h,
+    out_stride_w,
     BLOCK_C: tl.constexpr,
 ):
     # Grid maps over (n, h, w)
@@ -72,13 +94,25 @@ def _softmax_dim1_kernel(
     y_ptrs = y_ptr + base + c_offsets * out_stride_c
     tl.store(y_ptrs, y_vals, mask=c_mask)
 
+
 @triton.jit
 def _fused_minD_softmaxC_wtile_singleCTile(
-    x_ptr,                # *f32 [B, C, D, H, W]
-    y_ptr,                # *f32 [B, C, H, W]
-    B, C, D, H, W,
-    stride_n, stride_c, stride_d, stride_h, stride_w,
-    out_stride_n, out_stride_c, out_stride_h, out_stride_w,
+    x_ptr,  # *f32 [B, C, D, H, W]
+    y_ptr,  # *f32 [B, C, H, W]
+    B,
+    C,
+    D,
+    H,
+    W,
+    stride_n,
+    stride_c,
+    stride_d,
+    stride_h,
+    stride_w,
+    out_stride_n,
+    out_stride_c,
+    out_stride_h,
+    out_stride_w,
     TOT_D_TILES: tl.constexpr,
     BLOCK_C: tl.constexpr,
     BLOCK_D: tl.constexpr,
@@ -112,14 +146,11 @@ def _fused_minD_softmaxC_wtile_singleCTile(
         d_offsets = dt * BLOCK_D + tl.arange(0, BLOCK_D)
         d_mask = d_offsets < D
 
-        ptrs = (
-            x_ptr
-            + in_base
-            + c_offsets[:, None, None] * stride_c
-            + d_offsets[None, :, None] * stride_d
-            + w_offsets[None, None, :] * stride_w
-        )
-        mask3d = c_mask[:, None, None] & d_mask[None, :, None] & w_mask[None, None, :]
+        ptrs = (x_ptr + in_base + c_offsets[:, None, None] * stride_c +
+                d_offsets[None, :, None] * stride_d +
+                w_offsets[None, None, :] * stride_w)
+        mask3d = c_mask[:, None, None] & d_mask[None, :,
+                                                None] & w_mask[None, None, :]
         vals = tl.load(ptrs, mask=mask3d, other=pos_inf)
         tile_min = tl.min(vals, axis=1)  # reduce along D
         run_min = tl.minimum(run_min, tile_min)
@@ -132,11 +163,7 @@ def _fused_minD_softmaxC_wtile_singleCTile(
     out_vals = exps / gsum[None, :]
 
     # Store results to [B, C, H, W]
-    out_ptrs = (
-        y_ptr
-        + n_idx * out_stride_n
-        + c_offsets[:, None] * out_stride_c
-        + h_idx * out_stride_h
-        + w_offsets[None, :] * out_stride_w
-    )
+    out_ptrs = (y_ptr + n_idx * out_stride_n +
+                c_offsets[:, None] * out_stride_c + h_idx * out_stride_h +
+                w_offsets[None, :] * out_stride_w)
     tl.store(out_ptrs, out_vals, mask=c_mask[:, None] & w_mask[None, :])

@@ -1,12 +1,16 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_tanh_hswish_residual_lse(
     x_conv_ptr,
     x_norm_ptr,
     out_ptr,
-    N, C, H, W,
+    N,
+    C,
+    H,
+    W,
     BLOCK_C: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -28,7 +32,8 @@ def _fused_tanh_hswish_residual_lse(
         ch_mask = (idx < C) & mask_pid
         offs = base + idx * HW
 
-        xc = tl.load(x_conv_ptr + offs, mask=ch_mask, other=-1.0e30).to(tl.float32)
+        xc = tl.load(x_conv_ptr + offs, mask=ch_mask,
+                     other=-1.0e30).to(tl.float32)
         xn = tl.load(x_norm_ptr + offs, mask=ch_mask, other=0.0).to(tl.float32)
 
         t = 2.0 / (1.0 + tl.exp(-2.0 * xn)) - 1.0

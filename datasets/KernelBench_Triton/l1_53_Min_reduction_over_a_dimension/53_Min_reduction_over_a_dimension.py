@@ -1,12 +1,19 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _min_reduce_last_kernel(
-    x_ptr, out_ptr,
-    B, M, N,
-    stride_b, stride_m, stride_n,
-    out_stride_b, out_stride_m,
+    x_ptr,
+    out_ptr,
+    B,
+    M,
+    N,
+    stride_b,
+    stride_m,
+    stride_n,
+    out_stride_b,
+    out_stride_m,
     BLOCK_K: tl.constexpr,
 ):
     # Reduce over last dim (N). Each program computes one (b, m) output.
@@ -39,19 +46,29 @@ def _min_reduce_last_kernel(
             idx = k + offs_k + u * BLOCK_K
             mask = idx < N
             ptrs = x_ptr + base + idx * stride_n
-            x = tl.load(ptrs, mask=mask, other=float("inf"), cache_modifier=".ca")
+            x = tl.load(ptrs,
+                        mask=mask,
+                        other=float("inf"),
+                        cache_modifier=".ca")
             acc = tl.minimum(acc, tl.min(x, axis=0))
         k += 2 * BLOCK_K
 
     out_off = b * out_stride_b + m * out_stride_m
     tl.store(out_ptr + out_off, acc)
 
+
 @triton.jit
 def _min_reduce_mid_kernel(
-    x_ptr, out_ptr,
-    B, M, N,
-    stride_b, stride_m, stride_n,
-    out_stride_b, out_stride_n,
+    x_ptr,
+    out_ptr,
+    B,
+    M,
+    N,
+    stride_b,
+    stride_m,
+    stride_n,
+    out_stride_b,
+    out_stride_n,
     BLOCK_K: tl.constexpr,
 ):
     # Reduce over middle dim (M). Each program computes one (b, n) output.
@@ -83,19 +100,29 @@ def _min_reduce_mid_kernel(
             idx = k + offs_k + u * BLOCK_K
             mask = idx < M
             ptrs = x_ptr + base + idx * stride_m
-            x = tl.load(ptrs, mask=mask, other=float("inf"), cache_modifier=".cg")
+            x = tl.load(ptrs,
+                        mask=mask,
+                        other=float("inf"),
+                        cache_modifier=".cg")
             acc = tl.minimum(acc, tl.min(x, axis=0))
         k += 2 * BLOCK_K
 
     out_off = b * out_stride_b + n * out_stride_n
     tl.store(out_ptr + out_off, acc)
 
+
 @triton.jit
 def _min_reduce_first_kernel(
-    x_ptr, out_ptr,
-    B, M, N,
-    stride_b, stride_m, stride_n,
-    out_stride_m, out_stride_n,
+    x_ptr,
+    out_ptr,
+    B,
+    M,
+    N,
+    stride_b,
+    stride_m,
+    stride_n,
+    out_stride_m,
+    out_stride_n,
     BLOCK_K: tl.constexpr,
 ):
     # Reduce over first dim (B). Each program computes one (m, n) output.
@@ -127,7 +154,10 @@ def _min_reduce_first_kernel(
             idx = k + offs_k + u * BLOCK_K
             mask = idx < B
             ptrs = x_ptr + base + idx * stride_b
-            x = tl.load(ptrs, mask=mask, other=float("inf"), cache_modifier=".cg")
+            x = tl.load(ptrs,
+                        mask=mask,
+                        other=float("inf"),
+                        cache_modifier=".cg")
             acc = tl.minimum(acc, tl.min(x, axis=0))
         k += 2 * BLOCK_K
 

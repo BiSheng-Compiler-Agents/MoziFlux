@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config({'BLOCK_SIZE': 1024}, num_warps=2, num_stages=1),

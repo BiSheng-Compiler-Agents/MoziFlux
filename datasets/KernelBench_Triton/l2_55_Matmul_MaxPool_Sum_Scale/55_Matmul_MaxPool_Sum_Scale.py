@@ -1,22 +1,23 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _linear_maxpool_sum_scale_kernel(
-    x_ptr,              # float32[B, IN_F]
-    w_ptr,              # float32[OUT_F, IN_F]
-    b_ptr,              # float32[OUT_F]
-    out_ptr,            # float32[B]
-    B: tl.constexpr,    # batch size
-    IN_F,               # in_features (int)
-    OUT_F,              # out_features (int)
-    KERNEL,             # kernel_size (int), stride == kernel_size
-    X_STRIDE,           # stride for x rows (int)
-    W_ROW_STRIDE,       # weight row stride (int) -> typically IN_F
-    W_COL_STRIDE,       # weight col stride (int) -> typically 1
-    SCALE,              # scale factor (float)
-    BLOCK_IN: tl.constexpr,   # tile size along IN_F
-    BLOCK_KO: tl.constexpr,   # tile size along kernel window outputs
+        x_ptr,  # float32[B, IN_F]
+        w_ptr,  # float32[OUT_F, IN_F]
+        b_ptr,  # float32[OUT_F]
+        out_ptr,  # float32[B]
+        B: tl.constexpr,  # batch size
+        IN_F,  # in_features (int)
+        OUT_F,  # out_features (int)
+        KERNEL,  # kernel_size (int), stride == kernel_size
+        X_STRIDE,  # stride for x rows (int)
+        W_ROW_STRIDE,  # weight row stride (int) -> typically IN_F
+        W_COL_STRIDE,  # weight col stride (int) -> typically 1
+        SCALE,  # scale factor (float)
+        BLOCK_IN: tl.constexpr,  # tile size along IN_F
+        BLOCK_KO: tl.constexpr,  # tile size along kernel window outputs
 ):
     pid = tl.program_id(axis=0)
     # Each program handles one row (batch element)
@@ -54,8 +55,11 @@ def _linear_maxpool_sum_scale_kernel(
                 x_vec = tl.load(x_row_ptr + m_idx, mask=mask_m, other=0.0)
 
                 # Load weight sub-matrix [BLOCK_KO, BLOCK_IN]
-                w_ptrs = w_ptr + (o_idx[:, None] * W_ROW_STRIDE) + (m_idx[None, :] * W_COL_STRIDE)
-                w_block = tl.load(w_ptrs, mask=mask_o[:, None] & mask_m[None, :], other=0.0)
+                w_ptrs = w_ptr + (o_idx[:, None] * W_ROW_STRIDE) + (
+                    m_idx[None, :] * W_COL_STRIDE)
+                w_block = tl.load(w_ptrs,
+                                  mask=mask_o[:, None] & mask_m[None, :],
+                                  other=0.0)
 
                 # FMA reduction over input features for each output in the window chunk
                 acc += tl.sum(w_block * x_vec[None, :], axis=1)
@@ -67,7 +71,8 @@ def _linear_maxpool_sum_scale_kernel(
             val_vec = acc + b_vec
 
             # Compute max over valid elements in this chunk and update window max
-            chunk_max = tl.max(tl.where(mask_o, val_vec, -float("inf")), axis=0)
+            chunk_max = tl.max(tl.where(mask_o, val_vec, -float("inf")),
+                               axis=0)
             window_max = tl.maximum(window_max, chunk_max)
 
             ko_off += BLOCK_KO

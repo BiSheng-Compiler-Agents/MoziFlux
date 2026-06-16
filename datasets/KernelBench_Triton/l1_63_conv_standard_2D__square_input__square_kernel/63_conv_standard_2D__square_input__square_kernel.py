@@ -1,25 +1,27 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def conv2d_nchw_s1p0_vecoc_kernel(
-    x_ptr,        # *f32
-    w_ptr,        # *f32
-    b_ptr,        # *f32 or dummy
-    y_ptr,        # *f32
-    N,            # int32 runtime
-    H,            # int32 runtime
-    W,            # int32 runtime
-    OC,           # int32 runtime
-    H_out,        # int32 runtime
-    W_out,        # int32 runtime
-    TILES_WO,     # int32 runtime: number of tiles along width
-    C: tl.constexpr,           # compile-time in_channels
-    K: tl.constexpr,           # compile-time kernel_size (square)
-    BIAS: tl.constexpr,        # 0/1 compile-time whether to add bias
-    BLOCK_HO: tl.constexpr,    # tile size along output height
-    BLOCK_WO: tl.constexpr,    # tile size along output width
-    BLOCK_OC: tl.constexpr,    # number of output channels computed per program
+        x_ptr,  # *f32
+        w_ptr,  # *f32
+        b_ptr,  # *f32 or dummy
+        y_ptr,  # *f32
+        N,  # int32 runtime
+        H,  # int32 runtime
+        W,  # int32 runtime
+        OC,  # int32 runtime
+        H_out,  # int32 runtime
+        W_out,  # int32 runtime
+        TILES_WO,  # int32 runtime: number of tiles along width
+        C: tl.constexpr,  # compile-time in_channels
+        K: tl.constexpr,  # compile-time kernel_size (square)
+        BIAS: tl.constexpr,  # 0/1 compile-time whether to add bias
+        BLOCK_HO: tl.constexpr,  # tile size along output height
+        BLOCK_WO: tl.constexpr,  # tile size along output width
+        BLOCK_OC: tl.
+    constexpr,  # number of output channels computed per program
 ):
     pid_n = tl.program_id(axis=0)
     pid_ob = tl.program_id(axis=1)  # output-channel block id
@@ -69,23 +71,23 @@ def conv2d_nchw_s1p0_vecoc_kernel(
             for c in range(0, C):
                 # Load weights for a vector of OC
                 w_off = ((oc_offsets * C + c) * K + kh) * K + kw  # [BLOCK_OC]
-                w_vec = tl.load(w_ptr + w_off, mask=mask_oc, other=0.0).to(tl.float32)  # [BLOCK_OC]
+                w_vec = tl.load(w_ptr + w_off, mask=mask_oc,
+                                other=0.0).to(tl.float32)  # [BLOCK_OC]
                 # Load input tile for this (c, kh, kw)
                 x_offs_c = x_hw_offsets + c * x_c_stride  # [BH, BW]
-                x_val = tl.load(x_ptr + x_offs_c, mask=mask_spatial & in_bounds, other=0.0).to(tl.float32)  # [BH, BW]
+                x_val = tl.load(x_ptr + x_offs_c,
+                                mask=mask_spatial & in_bounds,
+                                other=0.0).to(tl.float32)  # [BH, BW]
                 # FMA with broadcasting over OC
                 acc += w_vec[:, None, None] * x_val[None, :, :]
 
     if BIAS:
-        b_vec = tl.load(b_ptr + oc_offsets, mask=mask_oc, other=0.0).to(tl.float32)  # [BLOCK_OC]
+        b_vec = tl.load(b_ptr + oc_offsets, mask=mask_oc,
+                        other=0.0).to(tl.float32)  # [BLOCK_OC]
         acc += b_vec[:, None, None]
 
     # Store results
-    y_offsets = (
-        y_base
-        + oc_offsets[:, None, None] * y_oc_stride
-        + OH[None, :, :] * y_h_stride
-        + OW[None, :, :] * y_w_stride
-    )
+    y_offsets = (y_base + oc_offsets[:, None, None] * y_oc_stride +
+                 OH[None, :, :] * y_h_stride + OW[None, :, :] * y_w_stride)
     store_mask = mask_oc[:, None, None] & mask_spatial[None, :, :]
     tl.store(y_ptr + y_offsets, acc, mask=store_mask)

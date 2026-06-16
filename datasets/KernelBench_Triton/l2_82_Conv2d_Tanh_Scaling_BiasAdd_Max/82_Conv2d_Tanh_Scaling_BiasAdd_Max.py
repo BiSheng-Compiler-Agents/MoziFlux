@@ -1,17 +1,29 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_tanh_scale_bias_maxpool2d(
-    x_ptr,                # *f32 [B, C, H, W]
-    bias_ptr,             # *f32 [C]
-    y_ptr,                # *f32 [B, C, Hpo, Wpo]
-    B, C, H, W,           # input dims
-    HPO, WPO,             # pooled output dims
-    STRIDE_B, STRIDE_C, STRIDE_H, STRIDE_W,       # input strides (in elements)
-    O_STRIDE_B, O_STRIDE_C, O_STRIDE_H, O_STRIDE_W,  # output strides (in elements)
-    scale,                # float scaling factor
-    POOL_K: tl.constexpr, # pooling kernel size (assume stride=POOL_K, padding=0, ceil_mode=False)
+    x_ptr,  # *f32 [B, C, H, W]
+    bias_ptr,  # *f32 [C]
+    y_ptr,  # *f32 [B, C, Hpo, Wpo]
+    B,
+    C,
+    H,
+    W,  # input dims
+    HPO,
+    WPO,  # pooled output dims
+    STRIDE_B,
+    STRIDE_C,
+    STRIDE_H,
+    STRIDE_W,  # input strides (in elements)
+    O_STRIDE_B,
+    O_STRIDE_C,
+    O_STRIDE_H,
+    O_STRIDE_W,  # output strides (in elements)
+    scale,  # float scaling factor
+    POOL_K: tl.
+    constexpr,  # pooling kernel size (assume stride=POOL_K, padding=0, ceil_mode=False)
     BLOCK_H: tl.constexpr,
     BLOCK_W: tl.constexpr,
 ):

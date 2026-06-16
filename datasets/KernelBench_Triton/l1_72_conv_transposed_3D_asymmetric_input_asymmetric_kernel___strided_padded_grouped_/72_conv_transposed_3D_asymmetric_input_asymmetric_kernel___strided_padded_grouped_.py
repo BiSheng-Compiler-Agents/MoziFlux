@@ -1,14 +1,32 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _upsample3d_scatter_kernel(
-    in_ptr, out_ptr,
-    N, C, Di, Hi, Wi,
-    Do, Ho, Wo,
-    SD, SH, SW,
-    in_stride_n, in_stride_c, in_stride_d, in_stride_h, in_stride_w,
-    out_stride_n, out_stride_c, out_stride_d, out_stride_h, out_stride_w,
+    in_ptr,
+    out_ptr,
+    N,
+    C,
+    Di,
+    Hi,
+    Wi,
+    Do,
+    Ho,
+    Wo,
+    SD,
+    SH,
+    SW,
+    in_stride_n,
+    in_stride_c,
+    in_stride_d,
+    in_stride_h,
+    in_stride_w,
+    out_stride_n,
+    out_stride_c,
+    out_stride_d,
+    out_stride_h,
+    out_stride_w,
     BLOCK_W: tl.constexpr,
 ):
     # Simple compile-time sanity

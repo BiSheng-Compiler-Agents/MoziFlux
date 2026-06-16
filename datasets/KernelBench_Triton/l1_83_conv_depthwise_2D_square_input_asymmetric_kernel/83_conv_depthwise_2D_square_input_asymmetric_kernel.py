@@ -1,22 +1,36 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _dw_conv_kh1_kernel(
-    x_ptr,             # *const T, [B, C, H_in, W_in]
-    w_ptr,             # *const T, [C, 1, K, 1]
-    b_ptr,             # *const T or nullptr, [C]
-    y_ptr,             # *T, [B, C, H_out, W_out]
-    B, C,
-    H_in, W_in,
-    H_out, W_out,
+    x_ptr,  # *const T, [B, C, H_in, W_in]
+    w_ptr,  # *const T, [C, 1, K, 1]
+    b_ptr,  # *const T or nullptr, [C]
+    y_ptr,  # *T, [B, C, H_out, W_out]
+    B,
+    C,
+    H_in,
+    W_in,
+    H_out,
+    W_out,
     K,
-    S_h, S_w,
-    P_h, P_w,
-    D_h, D_w,
-    x_bs, x_cs, x_hs, x_ws,
-    w_cs, w_khs,
-    y_bs, y_cs, y_hs, y_ws,
+    S_h,
+    S_w,
+    P_h,
+    P_w,
+    D_h,
+    D_w,
+    x_bs,
+    x_cs,
+    x_hs,
+    x_ws,
+    w_cs,
+    w_khs,
+    y_bs,
+    y_cs,
+    y_hs,
+    y_ws,
     HAS_BIAS: tl.constexpr,
     BLOCK_H: tl.constexpr,
     BLOCK_W: tl.constexpr,

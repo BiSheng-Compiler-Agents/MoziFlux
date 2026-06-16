@@ -35,7 +35,8 @@ def _softmax_row_fwd_db_kernel(
         exp_scale = tl.where(row_mask, tl.exp(row_max - new_row_max), 0.0)
         row_sum = tl.where(
             row_mask,
-            row_sum * exp_scale + tl.sum(tl.exp(x - new_row_max[:, None]), axis=1),
+            row_sum * exp_scale +
+            tl.sum(tl.exp(x - new_row_max[:, None]), axis=1),
             1.0,
         )
         row_max = new_row_max
@@ -54,19 +55,21 @@ def _softmax_row_fwd_db_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.dim() != 2:
-            raise ValueError("ModelNew expects a 2D tensor shaped [batch, columns]")
+            raise ValueError(
+                "ModelNew expects a 2D tensor shaped [batch, columns]")
         if not getattr(x, "is_npu", False):
             raise RuntimeError("ModelNew requires input tensors on Ascend NPU")
 
         x_in = x.contiguous()
         n_rows, n_cols = x_in.shape
         y_out = torch.empty_like(x_in)
-        grid = (triton.cdiv(n_rows, 2),)
+        grid = (triton.cdiv(n_rows, 2), )
         _softmax_row_fwd_db_kernel[grid](
             x_in,
             y_out,

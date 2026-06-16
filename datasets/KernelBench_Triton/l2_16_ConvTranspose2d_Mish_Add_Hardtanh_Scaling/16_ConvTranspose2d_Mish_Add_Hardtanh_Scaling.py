@@ -1,11 +1,14 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_mish_add_hardtanh_scale_kernel(
-    x_ptr, y_ptr,
+    x_ptr,
+    y_ptr,
     n_elements,
-    add_value, scale_value,
+    add_value,
+    scale_value,
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(0)
@@ -16,7 +19,10 @@ def _fused_mish_add_hardtanh_scale_kernel(
     mask = offs < n_elements
 
     # Load; values are single-use so prefer evict_last
-    x = tl.load(x_ptr + offs, mask=mask, other=0.0, eviction_policy="evict_last")
+    x = tl.load(x_ptr + offs,
+                mask=mask,
+                other=0.0,
+                eviction_policy="evict_last")
     x_f32 = x.to(tl.float32)
 
     # Mish: x * tanh(softplus(x))

@@ -1,18 +1,19 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_gn_swish_mul_swish_kernel(
-    x_ptr,            # (N, C)
-    gamma_ptr,        # (C,)
-    beta_ptr,         # (C,)
-    mulw_ptr,         # (C,)
-    y_ptr,            # (N, C)
-    N,                # batch size
-    C,                # out_features / channels
-    G,                # num_groups
-    GROUP_SIZE,       # C // G
-    EPS,              # eps for GroupNorm
+    x_ptr,  # (N, C)
+    gamma_ptr,  # (C,)
+    beta_ptr,  # (C,)
+    mulw_ptr,  # (C,)
+    y_ptr,  # (N, C)
+    N,  # batch size
+    C,  # out_features / channels
+    G,  # num_groups
+    GROUP_SIZE,  # C // G
+    EPS,  # eps for GroupNorm
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(0)

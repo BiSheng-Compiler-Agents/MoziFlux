@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _scale_kernel(x_ptr, y_ptr, s, n_elements, BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(0)
@@ -16,7 +17,10 @@ def _scale_kernel(x_ptr, y_ptr, s, n_elements, BLOCK_SIZE: tl.constexpr):
         tl.store(y_ptr + offsets, y)
     else:
         mask = offsets < n_elements
-        x = tl.load(x_ptr + offsets, mask=mask, other=0.0, cache_modifier=".cg")
+        x = tl.load(x_ptr + offsets,
+                    mask=mask,
+                    other=0.0,
+                    cache_modifier=".cg")
         s_cast = tl.full((), s, x.dtype)
         y = x * s_cast
         tl.store(y_ptr + offsets, y, mask=mask)

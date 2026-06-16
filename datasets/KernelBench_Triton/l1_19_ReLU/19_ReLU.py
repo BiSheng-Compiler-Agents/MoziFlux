@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config({'BLOCK_SIZE': 256}, num_warps=4, num_stages=1),
@@ -12,7 +13,8 @@ import triton.language as tl
     key=['n_elements'],
 )
 @triton.jit
-def _relu_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr, IS_FP: tl.constexpr):
+def _relu_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr,
+                 IS_FP: tl.constexpr):
     pid = tl.program_id(axis=0)
     offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     # Vectorization / coalescing hints

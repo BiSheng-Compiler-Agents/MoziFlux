@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config({"BLOCK_W": 16}, num_warps=1, num_stages=2),
@@ -19,12 +20,26 @@ import triton.language as tl
 def _maxpool3d_fwd_kernel(
     x_ptr,  # *f32 / *f16 contiguous NCDHW
     y_ptr,  # *f32 / *f16 contiguous NCDHW
-    N, C, D, H, W,
-    outD, outH, outW,
-    stride_d, stride_h, stride_w,
-    pad_d, pad_h, pad_w,
-    dil_d, dil_h, dil_w,
-    K_D: tl.constexpr, K_H: tl.constexpr, K_W: tl.constexpr,
+    N,
+    C,
+    D,
+    H,
+    W,
+    outD,
+    outH,
+    outW,
+    stride_d,
+    stride_h,
+    stride_w,
+    pad_d,
+    pad_h,
+    pad_w,
+    dil_d,
+    dil_h,
+    dil_w,
+    K_D: tl.constexpr,
+    K_H: tl.constexpr,
+    K_W: tl.constexpr,
     BLOCK_W: tl.constexpr,
 ):
     # program ids
@@ -58,7 +73,7 @@ def _maxpool3d_fwd_kernel(
 
     # accumulator in fp32 for robustness (store will cast as needed)
     neg_inf = -float("inf")
-    acc = tl.full((BLOCK_W,), neg_inf, dtype=tl.float32)
+    acc = tl.full((BLOCK_W, ), neg_inf, dtype=tl.float32)
 
     # precompute level strides
     L1 = H * W
@@ -78,7 +93,10 @@ def _maxpool3d_fwd_kernel(
                 base_zh = z_base + y * L2
                 m = mask_ow & z_valid & y_valid & x_valid
                 in_idx = base_nc + base_zh + x
-                vals = tl.load(x_ptr + in_idx, mask=m, other=neg_inf, eviction_policy="evict_first")
+                vals = tl.load(x_ptr + in_idx,
+                               mask=m,
+                               other=neg_inf,
+                               eviction_policy="evict_first")
                 vals = vals.to(tl.float32)
                 acc = tl.maximum(acc, vals)
         x += dil_w

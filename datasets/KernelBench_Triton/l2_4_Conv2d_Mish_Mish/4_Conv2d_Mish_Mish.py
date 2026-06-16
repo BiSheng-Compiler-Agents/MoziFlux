@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config({'BLOCK_SIZE': 1024}, num_warps=4, num_stages=2),
@@ -28,15 +29,18 @@ def _mish_mish_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
     # softplus(x) = x if x > 20, ~exp(x) if x < -20, else max(x,0)+log1p(exp(-|x|))
     abs_x = tl.abs(x32)
     sp1_mid = tl.where(x32 > zero, x32, zero) + tl.log(one + tl.exp(-abs_x))
-    sp1 = tl.where(x32 > twenty, x32, tl.where(x32 < neg_twenty, tl.exp(x32), sp1_mid))
+    sp1 = tl.where(x32 > twenty, x32,
+                   tl.where(x32 < neg_twenty, tl.exp(x32), sp1_mid))
 
     tanh_sp1 = tl.tanh(sp1)
     mish1 = x32 * tanh_sp1
 
     # Second Mish
     abs_m1 = tl.abs(mish1)
-    sp2_mid = tl.where(mish1 > zero, mish1, zero) + tl.log(one + tl.exp(-abs_m1))
-    sp2 = tl.where(mish1 > twenty, mish1, tl.where(mish1 < neg_twenty, tl.exp(mish1), sp2_mid))
+    sp2_mid = tl.where(mish1 > zero, mish1,
+                       zero) + tl.log(one + tl.exp(-abs_m1))
+    sp2 = tl.where(mish1 > twenty, mish1,
+                   tl.where(mish1 < neg_twenty, tl.exp(mish1), sp2_mid))
 
     tanh_sp2 = tl.tanh(sp2)
     out32 = mish1 * tanh_sp2

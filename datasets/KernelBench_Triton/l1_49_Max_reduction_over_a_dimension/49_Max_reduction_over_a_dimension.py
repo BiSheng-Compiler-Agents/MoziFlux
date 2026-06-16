@@ -1,14 +1,10 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
-def _max_reduce_dim1_kernel(
-    x_ptr, o_ptr,
-    B, M, N,
-    sx0, sx1, sx2,
-    so0, so1,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr
-):
+def _max_reduce_dim1_kernel(x_ptr, o_ptr, B, M, N, sx0, sx1, sx2, so0, so1,
+                            BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
     # Grid: (B, ceil_div(N, BLOCK_N))
     b = tl.program_id(0)
     pid_n = tl.program_id(1)
@@ -33,20 +29,19 @@ def _max_reduce_dim1_kernel(
             m_idx = m_start + mi
             valid_row = m_idx < M
             row_ptrs = base + m_idx * sx1 + n_offsets * sx2
-            row = tl.load(row_ptrs, mask=n_mask & valid_row, other=-float("inf"), cache_modifier=".cg")
+            row = tl.load(row_ptrs,
+                          mask=n_mask & valid_row,
+                          other=-float("inf"),
+                          cache_modifier=".cg")
             acc = tl.maximum(acc, row)
         m_start += BLOCK_M
 
     tl.store(o_ptrs, acc.to(o_ptr.dtype.element_ty), mask=n_mask)
 
+
 @triton.jit
-def _max_reduce_dim0_kernel(
-    x_ptr, o_ptr,
-    B, M, N,
-    sx0, sx1, sx2,
-    so0, so1,
-    BLOCK_B: tl.constexpr, BLOCK_N: tl.constexpr
-):
+def _max_reduce_dim0_kernel(x_ptr, o_ptr, B, M, N, sx0, sx1, sx2, so0, so1,
+                            BLOCK_B: tl.constexpr, BLOCK_N: tl.constexpr):
     # Grid: (M, ceil_div(N, BLOCK_N))
     m = tl.program_id(0)
     pid_n = tl.program_id(1)
@@ -61,7 +56,8 @@ def _max_reduce_dim0_kernel(
     while b_start < B:
         b_offsets = b_start + tl.arange(0, BLOCK_B)
         b_mask = b_offsets < B
-        ptrs = x_ptr + b_offsets[:, None] * sx0 + m * sx1 + n_offsets[None, :] * sx2
+        ptrs = x_ptr + b_offsets[:, None] * sx0 + m * sx1 + n_offsets[
+            None, :] * sx2
         mask = b_mask[:, None] & n_mask[None, :]
         x_tile = tl.load(ptrs, mask=mask, other=-float("inf"))
         tile_max = tl.max(x_tile, axis=0).to(tl.float32)
@@ -70,14 +66,10 @@ def _max_reduce_dim0_kernel(
 
     tl.store(o_ptrs, acc, mask=n_mask)
 
+
 @triton.jit
-def _max_reduce_dim2_kernel(
-    x_ptr, o_ptr,
-    B, M, N,
-    sx0, sx1, sx2,
-    so0, so1,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr
-):
+def _max_reduce_dim2_kernel(x_ptr, o_ptr, B, M, N, sx0, sx1, sx2, so0, so1,
+                            BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
     # Grid: (B, ceil_div(M, BLOCK_M))
     b = tl.program_id(0)
     pid_m = tl.program_id(1)
@@ -94,9 +86,13 @@ def _max_reduce_dim2_kernel(
     while n_start < N:
         n_offsets = n_start + tl.arange(0, BLOCK_N)
         n_mask = n_offsets < N
-        ptrs = x_ptr + b * sx0 + m_offsets[:, None] * sx1 + n_offsets[None, :] * sx2
+        ptrs = x_ptr + b * sx0 + m_offsets[:, None] * sx1 + n_offsets[
+            None, :] * sx2
         mask = m_mask[:, None] & n_mask[None, :]
-        x_tile = tl.load(ptrs, mask=mask, other=-float("inf"), cache_modifier=".cg")
+        x_tile = tl.load(ptrs,
+                         mask=mask,
+                         other=-float("inf"),
+                         cache_modifier=".cg")
 
         tile_max = tl.max(x_tile, axis=1).to(tl.float32)
         acc = tl.maximum(acc, tile_max)

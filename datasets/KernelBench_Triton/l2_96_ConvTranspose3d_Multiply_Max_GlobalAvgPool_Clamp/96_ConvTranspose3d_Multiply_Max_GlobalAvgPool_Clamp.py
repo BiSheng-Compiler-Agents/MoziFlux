@@ -1,19 +1,26 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_scale_maxpool3d_gap_clamp(
-    x_ptr,                       # *x_dtype [N, C, D, H, W] contiguous
-    out_ptr,                     # *x_dtype [N*C] flattened output
-    N, C, D, H, W,               # dimensions
-    scale,                       # scalar
-    clamp_min, clamp_max,        # scalars
-    KSIZE: tl.constexpr,         # pooling kernel size (assumed stride=KSIZE, padding=0, dilation=1)
-    DP: tl.constexpr,            # pooled D
-    HP: tl.constexpr,            # pooled H
-    WP: tl.constexpr,            # pooled W
-    NWINS: tl.constexpr,         # total pooling windows = DP * HP * WP
-    BLOCK_WINS: tl.constexpr,    # number of windows processed per iteration
+        x_ptr,  # *x_dtype [N, C, D, H, W] contiguous
+        out_ptr,  # *x_dtype [N*C] flattened output
+        N,
+        C,
+        D,
+        H,
+        W,  # dimensions
+        scale,  # scalar
+        clamp_min,
+        clamp_max,  # scalars
+        KSIZE: tl.
+    constexpr,  # pooling kernel size (assumed stride=KSIZE, padding=0, dilation=1)
+        DP: tl.constexpr,  # pooled D
+        HP: tl.constexpr,  # pooled H
+        WP: tl.constexpr,  # pooled W
+        NWINS: tl.constexpr,  # total pooling windows = DP * HP * WP
+        BLOCK_WINS: tl.constexpr,  # number of windows processed per iteration
 ):
     pid = tl.program_id(axis=0)
     n = pid // C

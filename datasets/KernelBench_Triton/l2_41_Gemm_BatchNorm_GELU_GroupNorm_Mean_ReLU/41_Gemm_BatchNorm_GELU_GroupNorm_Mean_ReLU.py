@@ -1,17 +1,18 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_gelu_groupnorm_mean_relu(
-    x_ptr,               # [N, C]
-    weight_ptr,          # [C]
-    bias_ptr,            # [C]
-    out_ptr,             # [N, 1]
-    C,                   # int: number of features (channels)
-    GROUP_SIZE,          # int: channels per group = C // NUM_GROUPS
-    EPS: tl.constexpr,   # groupnorm eps (compile-time)
-    NUM_GROUPS: tl.constexpr,  # number of groups (compile-time)
-    BLOCK_SIZE: tl.constexpr,  # equals GROUP_SIZE (compile-time)
+        x_ptr,  # [N, C]
+        weight_ptr,  # [C]
+        bias_ptr,  # [C]
+        out_ptr,  # [N, 1]
+        C,  # int: number of features (channels)
+        GROUP_SIZE,  # int: channels per group = C // NUM_GROUPS
+        EPS: tl.constexpr,  # groupnorm eps (compile-time)
+        NUM_GROUPS: tl.constexpr,  # number of groups (compile-time)
+        BLOCK_SIZE: tl.constexpr,  # equals GROUP_SIZE (compile-time)
 ):
     pid = tl.program_id(axis=0)  # row id
     row_start = pid * C
@@ -33,7 +34,10 @@ def _fused_gelu_groupnorm_mean_relu(
         mask = offs < GROUP_SIZE
 
         # Load x for this group, apply exact GELU (compute in fp32)
-        x = tl.load(x_ptr + row_start + cols, mask=mask, other=0.0, cache_modifier=".cg").to(tl.float32)
+        x = tl.load(x_ptr + row_start + cols,
+                    mask=mask,
+                    other=0.0,
+                    cache_modifier=".cg").to(tl.float32)
         xg = 0.5 * x * (1.0 + tl.erf(x * inv_sqrt2))
 
         # Compute group statistics: mean and variance of GELU(x)
@@ -44,8 +48,14 @@ def _fused_gelu_groupnorm_mean_relu(
         rstd = tl.rsqrt(var + EPS)
 
         # Load affine parameters (prefer caching as they are reused across rows)
-        gamma = tl.load(weight_ptr + cols, mask=mask, other=0.0, cache_modifier=".ca").to(tl.float32)
-        beta = tl.load(bias_ptr + cols, mask=mask, other=0.0, cache_modifier=".ca").to(tl.float32)
+        gamma = tl.load(weight_ptr + cols,
+                        mask=mask,
+                        other=0.0,
+                        cache_modifier=".ca").to(tl.float32)
+        beta = tl.load(bias_ptr + cols,
+                       mask=mask,
+                       other=0.0,
+                       cache_modifier=".ca").to(tl.float32)
 
         # Closed-form sum over GroupNorm+affine without materializing y
         # sum(y) = rstd * (sum(gamma * xg) - mu * sum(gamma)) + sum(beta)

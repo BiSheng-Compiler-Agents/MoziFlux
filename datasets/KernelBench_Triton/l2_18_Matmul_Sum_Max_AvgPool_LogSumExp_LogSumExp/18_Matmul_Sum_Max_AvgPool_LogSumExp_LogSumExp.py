@@ -1,11 +1,12 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _rowwise_linear_sum_kernel(
-    x_ptr,           # (B, I)
-    wsum_ptr,        # (I,)
-    out_ptr,         # (B,) result
+    x_ptr,  # (B, I)
+    wsum_ptr,  # (I,)
+    out_ptr,  # (B,) result
     B: tl.constexpr,
     I: tl.constexpr,
     stride_x_b,
@@ -64,19 +65,22 @@ def _rowwise_linear_sum_kernel(
     # Write result
     tl.store(out_ptr + rows * stride_out_b, acc, mask=mask_rows)
 
+
 @triton.jit
 def _fused_linear_sum_kernel(
-    x_ptr,            # *f32 (B, I)
-    W_ptr,            # *f32 (O, I)
-    b_ptr,            # *f32 (O,) - can be dummy if O_b==0
-    out_ptr,          # *f32 (B,)
-    B, I, O,          # int32 sizes
-    stride_x_b,       # int32
-    stride_x_i,       # int32
-    stride_w_o,       # int32
-    stride_w_i,       # int32
-    stride_b_o,       # int32
-    stride_out_b,     # int32
+    x_ptr,  # *f32 (B, I)
+    W_ptr,  # *f32 (O, I)
+    b_ptr,  # *f32 (O,) - can be dummy if O_b==0
+    out_ptr,  # *f32 (B,)
+    B,
+    I,
+    O,  # int32 sizes
+    stride_x_b,  # int32
+    stride_x_i,  # int32
+    stride_w_o,  # int32
+    stride_w_i,  # int32
+    stride_b_o,  # int32
+    stride_out_b,  # int32
     BLOCK_B: tl.constexpr,
     BLOCK_K: tl.constexpr,
     UNROLL_O: tl.constexpr,
@@ -98,7 +102,8 @@ def _fused_linear_sum_kernel(
     while o < O:
         o_idx = o + offs_o
         mask_o = o_idx < O
-        b_vals = tl.load(b_ptr + o_idx * stride_b_o, mask=mask_o, other=0.0).to(tl.float32)
+        b_vals = tl.load(b_ptr + o_idx * stride_b_o, mask=mask_o,
+                         other=0.0).to(tl.float32)
         c_acc += tl.sum(b_vals, axis=0)
         o += UNROLL_O
 
@@ -116,7 +121,8 @@ def _fused_linear_sum_kernel(
             o2_idx = o2 + offs_o
             mask_o2 = o2_idx < O
             w_block = tl.load(
-                W_ptr + o2_idx[:, None] * stride_w_o + k_idx[None, :] * stride_w_i,
+                W_ptr + o2_idx[:, None] * stride_w_o +
+                k_idx[None, :] * stride_w_i,
                 mask=mask_o2[:, None] & mask_k[None, :],
                 other=0.0,
             ).to(tl.float32)

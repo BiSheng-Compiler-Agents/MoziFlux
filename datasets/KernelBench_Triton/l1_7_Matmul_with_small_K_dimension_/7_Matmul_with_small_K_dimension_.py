@@ -1,27 +1,73 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         # Favor large N-tiles to improve coalescing on B (row-major, stride_n = 1)
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 32}, num_warps=8, num_stages=3),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 32}, num_warps=8, num_stages=2),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 256,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=3),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 256,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=2),
         # Alternative shapes for different M/N divisibility and occupancy trade-offs
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_warps=4, num_stages=3),
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 256, "BLOCK_K": 32}, num_warps=4, num_stages=2),
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 32}, num_warps=8, num_stages=2),
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 128, "BLOCK_K": 32}, num_warps=4, num_stages=1),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_warps=4,
+                      num_stages=3),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 256,
+            "BLOCK_K": 32
+        },
+                      num_warps=4,
+                      num_stages=2),
+        triton.Config({
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=2),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_warps=4,
+                      num_stages=1),
     ],
     key=["M", "N", "K"],
 )
 @triton.jit
 def _matmul_smallk_kernel(
-    A_ptr, B_ptr, C_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_cm, stride_cn,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
+    A_ptr,
+    B_ptr,
+    C_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_cm,
+    stride_cn,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
 ):
     # Program IDs
     pid_m = tl.program_id(0)
@@ -30,7 +76,7 @@ def _matmul_smallk_kernel(
     # Offsets for this CTA
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)  # [BM]
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)  # [BN]
-    rk = tl.arange(0, BLOCK_K)                    # [BK]
+    rk = tl.arange(0, BLOCK_K)  # [BK]
 
     # Hints to help vectorization on contiguous axes
     tl.max_contiguous(rn, BLOCK_N)
@@ -41,8 +87,10 @@ def _matmul_smallk_kernel(
 
     # Iterate over K
     for k0 in range(0, K, BLOCK_K):
-        a_ptrs = A_ptr + rm[:, None] * stride_am + (k0 + rk)[None, :] * stride_ak  # [BM, BK]
-        b_ptrs = B_ptr + (k0 + rk)[:, None] * stride_bk + rn[None, :] * stride_bn  # [BK, BN]
+        a_ptrs = A_ptr + rm[:, None] * stride_am + (
+            k0 + rk)[None, :] * stride_ak  # [BM, BK]
+        b_ptrs = B_ptr + (
+            k0 + rk)[:, None] * stride_bk + rn[None, :] * stride_bn  # [BK, BN]
 
         a_mask = (rm[:, None] < M) & ((k0 + rk)[None, :] < K)
         b_mask = ((k0 + rk)[:, None] < K) & (rn[None, :] < N)

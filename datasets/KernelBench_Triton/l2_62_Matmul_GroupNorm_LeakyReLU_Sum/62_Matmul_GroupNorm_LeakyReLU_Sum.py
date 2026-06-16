@@ -1,23 +1,27 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def fused_linear_groupnorm_lrelu_double(
-    x_ptr,                # float32 [N, K]
-    w_ptr,                # float32 [C, K]
-    b_ptr,                # float32 [C]
-    gamma_ptr,            # float32 [C]
-    beta_ptr,             # float32 [C]
-    y_ptr,                # float32 [N, C]
-    N: tl.constexpr,      # batch size
-    C: tl.constexpr,      # hidden size (channels)
-    K: tl.constexpr,      # input size
-    groups: tl.constexpr, # number of groups
-    eps,                  # float32
-    neg_slope,            # float32
-    stride_xm, stride_xk,
-    stride_wc, stride_wk,
-    stride_ym, stride_yc,
+    x_ptr,  # float32 [N, K]
+    w_ptr,  # float32 [C, K]
+    b_ptr,  # float32 [C]
+    gamma_ptr,  # float32 [C]
+    beta_ptr,  # float32 [C]
+    y_ptr,  # float32 [N, C]
+    N: tl.constexpr,  # batch size
+    C: tl.constexpr,  # hidden size (channels)
+    K: tl.constexpr,  # input size
+    groups: tl.constexpr,  # number of groups
+    eps,  # float32
+    neg_slope,  # float32
+    stride_xm,
+    stride_xk,
+    stride_wc,
+    stride_wk,
+    stride_ym,
+    stride_yc,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,  # set at launch to group_size = C // groups
     BLOCK_K: tl.constexpr,
@@ -44,12 +48,20 @@ def fused_linear_groupnorm_lrelu_double(
         mask_k = offs_k < K
 
         # X tile [BM, BK]
-        x_ptrs = x_ptr + (offs_m[:, None] * stride_xm + offs_k[None, :] * stride_xk)
-        x_tile = tl.load(x_ptrs, mask=(mask_m[:, None] & mask_k[None, :]), other=0.0, cache_modifier=".cg")
+        x_ptrs = x_ptr + (offs_m[:, None] * stride_xm +
+                          offs_k[None, :] * stride_xk)
+        x_tile = tl.load(x_ptrs,
+                         mask=(mask_m[:, None] & mask_k[None, :]),
+                         other=0.0,
+                         cache_modifier=".cg")
 
         # W tile [BK, BN] from layout [C, K]
-        w_ptrs = w_ptr + (offs_k[:, None] * stride_wk + c_idx[None, :] * stride_wc)
-        w_tile = tl.load(w_ptrs, mask=(mask_k[:, None] & mask_n[None, :]), other=0.0, cache_modifier=".cg")
+        w_ptrs = w_ptr + (offs_k[:, None] * stride_wk +
+                          c_idx[None, :] * stride_wc)
+        w_tile = tl.load(w_ptrs,
+                         mask=(mask_k[:, None] & mask_n[None, :]),
+                         other=0.0,
+                         cache_modifier=".cg")
 
         acc += tl.dot(x_tile, w_tile)
 

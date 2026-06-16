@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config({"BLOCK_W": 128}, num_warps=8, num_stages=3),
@@ -11,11 +12,26 @@ import triton.language as tl
 )
 @triton.jit
 def _avg_pool3d_k4s4_kernel(
-    x_ptr, y_ptr,
-    N, C, D, H, W,
-    OD, OH, OW,
-    stride_n, stride_c, stride_d, stride_h, stride_w,
-    out_stride_n, out_stride_c, out_stride_d, out_stride_h, out_stride_w,
+    x_ptr,
+    y_ptr,
+    N,
+    C,
+    D,
+    H,
+    W,
+    OD,
+    OH,
+    OW,
+    stride_n,
+    stride_c,
+    stride_d,
+    stride_h,
+    stride_w,
+    out_stride_n,
+    out_stride_c,
+    out_stride_d,
+    out_stride_h,
+    out_stride_w,
     BLOCK_W: tl.constexpr,
 ):
     # Program ids:
@@ -38,18 +54,10 @@ def _avg_pool3d_k4s4_kernel(
     w_mask = w_out < OW
 
     # Base pointers using strides
-    x_base = (
-        n_idx * stride_n
-        + c_idx * stride_c
-        + (od_idx * 4) * stride_d
-        + (oh_idx * 4) * stride_h
-    )
-    y_base = (
-        n_idx * out_stride_n
-        + c_idx * out_stride_c
-        + od_idx * out_stride_d
-        + oh_idx * out_stride_h
-    )
+    x_base = (n_idx * stride_n + c_idx * stride_c + (od_idx * 4) * stride_d +
+              (oh_idx * 4) * stride_h)
+    y_base = (n_idx * out_stride_n + c_idx * out_stride_c +
+              od_idx * out_stride_d + oh_idx * out_stride_h)
 
     # Each output corresponds to a 4x4x4 block in input with stride 4
     w_in_base = w_out * 4

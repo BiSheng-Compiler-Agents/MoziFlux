@@ -1,24 +1,25 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _conv_transpose1d_kernel(
-    x_ptr,            # *f32, [B, Cin, Lin]
-    w_ptr,            # *f32, [Cin, Cout, K]
-    bias_ptr,         # *f32, [Cout] (optional)
-    y_ptr,            # *f32, [B, Cout, Lout]
-    B: tl.constexpr,  # batch size
-    Cin: tl.constexpr,              # in channels
-    Cout,             # out channels
-    Lin,              # input length
-    Lout,             # output length
-    K: tl.constexpr,  # kernel size
-    STRIDE: tl.constexpr,           # stride
-    PADDING: tl.constexpr,          # padding
-    DILATION: tl.constexpr,         # dilation
-    HAS_BIAS: tl.constexpr,         # whether to add bias
-    BLOCK_COUT: tl.constexpr,       # tile size along out-channels
-    BLOCK_T: tl.constexpr,          # tile size along time dimension
+        x_ptr,  # *f32, [B, Cin, Lin]
+        w_ptr,  # *f32, [Cin, Cout, K]
+        bias_ptr,  # *f32, [Cout] (optional)
+        y_ptr,  # *f32, [B, Cout, Lout]
+        B: tl.constexpr,  # batch size
+        Cin: tl.constexpr,  # in channels
+        Cout,  # out channels
+        Lin,  # input length
+        Lout,  # output length
+        K: tl.constexpr,  # kernel size
+        STRIDE: tl.constexpr,  # stride
+        PADDING: tl.constexpr,  # padding
+        DILATION: tl.constexpr,  # dilation
+        HAS_BIAS: tl.constexpr,  # whether to add bias
+        BLOCK_COUT: tl.constexpr,  # tile size along out-channels
+        BLOCK_T: tl.constexpr,  # tile size along time dimension
 ):
     # program ids
     pid0 = tl.program_id(axis=0)  # over (B, T-blocks)
@@ -58,8 +59,11 @@ def _conv_transpose1d_kernel(
                 t_in = base_t - k * DILATION
                 vmask = (t_in >= 0) & (t_in < Lin) & t_mask
                 t_in_safe = tl.where(vmask, t_in, 0)
-                x_vals = tl.load(x_ptr + x_ic_base + t_in_safe, mask=vmask, other=0.0).to(tl.float32)
-                w_vec = tl.load(w_ptr_ic + k, mask=oc_mask, other=0.0).to(tl.float32)
+                x_vals = tl.load(x_ptr + x_ic_base + t_in_safe,
+                                 mask=vmask,
+                                 other=0.0).to(tl.float32)
+                w_vec = tl.load(w_ptr_ic + k, mask=oc_mask,
+                                other=0.0).to(tl.float32)
                 acc += w_vec[:, None] * x_vals[None, :]
         else:
             # General path: require divisibility by stride
@@ -69,13 +73,17 @@ def _conv_transpose1d_kernel(
                 t_in = n_vec // STRIDE
                 vmask = div_ok & (t_in >= 0) & (t_in < Lin) & t_mask
                 t_in_safe = tl.where(vmask, t_in, 0)
-                x_vals = tl.load(x_ptr + x_ic_base + t_in_safe, mask=vmask, other=0.0).to(tl.float32)
-                w_vec = tl.load(w_ptr_ic + k, mask=oc_mask, other=0.0).to(tl.float32)
+                x_vals = tl.load(x_ptr + x_ic_base + t_in_safe,
+                                 mask=vmask,
+                                 other=0.0).to(tl.float32)
+                w_vec = tl.load(w_ptr_ic + k, mask=oc_mask,
+                                other=0.0).to(tl.float32)
                 acc += w_vec[:, None] * x_vals[None, :]
 
     # Add bias if present
     if HAS_BIAS:
-        b_vec = tl.load(bias_ptr + oc_offsets, mask=oc_mask, other=0.0).to(tl.float32)
+        b_vec = tl.load(bias_ptr + oc_offsets, mask=oc_mask,
+                        other=0.0).to(tl.float32)
         acc += b_vec[:, None]
 
     # Store results

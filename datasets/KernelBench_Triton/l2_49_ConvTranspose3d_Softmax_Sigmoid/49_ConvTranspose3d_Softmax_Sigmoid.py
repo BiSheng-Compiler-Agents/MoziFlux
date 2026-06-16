@@ -1,11 +1,21 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _softmax_sigmoid_fused_5d(
-    x_ptr, y_ptr,
-    N, C, D, H, W,
-    stride_n, stride_c, stride_d, stride_h, stride_w,
+    x_ptr,
+    y_ptr,
+    N,
+    C,
+    D,
+    H,
+    W,
+    stride_n,
+    stride_c,
+    stride_d,
+    stride_h,
+    stride_w,
     BLOCK_C: tl.constexpr,
 ):
     pid = tl.program_id(0)
@@ -19,7 +29,8 @@ def _softmax_sigmoid_fused_5d(
     d_idx = tmp % D
     n_idx = tmp // D
 
-    base = (n_idx * stride_n + d_idx * stride_d + h_idx * stride_h + w_idx * stride_w).to(tl.int64)
+    base = (n_idx * stride_n + d_idx * stride_d + h_idx * stride_h +
+            w_idx * stride_w).to(tl.int64)
     ch_offsets = tl.arange(0, BLOCK_C)
 
     m = -float("inf")
@@ -38,7 +49,8 @@ def _softmax_sigmoid_fused_5d(
         ch = c0 + ch_offsets
         ch_mask = ch < C
         ptrs = x_ptr + base + (ch * stride_c)
-        x = tl.load(ptrs, mask=row_mask & ch_mask, other=-float("inf")).to(tl.float32)
+        x = tl.load(ptrs, mask=row_mask & ch_mask,
+                    other=-float("inf")).to(tl.float32)
         l += tl.sum(tl.exp(x - m), axis=0)
         c0 += BLOCK_C
 
@@ -49,7 +61,8 @@ def _softmax_sigmoid_fused_5d(
         ch = c0 + ch_offsets
         ch_mask = ch < C
         ptrs = x_ptr + base + (ch * stride_c)
-        x = tl.load(ptrs, mask=row_mask & ch_mask, other=-float("inf")).to(tl.float32)
+        x = tl.load(ptrs, mask=row_mask & ch_mask,
+                    other=-float("inf")).to(tl.float32)
         soft = tl.exp(x - m) * inv_l
         sig = 1.0 / (1.0 + tl.exp(-soft))
         out_ptrs = y_ptr + base + (ch * stride_c)

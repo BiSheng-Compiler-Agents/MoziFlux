@@ -1,12 +1,37 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_warps=4, num_stages=4),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_warps=4, num_stages=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_warps=4, num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_warps=4,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32
+        },
+                      num_warps=4,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64
+        },
+                      num_warps=4,
+                      num_stages=4),
     ],
     key=["N"],
 )
@@ -71,5 +96,6 @@ def _lower_tri_matmul_kernel(
     if tile_all_lower and full_in_bounds:
         tl.store(c_ptrs, acc.to(C_ptr.dtype.element_ty))
     else:
-        store_mask = (rm[:, None] >= rn[None, :]) & m_in[:, None] & n_in[None, :]
+        store_mask = (rm[:, None] >= rn[None, :]) & m_in[:,
+                                                         None] & n_in[None, :]
         tl.store(c_ptrs, acc.to(C_ptr.dtype.element_ty), mask=store_mask)

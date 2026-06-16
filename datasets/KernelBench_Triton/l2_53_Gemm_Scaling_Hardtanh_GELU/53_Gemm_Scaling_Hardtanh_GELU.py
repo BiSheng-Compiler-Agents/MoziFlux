@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _scale_hardtanh_gelu_kernel(
     x_ptr,  # [rows, cols]
@@ -36,7 +37,8 @@ def _scale_hardtanh_gelu_kernel(
     full_tile = (n_start + BLOCK_N) <= cols
 
     # Stream from global to avoid polluting L1 for this pure epilogue
-    x = tl.load(x_ptrs, cache_modifier=".cg") if full_tile else tl.load(x_ptrs, mask=mask, other=0.0, cache_modifier=".cg")
+    x = tl.load(x_ptrs, cache_modifier=".cg") if full_tile else tl.load(
+        x_ptrs, mask=mask, other=0.0, cache_modifier=".cg")
 
     # Compute in fp32 for numerical stability/accuracy parity with PyTorch GELU
     xf = x.to(tl.float32)

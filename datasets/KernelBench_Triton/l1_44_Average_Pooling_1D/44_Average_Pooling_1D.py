@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def avgpool1d_forward_kernel(
     x_ptr,  # *[N_ROWS, L_IN]

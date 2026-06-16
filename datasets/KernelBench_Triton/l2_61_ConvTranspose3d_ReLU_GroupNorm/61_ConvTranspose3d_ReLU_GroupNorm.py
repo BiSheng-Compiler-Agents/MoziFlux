@@ -1,18 +1,23 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _relu_groupnorm_kernel(
-    x_ptr,           # *T
-    y_ptr,           # *T
-    w_ptr,           # *fp32
-    b_ptr,           # *fp32
-    N, C, D, H, W,   # int32
-    G,               # int32
-    eps,             # fp32
-    sC,              # int32 = D*H*W
-    sN,              # int32 = C*sC
-    GROUP_ELEMS,     # int32 = (C//G) * sC
+    x_ptr,  # *T
+    y_ptr,  # *T
+    w_ptr,  # *fp32
+    b_ptr,  # *fp32
+    N,
+    C,
+    D,
+    H,
+    W,  # int32
+    G,  # int32
+    eps,  # fp32
+    sC,  # int32 = D*H*W
+    sN,  # int32 = C*sC
+    GROUP_ELEMS,  # int32 = (C//G) * sC
     NUM_TILES: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
 ):

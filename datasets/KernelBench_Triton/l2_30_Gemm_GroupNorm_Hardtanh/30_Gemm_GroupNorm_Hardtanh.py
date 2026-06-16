@@ -1,20 +1,21 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _groupnorm_hardtanh_kernel(
-    x_ptr,           # [N, C] input (post-GEMM), contiguous
-    gamma_ptr,       # [C] groupnorm affine weight
-    beta_ptr,        # [C] groupnorm affine bias
-    out_ptr,         # [N, C] output
-    N,               # number of rows (batch size)
-    C,               # number of channels (out_features)
-    G,               # number of groups
-    Cg,              # channels per group = C // G
-    eps,             # eps for numerical stability (float)
-    minv,            # hardtanh min
-    maxv,            # hardtanh max
-    BLOCK_SIZE: tl.constexpr,  # power-of-two >= Cg
+        x_ptr,  # [N, C] input (post-GEMM), contiguous
+        gamma_ptr,  # [C] groupnorm affine weight
+        beta_ptr,  # [C] groupnorm affine bias
+        out_ptr,  # [N, C] output
+        N,  # number of rows (batch size)
+        C,  # number of channels (out_features)
+        G,  # number of groups
+        Cg,  # channels per group = C // G
+        eps,  # eps for numerical stability (float)
+        minv,  # hardtanh min
+        maxv,  # hardtanh max
+        BLOCK_SIZE: tl.constexpr,  # power-of-two >= Cg
 ):
     pid = tl.program_id(0)
     n = pid // G

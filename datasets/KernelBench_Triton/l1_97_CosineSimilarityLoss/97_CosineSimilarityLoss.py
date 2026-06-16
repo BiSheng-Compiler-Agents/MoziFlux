@@ -1,12 +1,18 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _cosine_similarity_rows_kernel(
-    x_ptr, y_ptr, out_ptr,
-    B, D,
-    stride_xb, stride_xd,
-    stride_yb, stride_yd,
+    x_ptr,
+    y_ptr,
+    out_ptr,
+    B,
+    D,
+    stride_xb,
+    stride_xd,
+    stride_yb,
+    stride_yd,
     EPS: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
 ):

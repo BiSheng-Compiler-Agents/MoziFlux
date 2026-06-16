@@ -1,18 +1,25 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_min_sum_gelu_add_bias(
-    x_ptr,            # *f32, [N, C, H, W]
-    bias_ptr,         # *f32, [C, 1, 1]
-    y_ptr,            # *f32, [N, C, 1, W]
+    x_ptr,  # *f32, [N, C, H, W]
+    bias_ptr,  # *f32, [C, 1, 1]
+    y_ptr,  # *f32, [N, C, 1, W]
     N: tl.constexpr,  # int
     C: tl.constexpr,  # int
     H: tl.constexpr,  # int
     W: tl.constexpr,  # int
-    sxn, sxc, sxh, sxw,    # strides for x
-    sbc,                   # stride for bias along C
-    syn, syc, syh, syw,    # strides for y
+    sxn,
+    sxc,
+    sxh,
+    sxw,  # strides for x
+    sbc,  # stride for bias along C
+    syn,
+    syc,
+    syh,
+    syw,  # strides for y
     BLOCK_W: tl.constexpr,
     BLOCK_C: tl.constexpr,
 ):
@@ -37,36 +44,44 @@ def _fused_min_sum_gelu_add_bias(
     tl.multiple_of(w_ptrs, values=1)
 
     # Accumulator over H of per-(min over C)
-    acc = tl.zeros((BLOCK_W,), dtype=tl.float32)
+    acc = tl.zeros((BLOCK_W, ), dtype=tl.float32)
     INF = 1.0e20
 
     # Unroll height by 4 for better ILP
     h = 0
     while (h + 3) < H:
         # Initialize per-height minima
-        min0 = tl.full((BLOCK_W,), INF, dtype=tl.float32)
-        min1 = tl.full((BLOCK_W,), INF, dtype=tl.float32)
-        min2 = tl.full((BLOCK_W,), INF, dtype=tl.float32)
-        min3 = tl.full((BLOCK_W,), INF, dtype=tl.float32)
+        min0 = tl.full((BLOCK_W, ), INF, dtype=tl.float32)
+        min1 = tl.full((BLOCK_W, ), INF, dtype=tl.float32)
+        min2 = tl.full((BLOCK_W, ), INF, dtype=tl.float32)
+        min3 = tl.full((BLOCK_W, ), INF, dtype=tl.float32)
 
         c_start = 0
         while c_start < C:
             c_tile = c_start + tl.arange(0, BLOCK_C)
             mask_ct = c_tile < C
             # Base [C_tile, W_tile] pointer (independent of h)
-            base_cw = (
-                x_ptr
-                + x_base_n
-                + c_tile[:, None] * sxc
-                + w_ptrs[None, :]
-            )
+            base_cw = (x_ptr + x_base_n + c_tile[:, None] * sxc +
+                       w_ptrs[None, :])
             cmask_w = mask_ct[:, None] & mask_w[None, :]
 
             # Load 4 heights from the same C/W tile
-            v0 = tl.load(base_cw + (h + 0) * sxh, mask=cmask_w, other=INF, cache_modifier=".cg").to(tl.float32)
-            v1 = tl.load(base_cw + (h + 1) * sxh, mask=cmask_w, other=INF, cache_modifier=".cg").to(tl.float32)
-            v2 = tl.load(base_cw + (h + 2) * sxh, mask=cmask_w, other=INF, cache_modifier=".cg").to(tl.float32)
-            v3 = tl.load(base_cw + (h + 3) * sxh, mask=cmask_w, other=INF, cache_modifier=".cg").to(tl.float32)
+            v0 = tl.load(base_cw + (h + 0) * sxh,
+                         mask=cmask_w,
+                         other=INF,
+                         cache_modifier=".cg").to(tl.float32)
+            v1 = tl.load(base_cw + (h + 1) * sxh,
+                         mask=cmask_w,
+                         other=INF,
+                         cache_modifier=".cg").to(tl.float32)
+            v2 = tl.load(base_cw + (h + 2) * sxh,
+                         mask=cmask_w,
+                         other=INF,
+                         cache_modifier=".cg").to(tl.float32)
+            v3 = tl.load(base_cw + (h + 3) * sxh,
+                         mask=cmask_w,
+                         other=INF,
+                         cache_modifier=".cg").to(tl.float32)
 
             # Reduce across C-tile
             min0 = tl.minimum(min0, tl.min(v0, axis=0))
@@ -83,18 +98,17 @@ def _fused_min_sum_gelu_add_bias(
 
     # Handle remaining rows if H % 4 != 0
     while h < H:
-        cur_min = tl.full((BLOCK_W,), INF, dtype=tl.float32)
+        cur_min = tl.full((BLOCK_W, ), INF, dtype=tl.float32)
         c_start = 0
         while c_start < C:
             c_tile = c_start + tl.arange(0, BLOCK_C)
             mask_ct = c_tile < C
-            base_cw = (
-                x_ptr
-                + x_base_n
-                + c_tile[:, None] * sxc
-                + w_ptrs[None, :]
-            )
-            x_vals = tl.load(base_cw + h * sxh, mask=mask_ct[:, None] & mask_w[None, :], other=INF, cache_modifier=".cg").to(tl.float32)
+            base_cw = (x_ptr + x_base_n + c_tile[:, None] * sxc +
+                       w_ptrs[None, :])
+            x_vals = tl.load(base_cw + h * sxh,
+                             mask=mask_ct[:, None] & mask_w[None, :],
+                             other=INF,
+                             cache_modifier=".cg").to(tl.float32)
             cur_min = tl.minimum(cur_min, tl.min(x_vals, axis=0))
             c_start += BLOCK_C
         acc += tl.where(mask_w, cur_min, 0.0)
@@ -105,14 +119,11 @@ def _fused_min_sum_gelu_add_bias(
     gelu_vals = 0.5 * acc * (1.0 + tl.math.erf(acc * inv_sqrt2))
 
     # Load bias for the channel tile
-    bias_vals = tl.load(bias_ptr + c_offsets * sbc, mask=mask_c, other=0.0).to(tl.float32)
+    bias_vals = tl.load(bias_ptr + c_offsets * sbc, mask=mask_c,
+                        other=0.0).to(tl.float32)
 
     # Write out for this channel tile with bias broadcasting
-    out_ptrs = (
-        y_ptr
-        + out_base_n
-        + c_offsets[:, None] * syc
-        + w_offsets[None, :] * syw
-    )
+    out_ptrs = (y_ptr + out_base_n + c_offsets[:, None] * syc +
+                w_offsets[None, :] * syw)
     out_tile = gelu_vals[None, :] + bias_vals[:, None]
     tl.store(out_ptrs, out_tile, mask=mask_c[:, None] & mask_w[None, :])

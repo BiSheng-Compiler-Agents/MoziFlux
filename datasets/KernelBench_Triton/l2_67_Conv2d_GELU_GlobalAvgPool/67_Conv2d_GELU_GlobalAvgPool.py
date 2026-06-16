@@ -1,14 +1,21 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _gelu_gap2d_fused_row_kernel(
-    x_ptr,                      # *f32/ *f16 input tensor pointer [N, C, H, W]
-    y_ptr,                      # *f32 output tensor pointer [N, C]
-    C, H, W,                    # ints
-    stride_n, stride_c, stride_h, stride_w,  # strides for x in elements
-    out_stride_n, out_stride_c,              # strides for y in elements
-    BLOCK_W: tl.constexpr,                   # tile size across flattened H*W
+        x_ptr,  # *f32/ *f16 input tensor pointer [N, C, H, W]
+        y_ptr,  # *f32 output tensor pointer [N, C]
+        C,
+        H,
+        W,  # ints
+        stride_n,
+        stride_c,
+        stride_h,
+        stride_w,  # strides for x in elements
+        out_stride_n,
+        out_stride_c,  # strides for y in elements
+        BLOCK_W: tl.constexpr,  # tile size across flattened H*W
 ):
     pid = tl.program_id(axis=0)
     n = pid // C
@@ -22,7 +29,7 @@ def _gelu_gap2d_fused_row_kernel(
     idx = tl.arange(0, BLOCK_W)
 
     # Vector accumulator to minimize per-iteration reductions
-    acc_vec = tl.zeros((BLOCK_W,), dtype=tl.float32)
+    acc_vec = tl.zeros((BLOCK_W, ), dtype=tl.float32)
 
     inv_sqrt2 = 0.7071067811865476  # 1/sqrt(2)
 

@@ -1,16 +1,22 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _matmul_bias_relu_kernel(
     a_ptr,  # [M, K]
     b_ptr,  # [N, K] (weight), accessed as [K, N] via strides
     bias_ptr,  # [N]
     c_ptr,  # [M, N]
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bn, stride_bk,
-    stride_cm, stride_cn,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bn,
+    stride_bk,
+    stride_cm,
+    stride_cn,
     ADD_BIAS: tl.constexpr,
     APPLY_RELU: tl.constexpr,
     BLOCK_M: tl.constexpr,
@@ -44,8 +50,10 @@ def _matmul_bias_relu_kernel(
         k_offs = k + offs_k
 
         # Compute tile pointers
-        a_ptrs = a_ptr + (offs_m[:, None] * stride_am + k_offs[None, :] * stride_ak)  # [BM, BK]
-        b_ptrs = b_ptr + (k_offs[:, None] * stride_bk + offs_n[None, :] * stride_bn)  # [BK, BN]
+        a_ptrs = a_ptr + (offs_m[:, None] * stride_am +
+                          k_offs[None, :] * stride_ak)  # [BM, BK]
+        b_ptrs = b_ptr + (k_offs[:, None] * stride_bk +
+                          offs_n[None, :] * stride_bn)  # [BK, BN]
 
         # Masks for this tile
         a_mask = (a_mask_m[:, None]) & (k_offs[None, :] < K)
@@ -64,12 +72,14 @@ def _matmul_bias_relu_kernel(
 
     # Epilogue: bias and ReLU
     if ADD_BIAS:
-        bias = tl.load(bias_ptr + offs_n, mask=b_mask_n, other=0.0).to(tl.float32)
+        bias = tl.load(bias_ptr + offs_n, mask=b_mask_n,
+                       other=0.0).to(tl.float32)
         acc = acc + bias[None, :]
 
     if APPLY_RELU:
         acc = tl.maximum(acc, 0.0)
 
     # Store results
-    c_ptrs = c_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+    c_ptrs = c_ptr + (offs_m[:, None] * stride_cm +
+                      offs_n[None, :] * stride_cn)
     tl.store(c_ptrs, acc, mask=a_mask_m[:, None] & b_mask_n[None, :])

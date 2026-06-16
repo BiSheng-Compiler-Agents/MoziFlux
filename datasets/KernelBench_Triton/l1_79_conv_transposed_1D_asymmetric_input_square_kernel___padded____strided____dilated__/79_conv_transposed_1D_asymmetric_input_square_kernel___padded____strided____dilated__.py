@@ -1,14 +1,31 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def conv_transpose1d_fwd_kernel(
-    x_ptr, w_ptr, b_ptr, y_ptr,
-    N, CIN, COUT, LIN, LOUT,
-    K, STRIDE, PADDING, DILATION,
-    stride_xn, stride_xc, stride_xl,
-    stride_wci, stride_wco, stride_wk,
-    stride_yn, stride_yc, stride_yl,
+    x_ptr,
+    w_ptr,
+    b_ptr,
+    y_ptr,
+    N,
+    CIN,
+    COUT,
+    LIN,
+    LOUT,
+    K,
+    STRIDE,
+    PADDING,
+    DILATION,
+    stride_xn,
+    stride_xc,
+    stride_xl,
+    stride_wci,
+    stride_wco,
+    stride_wk,
+    stride_yn,
+    stride_yc,
+    stride_yl,
     HAS_BIAS: tl.constexpr,
     CIN_C: tl.constexpr,
     K_C: tl.constexpr,
@@ -31,7 +48,7 @@ def conv_transpose1d_fwd_kernel(
     base_wco = w_ptr + co * stride_wco
 
     # Accumulator in fp32
-    acc = tl.zeros((BLOCK_T,), dtype=tl.float32)
+    acc = tl.zeros((BLOCK_T, ), dtype=tl.float32)
 
     # Optional bias
     if HAS_BIAS:
@@ -66,7 +83,8 @@ def conv_transpose1d_fwd_kernel(
 
             # Load x[n, ci, i] for vector i (gather)
             x_base_ci = base_xn + ci * stride_xc
-            x_vals = tl.load(x_base_ci + x_offs, mask=mask_i, other=0.0).to(tl.float32)
+            x_vals = tl.load(x_base_ci + x_offs, mask=mask_i,
+                             other=0.0).to(tl.float32)
 
             acc += x_vals * w_val
 

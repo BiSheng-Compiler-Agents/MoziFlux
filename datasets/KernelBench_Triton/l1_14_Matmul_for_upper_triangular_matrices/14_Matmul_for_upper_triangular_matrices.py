@@ -1,27 +1,71 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         # Baseline configs
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_warps=4, num_stages=4),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_warps=4, num_stages=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_warps=4, num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_warps=4,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32
+        },
+                      num_warps=4,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64
+        },
+                      num_warps=4,
+                      num_stages=4),
         # Additional configs to better utilize H200
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 64}, num_warps=8, num_stages=5),
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 64}, num_warps=8, num_stages=5),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 256,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=5),
+        triton.Config({
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=5),
     ],
     key=["N"],
 )
 @triton.jit
 def _upper_tri_matmul_kernel(
-    A_ptr, B_ptr, C_ptr,
+    A_ptr,
+    B_ptr,
+    C_ptr,
     N,
-    stride_Am, stride_Ak,
-    stride_Bk, stride_Bn,
-    stride_Cm, stride_Cn,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
+    stride_Am,
+    stride_Ak,
+    stride_Bk,
+    stride_Bn,
+    stride_Cm,
+    stride_Cn,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
 ):
     # 2D tile ids
     pid_m = tl.program_id(axis=0)
@@ -74,5 +118,6 @@ def _upper_tri_matmul_kernel(
         # Fast path: no masks needed
         tl.store(c_ptrs, acc)
     else:
-        store_mask = (rm[:, None] <= rn[None, :]) & m_in[:, None] & n_in[None, :]
+        store_mask = (rm[:, None] <= rn[None, :]) & m_in[:,
+                                                         None] & n_in[None, :]
         tl.store(c_ptrs, acc, mask=store_mask)

@@ -1,13 +1,18 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _groupnorm_stats_kernel(
-    x_ptr,          # *f32
-    mean_ptr,       # *f32
-    rstd_ptr,       # *f32
-    B, C, H, W, G,  # i32
-    eps,            # f32
+    x_ptr,  # *f32
+    mean_ptr,  # *f32
+    rstd_ptr,  # *f32
+    B,
+    C,
+    H,
+    W,
+    G,  # i32
+    eps,  # f32
     BLOCK_SIZE: tl.constexpr,
 ):
     # One program per (n, g) pair computes mean and rstd for that group
@@ -51,17 +56,28 @@ def _groupnorm_stats_kernel(
     tl.store(mean_ptr + n * G + g + scalar_offs, mean, mask=scalar_offs == 0)
     tl.store(rstd_ptr + n * G + g + scalar_offs, rstd, mask=scalar_offs == 0)
 
+
 @triton.jit
 def _groupnorm_apply_pool_clamp_kernel(
-    x_ptr, y_ptr,            # *f32
-    mean_ptr, rstd_ptr,      # *f32
-    gamma_ptr, beta_ptr,     # *f32 (already fused with scale)
-    B, C, H, W, G,           # i32
-    Ho, Wo,                  # i32
-    clamp_min, clamp_max,    # f32
-    K: tl.constexpr,         # kernel size (square)
-    STRIDE: tl.constexpr,    # stride == kernel size
-    BLOCK_W: tl.constexpr,   # number of output columns processed per program
+        x_ptr,
+        y_ptr,  # *f32
+        mean_ptr,
+        rstd_ptr,  # *f32
+        gamma_ptr,
+        beta_ptr,  # *f32 (already fused with scale)
+        B,
+        C,
+        H,
+        W,
+        G,  # i32
+        Ho,
+        Wo,  # i32
+        clamp_min,
+        clamp_max,  # f32
+        K: tl.constexpr,  # kernel size (square)
+        STRIDE: tl.constexpr,  # stride == kernel size
+        BLOCK_W: tl.
+    constexpr,  # number of output columns processed per program
 ):
     # Grid: (B*C, Ho, ceil(Wo/BLOCK_W))
     pid_nc = tl.program_id(axis=0)
@@ -164,12 +180,20 @@ def _groupnorm_apply_pool_clamp_kernel(
     out_row_base = out_base_nc + h_out * Wo
     tl.store(y_ptr + out_row_base + w_out, acc, mask=w_out_mask)
 
+
 @triton.jit
 def _groupnorm_apply_kernel(
-    x_ptr, y_ptr,            # *f32
-    mean_ptr, rstd_ptr,      # *f32
-    gamma_ptr, beta_ptr,     # *f32
-    B, C, H, W, G,           # i32
+    x_ptr,
+    y_ptr,  # *f32
+    mean_ptr,
+    rstd_ptr,  # *f32
+    gamma_ptr,
+    beta_ptr,  # *f32
+    B,
+    C,
+    H,
+    W,
+    G,  # i32
     BLOCK_HW: tl.constexpr,
 ):
     pid = tl.program_id(0)  # linear over (B, C)

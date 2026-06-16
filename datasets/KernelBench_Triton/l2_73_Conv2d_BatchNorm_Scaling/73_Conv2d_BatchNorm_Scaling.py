@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _scale_kernel(x_ptr, y_ptr, scale, n_elements, BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
@@ -13,13 +14,11 @@ def _scale_kernel(x_ptr, y_ptr, scale, n_elements, BLOCK_SIZE: tl.constexpr):
     y = x * s
     tl.store(y_ptr + offs, y, mask=mask)
 
+
 @triton.jit
-def _bn_fuse_params_kernel(
-    mean_ptr, var_ptr, gamma_ptr, beta_ptr, convb_ptr,
-    g_out_ptr, b_out_ptr,
-    eps, scale, n_elements,
-    BLOCK_SIZE: tl.constexpr
-):
+def _bn_fuse_params_kernel(mean_ptr, var_ptr, gamma_ptr, beta_ptr, convb_ptr,
+                           g_out_ptr, b_out_ptr, eps, scale, n_elements,
+                           BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     tl.multiple_of(offs, 8)

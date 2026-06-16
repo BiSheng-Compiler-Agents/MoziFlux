@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config({"BLOCK_M": 2048}, num_warps=4, num_stages=2),
@@ -13,16 +14,19 @@ import triton.language as tl
 )
 @triton.jit
 def _group_mean_contrib_kernel(
-    x_ptr,              # *f32 [N, C, D, H, W], contiguous in last 3 dims (per-channel)
-    gamma_ptr,          # *f32 [C]
-    sum_gamma_ptr,      # *f32 [G]
-    out_ptr,            # *f32 [N] partial numerator contributions per sample
-    N, C, G, M,         # ints
-    stride_n,           # x.stride(0)
-    stride_c,           # x.stride(1) == M for NCDHW contiguous
-    eps,                # float32 epsilon
-    GROUP_SIZE: tl.constexpr,  # channels per group
-    BLOCK_M: tl.constexpr,     # tile over flattened spatial M = D*H*W
+        x_ptr,  # *f32 [N, C, D, H, W], contiguous in last 3 dims (per-channel)
+        gamma_ptr,  # *f32 [C]
+        sum_gamma_ptr,  # *f32 [G]
+        out_ptr,  # *f32 [N] partial numerator contributions per sample
+        N,
+        C,
+        G,
+        M,  # ints
+        stride_n,  # x.stride(0)
+        stride_c,  # x.stride(1) == M for NCDHW contiguous
+        eps,  # float32 epsilon
+        GROUP_SIZE: tl.constexpr,  # channels per group
+        BLOCK_M: tl.constexpr,  # tile over flattened spatial M = D*H*W
 ):
     pid = tl.program_id(axis=0)
     n = pid // G
@@ -34,7 +38,9 @@ def _group_mean_contrib_kernel(
     # Accumulators in fp32
     acc_A = tl.zeros((), dtype=tl.float32)  # sum over group of x
     acc_B = tl.zeros((), dtype=tl.float32)  # sum over group of x^2
-    acc_T = tl.zeros((), dtype=tl.float32)  # sum over group of gamma[c] * sum_spatial(x_{n,c})
+    acc_T = tl.zeros(
+        (),
+        dtype=tl.float32)  # sum over group of gamma[c] * sum_spatial(x_{n,c})
 
     offs = tl.arange(0, BLOCK_M)
     tl.max_contiguous(offs, BLOCK_M)
@@ -51,7 +57,10 @@ def _group_mean_contrib_kernel(
         while m < M:
             idx = m + offs
             mask = idx < M
-            vals = tl.load(base + idx, mask=mask, other=0.0, cache_modifier=".cg").to(tl.float32)
+            vals = tl.load(base + idx,
+                           mask=mask,
+                           other=0.0,
+                           cache_modifier=".cg").to(tl.float32)
             s_chan += tl.sum(vals, axis=0)
             ss_chan += tl.sum(vals * vals, axis=0)
             m += BLOCK_M

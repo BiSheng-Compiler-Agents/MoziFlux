@@ -1,16 +1,23 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _avgpool3d_k2s2_bias_scale_fused(
-    x_ptr,                # *float32 [N, C, D, H, W] contiguous NCDHW
-    bias_ptr,             # *float32 [C]
-    y_ptr,                # *float32 [N, C, D2, H2, W2] contiguous NCDHW
-    N, C, D, H, W,        # input dims
-    D2, H2, W2,           # output dims = floor(D/2), floor(H/2), floor(W/2)
-    scale1,               # float
-    scale2,               # float
-    n_elements,           # total output elements = N*C*D2*H2*W2
+    x_ptr,  # *float32 [N, C, D, H, W] contiguous NCDHW
+    bias_ptr,  # *float32 [C]
+    y_ptr,  # *float32 [N, C, D2, H2, W2] contiguous NCDHW
+    N,
+    C,
+    D,
+    H,
+    W,  # input dims
+    D2,
+    H2,
+    W2,  # output dims = floor(D/2), floor(H/2), floor(W/2)
+    scale1,  # float
+    scale2,  # float
+    n_elements,  # total output elements = N*C*D2*H2*W2
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -20,13 +27,13 @@ def _avgpool3d_k2s2_bias_scale_fused(
 
     # Fewer integer divisions for index de-linearization
     out_spatial = D2 * H2 * W2
-    nc = offs // out_spatial                          # combined n*C + c
+    nc = offs // out_spatial  # combined n*C + c
     rem = offs - nc * out_spatial
     t0 = rem // W2
     w2 = rem - t0 * W2
     d2 = t0 // H2
     h2 = t0 - d2 * H2
-    c = nc % C                                        # for bias indexing
+    c = nc % C  # for bias indexing
 
     # Map to input coordinates (stride=2, kernel=2, padding=0)
     w = w2 * 2

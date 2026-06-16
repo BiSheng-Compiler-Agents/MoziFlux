@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _tanh_maxpool2x2_nchw_kernel(
     x_ptr,

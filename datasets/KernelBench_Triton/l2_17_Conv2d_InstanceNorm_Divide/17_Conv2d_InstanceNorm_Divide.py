@@ -1,12 +1,20 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _instancenorm_divide_2d_fused_kernel(
     x_ptr,  # input/output
-    N, C, H, W,
-    stride_n, stride_c, stride_h, stride_w,
-    eps, div_const,
+    N,
+    C,
+    H,
+    W,
+    stride_n,
+    stride_c,
+    stride_h,
+    stride_w,
+    eps,
+    div_const,
     BLOCK_HW: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)  # each program handles one (n, c)

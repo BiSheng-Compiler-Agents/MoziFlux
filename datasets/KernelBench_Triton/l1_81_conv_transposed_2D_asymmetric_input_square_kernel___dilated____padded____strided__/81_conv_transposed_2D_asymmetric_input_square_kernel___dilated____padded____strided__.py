@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _flip_transpose_4d_kernel(
     inp_ptr,
@@ -36,14 +37,11 @@ def _flip_transpose_4d_kernel(
     stride_in_co = K * K
     stride_in_ci = Cout * stride_in_co
 
-    in_idx = (
-        ci * stride_in_ci
-        + co * stride_in_co
-        + in_ky * stride_in_kh
-        + in_kx * stride_in_kw
-    )
+    in_idx = (ci * stride_in_ci + co * stride_in_co + in_ky * stride_in_kh +
+              in_kx * stride_in_kw)
     vals = tl.load(inp_ptr + in_idx, mask=mask, other=0.0)
     tl.store(out_ptr + offs, vals, mask=mask)
+
 
 @triton.jit
 def _stride_insert_zeros_2d_kernel(
@@ -84,20 +82,14 @@ def _stride_insert_zeros_2d_kernel(
     w = rem - h * stride_h_linear
 
     vals = tl.load(
-        inp_ptr
-        + n * stride_in_n
-        + c * stride_in_c
-        + h * stride_in_h
-        + w * stride_in_w,
+        inp_ptr + n * stride_in_n + c * stride_in_c + h * stride_in_h +
+        w * stride_in_w,
         mask=mask,
         other=0.0,
     )
     tl.store(
-        out_ptr
-        + n * stride_out_n
-        + c * stride_out_c
-        + (h * STRIDE_H) * stride_out_h
-        + (w * STRIDE_W) * stride_out_w,
+        out_ptr + n * stride_out_n + c * stride_out_c +
+        (h * STRIDE_H) * stride_out_h + (w * STRIDE_W) * stride_out_w,
         vals,
         mask=mask,
     )

@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _flip_transpose_5d(
     inp_ptr,  # [Cin, Cout, Kd, Kh, Kw]
@@ -45,13 +46,8 @@ def _flip_transpose_5d(
     stride_in_co = Kd * stride_in_kd
     stride_in_ci = Cout * stride_in_co
 
-    in_idx = (
-        ci * stride_in_ci
-        + co * stride_in_co
-        + in_kz * stride_in_kd
-        + in_ky * stride_in_kh
-        + in_kx * stride_in_kw
-    )
+    in_idx = (ci * stride_in_ci + co * stride_in_co + in_kz * stride_in_kd +
+              in_ky * stride_in_kh + in_kx * stride_in_kw)
 
     vals = tl.load(inp_ptr + in_idx, mask=mask, other=0)
     tl.store(out_ptr + offs, vals, mask=mask)

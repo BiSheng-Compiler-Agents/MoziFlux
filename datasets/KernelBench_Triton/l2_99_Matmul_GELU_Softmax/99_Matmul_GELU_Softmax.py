@@ -1,17 +1,20 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _linear_gelu_softmax_rowwise(
-    x_ptr,         # [B, K]
-    w_ptr,         # [N, K]
-    b_ptr,         # [N]
-    y_ptr,         # [B, N]
-    stride_x,      # stride between rows of x (in elements)
-    stride_w_n,    # stride for weight along N (in elements)
-    stride_w_k,    # stride for weight along K (in elements)
-    stride_y,      # stride between rows of y (in elements)
-    B, K, N,       # dimensions
+    x_ptr,  # [B, K]
+    w_ptr,  # [N, K]
+    b_ptr,  # [N]
+    y_ptr,  # [B, N]
+    stride_x,  # stride between rows of x (in elements)
+    stride_w_n,  # stride for weight along N (in elements)
+    stride_w_k,  # stride for weight along K (in elements)
+    stride_y,  # stride between rows of y (in elements)
+    B,
+    K,
+    N,  # dimensions
     NUM_N_TILES: tl.constexpr,
     NUM_K_TILES: tl.constexpr,
     BLOCK_N: tl.constexpr,
@@ -38,11 +41,15 @@ def _linear_gelu_softmax_rowwise(
             k = k_start + cols_k
             k_mask = k < K
 
-            x_vals = tl.load(x_row_ptr + k, mask=k_mask, other=0.0).to(tl.float32)
+            x_vals = tl.load(x_row_ptr + k, mask=k_mask,
+                             other=0.0).to(tl.float32)
 
             w_ptrs = w_ptr + j[:, None] * stride_w_n + k[None, :] * stride_w_k
             wk_mask = j_mask[:, None] & k_mask[None, :]
-            w_vals = tl.load(w_ptrs, mask=wk_mask, other=0.0, cache_modifier=".cg").to(tl.float32)
+            w_vals = tl.load(w_ptrs,
+                             mask=wk_mask,
+                             other=0.0,
+                             cache_modifier=".cg").to(tl.float32)
 
             acc += tl.sum(w_vals * x_vals[None, :], axis=1)
             k_start += BLOCK_K
@@ -74,11 +81,15 @@ def _linear_gelu_softmax_rowwise(
             k = k_start + cols_k
             k_mask = k < K
 
-            x_vals = tl.load(x_row_ptr + k, mask=k_mask, other=0.0).to(tl.float32)
+            x_vals = tl.load(x_row_ptr + k, mask=k_mask,
+                             other=0.0).to(tl.float32)
 
             w_ptrs = w_ptr + j[:, None] * stride_w_n + k[None, :] * stride_w_k
             wk_mask = j_mask[:, None] & k_mask[None, :]
-            w_vals = tl.load(w_ptrs, mask=wk_mask, other=0.0, cache_modifier=".cg").to(tl.float32)
+            w_vals = tl.load(w_ptrs,
+                             mask=wk_mask,
+                             other=0.0,
+                             cache_modifier=".cg").to(tl.float32)
 
             acc += tl.sum(w_vals * x_vals[None, :], axis=1)
             k_start += BLOCK_K
@@ -88,7 +99,8 @@ def _linear_gelu_softmax_rowwise(
         gelu_vals = 0.5 * logits * (1.0 + tl.erf(logits * inv_sqrt2))
 
         tl.store(y_row_ptr + j, gelu_vals, mask=j_mask)
-        row_max = tl.maximum(row_max, tl.max(tl.where(j_mask, gelu_vals, neg_inf), axis=0))
+        row_max = tl.maximum(
+            row_max, tl.max(tl.where(j_mask, gelu_vals, neg_inf), axis=0))
         n_start += BLOCK_N
 
     denom = 0.0

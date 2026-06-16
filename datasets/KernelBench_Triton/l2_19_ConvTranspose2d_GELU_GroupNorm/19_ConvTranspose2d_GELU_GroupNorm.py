@@ -1,15 +1,19 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _gelu_groupnorm_kernel(
-    x_ptr,       # *f32
-    w_ptr,       # *f32
-    b_ptr,       # *f32
-    y_ptr,       # *f32
-    N, C, H, W,  # i32
-    G,           # i32
-    eps,         # f32
+    x_ptr,  # *f32
+    w_ptr,  # *f32
+    b_ptr,  # *f32
+    y_ptr,  # *f32
+    N,
+    C,
+    H,
+    W,  # i32
+    G,  # i32
+    eps,  # f32
     BLOCK: tl.constexpr,
 ):
     pid = tl.program_id(0)  # each program handles one (n, g) group
@@ -77,7 +81,9 @@ def _gelu_groupnorm_kernel(
             idx_hw = off + offs
             mask_hw = idx_hw < HW
 
-            x = tl.load(x_group_ptr + ch_base + idx_hw, mask=mask_hw, other=0.0).to(tl.float32)
+            x = tl.load(x_group_ptr + ch_base + idx_hw,
+                        mask=mask_hw,
+                        other=0.0).to(tl.float32)
             z = 0.5 * x * (1.0 + tl.erf(x * inv_sqrt2))
 
             y = (z - mean) * rstd

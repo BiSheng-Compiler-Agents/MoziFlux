@@ -35,10 +35,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-
 # ---------------------------------------------------------------------------
 # Database connection
 # ---------------------------------------------------------------------------
+
 
 def _db_path() -> str:
     return os.environ.get(
@@ -76,6 +76,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 # Core operations
 # ---------------------------------------------------------------------------
 
+
 def _write_episode(
     kernel_name: str,
     target: str,
@@ -92,9 +93,8 @@ def _write_episode(
             """,
             (kernel_name, target, observation, thoughts, action, result),
         )
-        row = conn.execute(
-            "SELECT * FROM episodes WHERE id = ?", (cur.lastrowid,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM episodes WHERE id = ?",
+                           (cur.lastrowid, )).fetchone()
         return _row_to_dict(row)
 
 
@@ -108,7 +108,8 @@ def _update_episode(
     result: str | None = None,
 ) -> dict[str, Any]:
     updates = {
-        k: v for k, v in {
+        k: v
+        for k, v in {
             "kernel_name": kernel_name,
             "target": target,
             "observation": observation,
@@ -128,20 +129,18 @@ def _update_episode(
         )
         if cur.rowcount == 0:
             raise LookupError(f"No episode found with id={episode_id}.")
-        row = conn.execute(
-            "SELECT * FROM episodes WHERE id = ?", (episode_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM episodes WHERE id = ?",
+                           (episode_id, )).fetchone()
         return _row_to_dict(row)
 
 
 def _delete_episode(episode_id: int) -> dict[str, Any]:
     with _db() as conn:
-        row = conn.execute(
-            "SELECT * FROM episodes WHERE id = ?", (episode_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM episodes WHERE id = ?",
+                           (episode_id, )).fetchone()
         if row is None:
             raise LookupError(f"No episode found with id={episode_id}.")
-        conn.execute("DELETE FROM episodes WHERE id = ?", (episode_id,))
+        conn.execute("DELETE FROM episodes WHERE id = ?", (episode_id, ))
         return _row_to_dict(row)
 
 
@@ -217,7 +216,8 @@ def _list_episodes(
         where_parts.append("target = ?")
         where_vals.append(target)
 
-    where_clause = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+    where_clause = ("WHERE " +
+                    " AND ".join(where_parts)) if where_parts else ""
 
     with _db() as conn:
         rows = conn.execute(
@@ -235,6 +235,7 @@ def _list_episodes(
 # ---------------------------------------------------------------------------
 # Tool handlers
 # ---------------------------------------------------------------------------
+
 
 def _handle_write(args: dict, **_) -> str:
     try:
@@ -307,7 +308,11 @@ def _handle_list(args: dict, **_) -> str:
             limit=int(args.get("limit", 20)),
             offset=int(args.get("offset", 0)),
         )
-        return json.dumps({"success": True, "count": len(episodes), "episodes": episodes})
+        return json.dumps({
+            "success": True,
+            "count": len(episodes),
+            "episodes": episodes
+        })
     except Exception as e:
         logger.exception("episode_list failed")
         return json.dumps({"success": False, "error": str(e)})
@@ -317,47 +322,64 @@ def _handle_list(args: dict, **_) -> str:
 # Plugin registration
 # ---------------------------------------------------------------------------
 
+
 def register(ctx) -> None:
 
     ctx.register_tool(
         name="episode_write",
         toolset="triton_ascend",
         schema={
-            "name": "episode_write",
-            "description": (
-                "Record a new Triton kernel optimization episode. "
-                "Use this after completing an optimization attempt to save the experience "
-                "for future recall. Write in first person ('I ...')."
-            ),
+            "name":
+            "episode_write",
+            "description":
+            ("Record a new Triton kernel optimization episode. "
+             "Use this after completing an optimization attempt to save the experience "
+             "for future recall. Write in first person ('I ...')."),
             "parameters": {
-                "type": "object",
+                "type":
+                "object",
                 "properties": {
                     "kernel_name": {
-                        "type": "string",
-                        "description": "The operation being optimized, e.g. 'softmax', 'matmul', 'layer_norm', 'relu'.",
+                        "type":
+                        "string",
+                        "description":
+                        "The operation being optimized, e.g. 'softmax', 'matmul', 'layer_norm', 'relu'.",
                     },
                     "target": {
-                        "type": "string",
-                        "description": "The hardware target, e.g. 'ascend910_9589', 'ascend950'.",
+                        "type":
+                        "string",
+                        "description":
+                        "The hardware target, e.g. 'ascend910_9589', 'ascend950'.",
                     },
                     "observation": {
-                        "type": "string",
-                        "description": "What the kernel looked like and what the problem was — baseline shape, latency, failure mode.",
+                        "type":
+                        "string",
+                        "description":
+                        "What the kernel looked like and what the problem was — baseline shape, latency, failure mode.",
                     },
                     "thoughts": {
-                        "type": "string",
-                        "description": "The reasoning that led to the chosen optimization approach. What did I notice? What alternatives did I consider?",
+                        "type":
+                        "string",
+                        "description":
+                        "The reasoning that led to the chosen optimization approach. What did I notice? What alternatives did I consider?",
                     },
                     "action": {
-                        "type": "string",
-                        "description": "What optimization was applied: which pattern, what block sizes, what code changes, and how.",
+                        "type":
+                        "string",
+                        "description":
+                        "What optimization was applied: which pattern, what block sizes, what code changes, and how.",
                     },
                     "result": {
-                        "type": "string",
-                        "description": "Outcome: speedup achieved (before → after latency), what worked, what to try differently next time.",
+                        "type":
+                        "string",
+                        "description":
+                        "Outcome: speedup achieved (before → after latency), what worked, what to try differently next time.",
                     },
                 },
-                "required": ["kernel_name", "target", "observation", "thoughts", "action", "result"],
+                "required": [
+                    "kernel_name", "target", "observation", "thoughts",
+                    "action", "result"
+                ],
             },
         },
         handler=_handle_write,
@@ -368,17 +390,39 @@ def register(ctx) -> None:
         toolset="triton_ascend",
         schema={
             "name": "episode_update",
-            "description": "Update one or more fields of an existing episode by its id.",
+            "description":
+            "Update one or more fields of an existing episode by its id.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "id": {"type": "integer", "description": "Episode id to update."},
-                    "kernel_name": {"type": "string", "description": "Updated kernel name."},
-                    "target": {"type": "string", "description": "Updated target hardware."},
-                    "observation": {"type": "string", "description": "Updated observation."},
-                    "thoughts": {"type": "string", "description": "Updated thoughts."},
-                    "action": {"type": "string", "description": "Updated action."},
-                    "result": {"type": "string", "description": "Updated result."},
+                    "id": {
+                        "type": "integer",
+                        "description": "Episode id to update."
+                    },
+                    "kernel_name": {
+                        "type": "string",
+                        "description": "Updated kernel name."
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "Updated target hardware."
+                    },
+                    "observation": {
+                        "type": "string",
+                        "description": "Updated observation."
+                    },
+                    "thoughts": {
+                        "type": "string",
+                        "description": "Updated thoughts."
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "Updated action."
+                    },
+                    "result": {
+                        "type": "string",
+                        "description": "Updated result."
+                    },
                 },
                 "required": ["id"],
             },
@@ -395,7 +439,10 @@ def register(ctx) -> None:
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "id": {"type": "integer", "description": "Episode id to delete."},
+                    "id": {
+                        "type": "integer",
+                        "description": "Episode id to delete."
+                    },
                 },
                 "required": ["id"],
             },
@@ -407,32 +454,40 @@ def register(ctx) -> None:
         name="episode_retrieve",
         toolset="triton_ascend",
         schema={
-            "name": "episode_retrieve",
-            "description": (
-                "Search past kernel optimization episodes by relevance. "
-                "Use this before starting an optimization to recall what worked on similar kernels. "
-                "Use affirmative form for the query, e.g. 'softmax wide rows MTE stall fix' "
-                "rather than 'how do I fix softmax?'. "
-                "Optionally filter by kernel_name or target to narrow results."
-            ),
+            "name":
+            "episode_retrieve",
+            "description":
+            ("Search past kernel optimization episodes by relevance. "
+             "Use this before starting an optimization to recall what worked on similar kernels. "
+             "Use affirmative form for the query, e.g. 'softmax wide rows MTE stall fix' "
+             "rather than 'how do I fix softmax?'. "
+             "Optionally filter by kernel_name or target to narrow results."),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
-                        "type": "string",
-                        "description": "What to search for. Use keywords describing the kernel, problem, or optimization pattern.",
+                        "type":
+                        "string",
+                        "description":
+                        "What to search for. Use keywords describing the kernel, problem, or optimization pattern.",
                     },
                     "kernel_name": {
-                        "type": "string",
-                        "description": "Restrict search to a specific kernel operation.",
+                        "type":
+                        "string",
+                        "description":
+                        "Restrict search to a specific kernel operation.",
                     },
                     "target": {
-                        "type": "string",
-                        "description": "Restrict search to a specific hardware target.",
+                        "type":
+                        "string",
+                        "description":
+                        "Restrict search to a specific hardware target.",
                     },
                     "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of episodes to return (default: 5).",
+                        "type":
+                        "integer",
+                        "description":
+                        "Maximum number of episodes to return (default: 5).",
                     },
                 },
                 "required": ["query"],
@@ -446,14 +501,27 @@ def register(ctx) -> None:
         toolset="triton_ascend",
         schema={
             "name": "episode_list",
-            "description": "List recorded optimization episodes, newest first. Filter by kernel_name and/or target.",
+            "description":
+            "List recorded optimization episodes, newest first. Filter by kernel_name and/or target.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "kernel_name": {"type": "string", "description": "Filter by kernel operation."},
-                    "target": {"type": "string", "description": "Filter by hardware target."},
-                    "limit": {"type": "integer", "description": "Max episodes to return (default: 20)."},
-                    "offset": {"type": "integer", "description": "Pagination offset (default: 0)."},
+                    "kernel_name": {
+                        "type": "string",
+                        "description": "Filter by kernel operation."
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "Filter by hardware target."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max episodes to return (default: 20)."
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Pagination offset (default: 0)."
+                    },
                 },
                 "required": [],
             },

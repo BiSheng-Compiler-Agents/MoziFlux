@@ -1,13 +1,14 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_bias_div_swish_flat_kernel(
-    x_ptr,        # *float32, flattened [M*N]
-    y_ptr,        # *float32, flattened [M*N] (can alias x_ptr for in-place)
-    bias_ptr,     # *float32, shape (1,) scalar bias
-    inv_div,      # float32 scalar = 1.0 / divide_value
-    N_ELEMENTS,   # total number of elements = M * N
+    x_ptr,  # *float32, flattened [M*N]
+    y_ptr,  # *float32, flattened [M*N] (can alias x_ptr for in-place)
+    bias_ptr,  # *float32, shape (1,) scalar bias
+    inv_div,  # float32 scalar = 1.0 / divide_value
+    N_ELEMENTS,  # total number of elements = M * N
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)

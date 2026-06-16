@@ -1,15 +1,20 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_linear_sigmoid_row_sum_kernel(
-    x_ptr,         # *f32 / *f16 [B, K]
-    w_ptr,         # *f32 / *f16 [H, K]
-    b_ptr,         # *f32 / *f16 [H]
-    out_ptr,       # *f32        [B]
-    B, K, H,       # int32 sizes
-    stride_xm, stride_xk,
-    stride_wj, stride_wk,
+    x_ptr,  # *f32 / *f16 [B, K]
+    w_ptr,  # *f32 / *f16 [H, K]
+    b_ptr,  # *f32 / *f16 [H]
+    out_ptr,  # *f32        [B]
+    B,
+    K,
+    H,  # int32 sizes
+    stride_xm,
+    stride_xk,
+    stride_wj,
+    stride_wk,
     stride_b,
     BLOCK_H: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -44,7 +49,8 @@ def _fused_linear_sigmoid_row_sum_kernel(
 
             # Compute linear outputs for this hidden tile
             w_tile = tl.load(
-                w_ptr + j_offsets[:, None] * stride_wj + k_offsets[None, :] * stride_wk,
+                w_ptr + j_offsets[:, None] * stride_wj +
+                k_offsets[None, :] * stride_wk,
                 mask=j_mask[:, None] & k_mask[None, :],
                 other=0.0,
             ).to(tl.float32)  # [BLOCK_H, BLOCK_K]
@@ -52,7 +58,9 @@ def _fused_linear_sigmoid_row_sum_kernel(
             acc = tl.sum(w_tile * x_vals[None, :], axis=1)
 
             # Add bias
-            b_vals = tl.load(b_ptr + j_offsets * stride_b, mask=j_mask, other=0.0).to(tl.float32)
+            b_vals = tl.load(b_ptr + j_offsets * stride_b,
+                             mask=j_mask,
+                             other=0.0).to(tl.float32)
             acc = acc + b_vals
 
             # Sigmoid and masked reduction over this hidden tile
@@ -68,7 +76,7 @@ def _fused_linear_sigmoid_row_sum_kernel(
             j_offsets = j_start + j_arange
             j_mask = j_offsets < H
 
-            acc = tl.zeros((BLOCK_H,), dtype=tl.float32)
+            acc = tl.zeros((BLOCK_H, ), dtype=tl.float32)
 
             # Loop over K dimension
             k_start = 0
@@ -85,7 +93,8 @@ def _fused_linear_sigmoid_row_sum_kernel(
 
                 # Load W[j, k] tile
                 w_tile = tl.load(
-                    w_ptr + j_offsets[:, None] * stride_wj + k_offsets[None, :] * stride_wk,
+                    w_ptr + j_offsets[:, None] * stride_wj +
+                    k_offsets[None, :] * stride_wk,
                     mask=j_mask[:, None] & k_mask[None, :],
                     other=0.0,
                 ).to(tl.float32)  # [BLOCK_H, BLOCK_K]
@@ -95,7 +104,9 @@ def _fused_linear_sigmoid_row_sum_kernel(
                 k_start += BLOCK_K
 
             # Add bias
-            b_vals = tl.load(b_ptr + j_offsets * stride_b, mask=j_mask, other=0.0).to(tl.float32)
+            b_vals = tl.load(b_ptr + j_offsets * stride_b,
+                             mask=j_mask,
+                             other=0.0).to(tl.float32)
             acc = acc + b_vals
 
             # Sigmoid and masked reduction over this hidden tile
@@ -107,6 +118,7 @@ def _fused_linear_sigmoid_row_sum_kernel(
 
     # Write per-row result
     tl.store(out_ptr + pid, row_sum)
+
 
 @triton.jit
 def _logsumexp_kernel(inp_ptr, out_ptr, B, BLOCK: tl.constexpr):
@@ -135,7 +147,8 @@ def _logsumexp_kernel(inp_ptr, out_ptr, B, BLOCK: tl.constexpr):
         tile_sum = tl.sum(tl.exp(vals - tile_max), axis=0)
 
         new_max = tl.maximum(acc_max, tile_max)
-        acc_sum = acc_sum * tl.exp(acc_max - new_max) + tile_sum * tl.exp(tile_max - new_max)
+        acc_sum = acc_sum * tl.exp(acc_max - new_max) + tile_sum * tl.exp(
+            tile_max - new_max)
         acc_max = new_max
 
         offset += BLOCK
@@ -143,15 +156,20 @@ def _logsumexp_kernel(inp_ptr, out_ptr, B, BLOCK: tl.constexpr):
     result = acc_max + tl.log(acc_sum)
     tl.store(out_ptr, result)
 
+
 @triton.jit
 def _fused_rowsum_logsumexp_kernel(
-    x_ptr,         # *f32 [B, K]
-    w_ptr,         # *f32 [H, K]
-    b_ptr,         # *f32 [H]
-    out_ptr,       # *f32 [1]
-    B, K, H,
-    stride_xm, stride_xk,
-    stride_wj, stride_wk,
+    x_ptr,  # *f32 [B, K]
+    w_ptr,  # *f32 [H, K]
+    b_ptr,  # *f32 [H]
+    out_ptr,  # *f32 [1]
+    B,
+    K,
+    H,
+    stride_xm,
+    stride_xk,
+    stride_wj,
+    stride_wk,
     stride_b,
     BLOCK_B: tl.constexpr,
     BLOCK_H: tl.constexpr,
@@ -163,7 +181,7 @@ def _fused_rowsum_logsumexp_kernel(
         return
 
     acc_max = -1.0e30  # running max for stable logsumexp
-    acc_sum = 0.0      # running sum of exp shifted by acc_max
+    acc_sum = 0.0  # running sum of exp shifted by acc_max
 
     rows_arange = tl.arange(0, BLOCK_B)
     j_arange = tl.arange(0, BLOCK_H)
@@ -175,7 +193,7 @@ def _fused_rowsum_logsumexp_kernel(
         row_mask = rows < B
 
         # Accumulator for per-row sums after sigmoid over hidden dim
-        row_sums = tl.zeros((BLOCK_B,), dtype=tl.float32)
+        row_sums = tl.zeros((BLOCK_B, ), dtype=tl.float32)
 
         j_start = 0
         while j_start < H:
@@ -192,14 +210,16 @@ def _fused_rowsum_logsumexp_kernel(
 
                 # Load X tiles for multiple rows at once: [BLOCK_B, BLOCK_K]
                 x_tile = tl.load(
-                    x_ptr + rows[:, None] * stride_xm + k_offsets[None, :] * stride_xk,
+                    x_ptr + rows[:, None] * stride_xm +
+                    k_offsets[None, :] * stride_xk,
                     mask=row_mask[:, None] & k_mask[None, :],
                     other=0.0,
                 ).to(tl.float32)
 
                 # Load W tile once and reuse across rows: [BLOCK_H, BLOCK_K]
                 w_tile = tl.load(
-                    w_ptr + j_offsets[:, None] * stride_wj + k_offsets[None, :] * stride_wk,
+                    w_ptr + j_offsets[:, None] * stride_wj +
+                    k_offsets[None, :] * stride_wk,
                     mask=j_mask[:, None] & k_mask[None, :],
                     other=0.0,
                 ).to(tl.float32)
@@ -210,7 +230,9 @@ def _fused_rowsum_logsumexp_kernel(
                 k_start += BLOCK_K
 
             # Add bias and apply sigmoid
-            b_vals = tl.load(b_ptr + j_offsets * stride_b, mask=j_mask, other=0.0).to(tl.float32)
+            b_vals = tl.load(b_ptr + j_offsets * stride_b,
+                             mask=j_mask,
+                             other=0.0).to(tl.float32)
             acc = acc + b_vals[None, :]
 
             s = tl.sigmoid(acc)
@@ -227,7 +249,8 @@ def _fused_rowsum_logsumexp_kernel(
         tile_sum = tl.sum(tl.exp(masked_vals - tile_max), axis=0)
 
         new_max = tl.maximum(acc_max, tile_max)
-        acc_sum = acc_sum * tl.exp(acc_max - new_max) + tile_sum * tl.exp(tile_max - new_max)
+        acc_sum = acc_sum * tl.exp(acc_max - new_max) + tile_sum * tl.exp(
+            tile_max - new_max)
         acc_max = new_max
 
         b_start += BLOCK_B

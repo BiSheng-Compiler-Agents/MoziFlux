@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _argmax_row_kernel(
     x_ptr,
@@ -30,13 +31,13 @@ def _argmax_row_kernel(
 
         tile_max = tl.max(values, axis=0)
         equal_mask = (values == tile_max) & mask
-        invalid_index = tl.full((BLOCK_K,), k, dtype=tl.int64)
-        tile_indices = tl.where(equal_mask, offsets.to(tl.int64), invalid_index)
+        invalid_index = tl.full((BLOCK_K, ), k, dtype=tl.int64)
+        tile_indices = tl.where(equal_mask, offsets.to(tl.int64),
+                                invalid_index)
         tile_first_idx = tl.min(tile_indices, axis=0)
 
-        should_update = (tile_max > best_val) | (
-            (tile_max == best_val) & (tile_first_idx < best_idx)
-        )
+        should_update = (tile_max > best_val) | ((tile_max == best_val) &
+                                                 (tile_first_idx < best_idx))
         best_val = tl.where(should_update, tile_max, best_val)
         best_idx = tl.where(should_update, tile_first_idx, best_idx)
         k0 += BLOCK_K

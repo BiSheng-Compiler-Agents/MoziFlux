@@ -1,10 +1,11 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _touch_inplace_kernel(
-    y_ptr,          # *mut T
-    n_elements,     # int32
+    y_ptr,  # *mut T
+    n_elements,  # int32
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(0)

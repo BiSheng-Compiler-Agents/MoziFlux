@@ -79,16 +79,17 @@ try:
     from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 
     _provider = TracerProvider()
-    _exporter = OTLPSpanExporter(endpoint="http://localhost:4317", insecure=True)
+    _exporter = OTLPSpanExporter(endpoint="http://localhost:4317",
+                                 insecure=True)
     _provider.add_span_processor(BatchSpanProcessor(_exporter))
     trace.set_tracer_provider(_provider)
     _tracer = trace.get_tracer("hermes.phoenix-tracer")
     _OTEL_AVAILABLE = True
-    logger.info("phoenix-tracer: OTel provider initialised → http://localhost:4317")
+    logger.info(
+        "phoenix-tracer: OTel provider initialised → http://localhost:4317")
 except Exception as _e:
     _OTEL_AVAILABLE = False
     logger.warning("phoenix-tracer: OTel unavailable — %s", _e)
-
 
 # ── Session state ──────────────────────────────────────────────────────────────
 # session_id → {
@@ -112,7 +113,9 @@ def _flatten(obj: Any, limit: int = 4096) -> str:
         return str(obj)[:limit]
 
 
-def _ensure_session(session_id: str, model: str = "", platform: str = "") -> Dict[str, Any]:
+def _ensure_session(session_id: str,
+                    model: str = "",
+                    platform: str = "") -> Dict[str, Any]:
     """
     Lazily create the root session span.
 
@@ -132,16 +135,19 @@ def _ensure_session(session_id: str, model: str = "", platform: str = "") -> Dic
 
         _sessions[session_id] = {
             "root_span": root_span,
-            "root_ctx":  root_ctx,
+            "root_ctx": root_ctx,
             "turn_span": None,
-            "turn_ctx":  None,
+            "turn_ctx": None,
         }
-        logger.debug("phoenix-tracer: created root span for session %s trace_id=%s",
-                     session_id, format(root_span.get_span_context().trace_id, "032x"))
+        logger.debug(
+            "phoenix-tracer: created root span for session %s trace_id=%s",
+            session_id, format(root_span.get_span_context().trace_id, "032x"))
     return _sessions[session_id]
 
 
-def _end_session(session_id: str, completed: bool = True, interrupted: bool = False) -> None:
+def _end_session(session_id: str,
+                 completed: bool = True,
+                 interrupted: bool = False) -> None:
     """Close all spans and flush."""
     sess = _sessions.pop(session_id, None)
     if not sess:
@@ -173,7 +179,11 @@ def _end_session(session_id: str, completed: bool = True, interrupted: bool = Fa
 
 # ── Hook handlers ──────────────────────────────────────────────────────────────
 
-def _on_session_start(session_id: str = "", model: str = "", platform: str = "", **_: Any) -> None:
+
+def _on_session_start(session_id: str = "",
+                      model: str = "",
+                      platform: str = "",
+                      **_: Any) -> None:
     if not _OTEL_AVAILABLE or not session_id:
         return
     try:
@@ -209,12 +219,15 @@ def _on_pre_llm_call(
         # Start turn span as child of root — pass root_ctx explicitly.
         # This works even though we're in a new thread because we read root_ctx
         # from our dict rather than from the thread-local OTel context stack.
-        turn_span = _tracer.start_span("hermes.llm.call", context=sess["root_ctx"])
+        turn_span = _tracer.start_span("hermes.llm.call",
+                                       context=sess["root_ctx"])
         turn_span.set_attribute("llm.model", model)
         turn_span.set_attribute("llm.platform", platform)
         turn_span.set_attribute("llm.is_first_turn", is_first_turn)
-        turn_span.set_attribute("llm.user_message", (user_message or "")[:2048])
-        turn_span.set_attribute("llm.history_len", len(conversation_history or []))
+        turn_span.set_attribute("llm.user_message", (user_message
+                                                     or "")[:2048])
+        turn_span.set_attribute("llm.history_len",
+                                len(conversation_history or []))
 
         # Build turn_ctx so tool spans can use it as their explicit parent
         turn_ctx = trace.set_span_in_context(turn_span)
@@ -222,8 +235,9 @@ def _on_pre_llm_call(
         sess["turn_span"] = turn_span
         sess["turn_ctx"] = turn_ctx
 
-        logger.debug("phoenix-tracer: turn span started session=%s trace_id=%s",
-                     session_id, format(turn_span.get_span_context().trace_id, "032x"))
+        logger.debug(
+            "phoenix-tracer: turn span started session=%s trace_id=%s",
+            session_id, format(turn_span.get_span_context().trace_id, "032x"))
 
     except Exception as exc:
         logger.debug("phoenix-tracer pre_llm_call: %s", exc)
@@ -245,7 +259,8 @@ def _on_post_llm_call(
         if not sess or sess["turn_span"] is None:
             return
 
-        sess["turn_span"].set_attribute("llm.assistant_response", (assistant_response or "")[:4096])
+        sess["turn_span"].set_attribute("llm.assistant_response",
+                                        (assistant_response or "")[:4096])
         sess["turn_span"].end()
         sess["turn_span"] = None
         sess["turn_ctx"] = None
@@ -273,7 +288,8 @@ def _on_pre_tool_call(
         if sess:
             parent_ctx = sess.get("turn_ctx") or sess.get("root_ctx")
 
-        span = _tracer.start_span(f"hermes.tool.{tool_name}", context=parent_ctx)
+        span = _tracer.start_span(f"hermes.tool.{tool_name}",
+                                  context=parent_ctx)
         span.set_attribute("tool.name", tool_name)
         span.set_attribute("tool.session_id", session_id)
         span.set_attribute("tool.task_id", task_id)
@@ -345,7 +361,9 @@ def _on_session_end(
         logger.debug("phoenix-tracer on_session_end: %s", exc)
 
 
-def _on_session_finalize(session_id: str = "", platform: str = "", **_: Any) -> None:
+def _on_session_finalize(session_id: str = "",
+                         platform: str = "",
+                         **_: Any) -> None:
     """True session end — gateway shutdown, /reset, or CLI exit.
 
     Only here do we close the root hermes.session span and flush to Phoenix.
@@ -361,12 +379,13 @@ def _on_session_finalize(session_id: str = "", platform: str = "", **_: Any) -> 
 
 # ── Plugin entry point ─────────────────────────────────────────────────────────
 
+
 def register(ctx) -> None:
-    ctx.register_hook("on_session_start",    _on_session_start)
-    ctx.register_hook("pre_llm_call",        _on_pre_llm_call)
-    ctx.register_hook("post_llm_call",       _on_post_llm_call)
-    ctx.register_hook("pre_tool_call",       _on_pre_tool_call)
-    ctx.register_hook("post_tool_call",      _on_post_tool_call)
-    ctx.register_hook("on_session_end",      _on_session_end)
+    ctx.register_hook("on_session_start", _on_session_start)
+    ctx.register_hook("pre_llm_call", _on_pre_llm_call)
+    ctx.register_hook("post_llm_call", _on_post_llm_call)
+    ctx.register_hook("pre_tool_call", _on_pre_tool_call)
+    ctx.register_hook("post_tool_call", _on_post_tool_call)
+    ctx.register_hook("on_session_end", _on_session_end)
     ctx.register_hook("on_session_finalize", _on_session_finalize)
     logger.info("phoenix-tracer: 7 hooks registered")

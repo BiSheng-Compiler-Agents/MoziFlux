@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _flip_transpose_4d_kernel(
     inp_ptr,  # [Cin, Cout, K, K]
@@ -36,48 +37,126 @@ def _flip_transpose_4d_kernel(
     stride_in_co = K * K
     stride_in_ci = Cout * stride_in_co
 
-    in_idx = (
-        ci * stride_in_ci
-        + co * stride_in_co
-        + in_ky * stride_in_kh
-        + in_kx * stride_in_kw
-    )
+    in_idx = (ci * stride_in_ci + co * stride_in_co + in_ky * stride_in_kh +
+              in_kx * stride_in_kw)
     vals = tl.load(inp_ptr + in_idx, mask=mask, other=0.0)
     tl.store(out_ptr + offs, vals, mask=mask)
 
+
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_M': 64,  'BLOCK_N': 64,   'BLOCK_K': 32}, num_warps=4, num_stages=3),
-        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64,   'BLOCK_K': 32}, num_warps=8, num_stages=4),
-        triton.Config({'BLOCK_M': 64,  'BLOCK_N': 128,  'BLOCK_K': 32}, num_warps=8, num_stages=4),
-        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128,  'BLOCK_K': 32}, num_warps=8, num_stages=5),
-        triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64,   'BLOCK_K': 32}, num_warps=8, num_stages=4),
-        triton.Config({'BLOCK_M': 64,  'BLOCK_N': 256,  'BLOCK_K': 32}, num_warps=8, num_stages=4),
+        triton.Config({
+            'BLOCK_M': 64,
+            'BLOCK_N': 64,
+            'BLOCK_K': 32
+        },
+                      num_warps=4,
+                      num_stages=3),
+        triton.Config({
+            'BLOCK_M': 128,
+            'BLOCK_N': 64,
+            'BLOCK_K': 32
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            'BLOCK_M': 64,
+            'BLOCK_N': 128,
+            'BLOCK_K': 32
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            'BLOCK_M': 128,
+            'BLOCK_N': 128,
+            'BLOCK_K': 32
+        },
+                      num_warps=8,
+                      num_stages=5),
+        triton.Config({
+            'BLOCK_M': 256,
+            'BLOCK_N': 64,
+            'BLOCK_K': 32
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            'BLOCK_M': 64,
+            'BLOCK_N': 256,
+            'BLOCK_K': 32
+        },
+                      num_warps=8,
+                      num_stages=4),
         # Added larger tiles and deeper pipelines for H200
-        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 256,  'BLOCK_K': 32}, num_warps=8, num_stages=5),
-        triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128,  'BLOCK_K': 32}, num_warps=8, num_stages=5),
-        triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256,  'BLOCK_K': 32}, num_warps=8, num_stages=6),
+        triton.Config({
+            'BLOCK_M': 128,
+            'BLOCK_N': 256,
+            'BLOCK_K': 32
+        },
+                      num_warps=8,
+                      num_stages=5),
+        triton.Config({
+            'BLOCK_M': 256,
+            'BLOCK_N': 128,
+            'BLOCK_K': 32
+        },
+                      num_warps=8,
+                      num_stages=5),
+        triton.Config({
+            'BLOCK_M': 256,
+            'BLOCK_N': 256,
+            'BLOCK_K': 32
+        },
+                      num_warps=8,
+                      num_stages=6),
         # Allow a wider K-chunk for larger Cin cases
-        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128,  'BLOCK_K': 64}, num_warps=8, num_stages=4),
-        triton.Config({'BLOCK_M': 64,  'BLOCK_N': 64,   'BLOCK_K': 64}, num_warps=4, num_stages=4),
+        triton.Config({
+            'BLOCK_M': 128,
+            'BLOCK_N': 128,
+            'BLOCK_K': 64
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            'BLOCK_M': 64,
+            'BLOCK_N': 64,
+            'BLOCK_K': 64
+        },
+                      num_warps=4,
+                      num_stages=4),
     ],
     key=['N', 'Cin', 'Cout', 'H_out', 'W_out', 'K'],
 )
 @triton.jit
 def _convtransp2d_stride1_pad0_groups1_kernel(
-    x_ptr,         # * (N, Cin, H, W)
-    w_ptr,         # * (Cout, Cin, K, K) -- rotated weight: flip(spatial) + permute(out,in,kh,kw)
-    bias_ptr,      # * (Cout,) or dummy
-    y_ptr,         # * (N, Cout, H_out, W_out)
-    N, Cin, H, W,
+    x_ptr,  # * (N, Cin, H, W)
+    w_ptr,  # * (Cout, Cin, K, K) -- rotated weight: flip(spatial) + permute(out,in,kh,kw)
+    bias_ptr,  # * (Cout,) or dummy
+    y_ptr,  # * (N, Cout, H_out, W_out)
+    N,
+    Cin,
+    H,
+    W,
     Cout,
     K: tl.constexpr,
-    H_out, W_out,
-    stride_xn, stride_xc, stride_xh, stride_xw,
-    stride_wo, stride_wi, stride_wkh, stride_wkw,
-    stride_yn, stride_yc, stride_yh, stride_yw,
+    H_out,
+    W_out,
+    stride_xn,
+    stride_xc,
+    stride_xh,
+    stride_xw,
+    stride_wo,
+    stride_wi,
+    stride_wkh,
+    stride_wkw,
+    stride_yn,
+    stride_yc,
+    stride_yh,
+    stride_yw,
     HAS_BIAS: tl.constexpr,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
 ):
     # Tile ids
     pid_m = tl.program_id(0)  # rows: N * H_out * W_out
@@ -123,23 +202,16 @@ def _convtransp2d_stride1_pad0_groups1_kernel(
                 vmask = mask_m & valid_y & valid_x
 
                 # Precompute base pointers to reduce integer ops in inner loop
-                x_base = (
-                    x_ptr
-                    + n_idx[:, None] * stride_xn
-                    + h_in[:, None] * stride_xh
-                    + w_in[:, None] * stride_xw
-                )
+                x_base = (x_ptr + n_idx[:, None] * stride_xn +
+                          h_in[:, None] * stride_xh +
+                          w_in[:, None] * stride_xw)
                 x_ptrs = x_base + c_idx[None, :] * stride_xc
                 x_mask = vmask[:, None] & c_mask[None, :]
                 a = tl.load(x_ptrs, mask=x_mask, other=0.0).to(tl.float32)
 
                 # Load W tile: (BLOCK_K, BLOCK_N) from rotated weight layout [Cout, Cin, K, K]
-                w_base = (
-                    w_ptr
-                    + cols[None, :] * stride_wo
-                    + ky * stride_wkh
-                    + kx * stride_wkw
-                )
+                w_base = (w_ptr + cols[None, :] * stride_wo + ky * stride_wkh +
+                          kx * stride_wkw)
                 w_ptrs = w_base + c_idx[:, None] * stride_wi
                 w_mask = c_mask[:, None] & mask_n[None, :]
                 b = tl.load(w_ptrs, mask=w_mask, other=0.0).to(tl.float32)
@@ -148,16 +220,12 @@ def _convtransp2d_stride1_pad0_groups1_kernel(
         rc += BLOCK_K
 
     if HAS_BIAS:
-        bias_vals = tl.load(bias_ptr + cols, mask=mask_n, other=0.0).to(tl.float32)
+        bias_vals = tl.load(bias_ptr + cols, mask=mask_n,
+                            other=0.0).to(tl.float32)
         acc = acc + bias_vals[None, :]
 
     # Store Y tile
-    y_ptrs = (
-        y_ptr
-        + n_idx[:, None] * stride_yn
-        + cols[None, :] * stride_yc
-        + h_out_idx[:, None] * stride_yh
-        + w_out_idx[:, None] * stride_yw
-    )
+    y_ptrs = (y_ptr + n_idx[:, None] * stride_yn + cols[None, :] * stride_yc +
+              h_out_idx[:, None] * stride_yh + w_out_idx[:, None] * stride_yw)
     y_mask = mask_m[:, None] & mask_n[None, :]
     tl.store(y_ptrs, acc, mask=y_mask)

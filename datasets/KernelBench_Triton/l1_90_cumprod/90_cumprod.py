@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config(dict(BLOCK=128), num_warps=2, num_stages=2),
@@ -38,6 +39,7 @@ def _cumprod_rowwise_kernel_vectorized(
         carry = carry * v
         tl.store(y_row_ptr + i * stride_yn, carry)
         i += 1
+
 
 @triton.jit
 def _touch_first_elem(y_ptr, M, stride_ym, stride_yn):

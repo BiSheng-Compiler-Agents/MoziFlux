@@ -9,9 +9,9 @@ DEFAULT_OUT_FEATURES = 8192
 
 @triton.jit
 def _rowwise_linear_sum_kernel(
-    x_ptr,           # (B, I)
-    wsum_ptr,        # (I,)
-    out_ptr,         # (B,) result
+    x_ptr,  # (B, I)
+    wsum_ptr,  # (I,)
+    out_ptr,  # (B,) result
     B: tl.constexpr,
     I: tl.constexpr,
     stride_x_b,
@@ -73,17 +73,19 @@ def _rowwise_linear_sum_kernel(
 
 @triton.jit
 def _fused_linear_sum_kernel(
-    x_ptr,            # *f32 (B, I)
-    W_ptr,            # *f32 (O, I)
-    b_ptr,            # *f32 (O,) - can be dummy if O_b==0
-    out_ptr,          # *f32 (B,)
-    B, I, O,          # int32 sizes
-    stride_x_b,       # int32
-    stride_x_i,       # int32
-    stride_w_o,       # int32
-    stride_w_i,       # int32
-    stride_b_o,       # int32
-    stride_out_b,     # int32
+    x_ptr,  # *f32 (B, I)
+    W_ptr,  # *f32 (O, I)
+    b_ptr,  # *f32 (O,) - can be dummy if O_b==0
+    out_ptr,  # *f32 (B,)
+    B,
+    I,
+    O,  # int32 sizes
+    stride_x_b,  # int32
+    stride_x_i,  # int32
+    stride_w_o,  # int32
+    stride_w_i,  # int32
+    stride_b_o,  # int32
+    stride_out_b,  # int32
     BLOCK_B: tl.constexpr,
     BLOCK_K: tl.constexpr,
     UNROLL_O: tl.constexpr,
@@ -105,7 +107,8 @@ def _fused_linear_sum_kernel(
     while o < O:
         o_idx = o + offs_o
         mask_o = o_idx < O
-        b_vals = tl.load(b_ptr + o_idx * stride_b_o, mask=mask_o, other=0.0).to(tl.float32)
+        b_vals = tl.load(b_ptr + o_idx * stride_b_o, mask=mask_o,
+                         other=0.0).to(tl.float32)
         c_acc += tl.sum(b_vals, axis=0)
         o += UNROLL_O
 
@@ -123,7 +126,8 @@ def _fused_linear_sum_kernel(
             o2_idx = o2 + offs_o
             mask_o2 = o2_idx < O
             w_block = tl.load(
-                W_ptr + o2_idx[:, None] * stride_w_o + k_idx[None, :] * stride_w_i,
+                W_ptr + o2_idx[:, None] * stride_w_o +
+                k_idx[None, :] * stride_w_i,
                 mask=mask_o2[:, None] & mask_k[None, :],
                 other=0.0,
             ).to(tl.float32)
@@ -155,6 +159,7 @@ class ModelNew(nn.Module):
         - LogSumExp
         - LogSumExp
     """
+
     def __init__(
         self,
         in_features=DEFAULT_IN_FEATURES,
@@ -173,7 +178,8 @@ class ModelNew(nn.Module):
         if x.device.type != "npu":
             raise RuntimeError("ModelNew expects Ascend NPU tensors.")
         if x.requires_grad:
-            raise RuntimeError("ModelNew Triton path does not support autograd inputs.")
+            raise RuntimeError(
+                "ModelNew Triton path does not support autograd inputs.")
 
         if self.linear.weight.device != x.device:
             self.linear = self.linear.to(device=x.device)
@@ -186,29 +192,37 @@ class ModelNew(nn.Module):
 
         # Ensure contiguous tensors
         x_c = x.contiguous()
-        W = self.linear.weight.contiguous()        # (O, I)
+        W = self.linear.weight.contiguous()  # (O, I)
         b = self.linear.bias
         if b is None:
-            b_c = torch.empty(1, device=x.device, dtype=W.dtype)  # dummy; O_b=0 prevents use
+            b_c = torch.empty(1, device=x.device,
+                              dtype=W.dtype)  # dummy; O_b=0 prevents use
             O_b = 0
         else:
             b_c = b.contiguous()
             O_b = W.shape[0]
 
         # Output buffer (B, 1) but we store as (B,) in kernel and then view
-        out = torch.empty((B,), device=x.device, dtype=torch.float32)
+        out = torch.empty((B, ), device=x.device, dtype=torch.float32)
 
         # Launch Triton kernel: process BLOCK_B rows per program
         BLOCK_B = 256
         BLOCK_K = 32
         UNROLL_O = 32
-        grid = (triton.cdiv(B, BLOCK_B),)
+        grid = (triton.cdiv(B, BLOCK_B), )
 
         _fused_linear_sum_kernel[grid](
-            x_c, W, b_c, out,
-            B, I, O_b,
-            x_c.stride(0), x_c.stride(1),
-            W.stride(0), W.stride(1),
+            x_c,
+            W,
+            b_c,
+            out,
+            B,
+            I,
+            O_b,
+            x_c.stride(0),
+            x_c.stride(1),
+            W.stride(0),
+            W.stride(1),
             b_c.stride(0),
             out.stride(0),
             BLOCK_B=BLOCK_B,
@@ -219,11 +233,16 @@ class ModelNew(nn.Module):
         )
 
         return out.view(B, 1)
+
+
 batch_size = 1024
-in_features  = 8192  
+in_features = 8192
 out_features = 8192
+
 
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features]

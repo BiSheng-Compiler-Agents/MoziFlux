@@ -1,8 +1,10 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
-def fused_div_gelu_kernel(x_ptr, out_ptr, n_elements, inv_divisor, BLOCK_SIZE: tl.constexpr):
+def fused_div_gelu_kernel(x_ptr, out_ptr, n_elements, inv_divisor,
+                          BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     mask = offsets < n_elements

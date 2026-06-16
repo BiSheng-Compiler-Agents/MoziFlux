@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _sumsq_kernel(x_ptr, n_elements, out_ptr, BLOCK: tl.constexpr):
     pid = tl.program_id(axis=0)
@@ -14,8 +15,10 @@ def _sumsq_kernel(x_ptr, n_elements, out_ptr, BLOCK: tl.constexpr):
     # Accumulate per-CTA partial sum into a single global scalar
     tl.atomic_add(out_ptr, s)
 
+
 @triton.jit
-def _reduce_partials_kernel(partials_ptr, n_partials, out_ptr, BLOCK: tl.constexpr):
+def _reduce_partials_kernel(partials_ptr, n_partials, out_ptr,
+                            BLOCK: tl.constexpr):
     # Kept for compatibility (unused in this optimized path)
     offs = tl.arange(0, BLOCK)
     acc = 0.0
@@ -27,6 +30,7 @@ def _reduce_partials_kernel(partials_ptr, n_partials, out_ptr, BLOCK: tl.constex
         acc += tl.sum(vals, axis=0)
         idx += BLOCK
     tl.store(out_ptr, acc)
+
 
 @triton.jit
 def _scale_kernel(x_ptr, y_ptr, n_elements, sumsq_ptr, BLOCK: tl.constexpr):

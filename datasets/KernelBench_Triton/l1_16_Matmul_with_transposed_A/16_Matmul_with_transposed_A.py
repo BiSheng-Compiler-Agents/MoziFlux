@@ -1,21 +1,82 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         # Balanced tiles
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64},  num_warps=8,  num_stages=5),
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 128, "BLOCK_K": 64},  num_warps=4,  num_stages=4),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64,  "BLOCK_K": 64},  num_warps=4,  num_stages=4),
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 64,  "BLOCK_K": 32},  num_warps=4,  num_stages=2),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=5),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_warps=4,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64
+        },
+                      num_warps=4,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32
+        },
+                      num_warps=4,
+                      num_stages=2),
         # Wider N or M
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 32},  num_warps=8,  num_stages=4),
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 32},  num_warps=8,  num_stages=4),
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 256, "BLOCK_K": 64},  num_warps=8,  num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 256,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 256,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=4),
         # Deeper K
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 128}, num_warps=8,  num_stages=4),
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 128, "BLOCK_K": 128}, num_warps=4,  num_stages=4),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64,  "BLOCK_K": 128}, num_warps=4,  num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 128
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 128
+        },
+                      num_warps=4,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 128
+        },
+                      num_warps=4,
+                      num_stages=4),
     ],
     key=["M", "N", "K"],
 )
@@ -24,11 +85,18 @@ def _matmul_AT_B_kernel(
     A_ptr,  # A: (K, M)
     B_ptr,  # B: (K, N)
     C_ptr,  # C: (M, N)
-    M, N, K,
-    stride_a_k, stride_a_m,
-    stride_b_k, stride_b_n,
-    stride_c_m, stride_c_n,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
+    M,
+    N,
+    K,
+    stride_a_k,
+    stride_a_m,
+    stride_b_k,
+    stride_b_n,
+    stride_c_m,
+    stride_c_n,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
 ):
     # 2D program ids
     pid_m = tl.program_id(axis=0)
@@ -37,7 +105,7 @@ def _matmul_AT_B_kernel(
     # Offsets for this tile
     offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)  # along M (rows of C)
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)  # along N (cols of C)
-    offs_k = tl.arange(0, BLOCK_K)                    # along K (reduction)
+    offs_k = tl.arange(0, BLOCK_K)  # along K (reduction)
 
     # Provide compiler hints for vectorization/tiling
     tl.multiple_of(offs_m, BLOCK_M)
@@ -53,15 +121,19 @@ def _matmul_AT_B_kernel(
         k_idx = k0 + offs_k  # [BK]
 
         # Load A tile from (K, M) as [BK, BM], then transpose to [BM, BK]
-        a_ptrs = A_ptr + (k_idx[:, None] * stride_a_k + offs_m[None, :] * stride_a_m)
+        a_ptrs = A_ptr + (k_idx[:, None] * stride_a_k +
+                          offs_m[None, :] * stride_a_m)
         a_mask = (k_idx[:, None] < K) & (offs_m[None, :] < M)
         a = tl.load(a_ptrs, mask=a_mask, other=0.0, cache_modifier=".cg")
-        a = tl.trans(a).to(tl.float32)  # shape [BM, BK] with A[k, m] laid out as (m, k)
+        a = tl.trans(a).to(
+            tl.float32)  # shape [BM, BK] with A[k, m] laid out as (m, k)
 
         # Load B tile from (K, N) as [BK, BN]
-        b_ptrs = B_ptr + (k_idx[:, None] * stride_b_k + offs_n[None, :] * stride_b_n)
+        b_ptrs = B_ptr + (k_idx[:, None] * stride_b_k +
+                          offs_n[None, :] * stride_b_n)
         b_mask = (k_idx[:, None] < K) & (offs_n[None, :] < N)
-        b = tl.load(b_ptrs, mask=b_mask, other=0.0, cache_modifier=".cg").to(tl.float32)  # shape [BK, BN]
+        b = tl.load(b_ptrs, mask=b_mask, other=0.0,
+                    cache_modifier=".cg").to(tl.float32)  # shape [BK, BN]
 
         # Accumulate: C[m, n] += sum_k A[k, m] * B[k, n]
         acc += tl.dot(a, b)
@@ -69,6 +141,7 @@ def _matmul_AT_B_kernel(
         k0 += BLOCK_K
 
     # Write back C tile
-    c_ptrs = C_ptr + (offs_m[:, None] * stride_c_m + offs_n[None, :] * stride_c_n)
+    c_ptrs = C_ptr + (offs_m[:, None] * stride_c_m +
+                      offs_n[None, :] * stride_c_n)
     c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
     tl.store(c_ptrs, acc, mask=c_mask)

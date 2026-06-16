@@ -1,19 +1,20 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_add_swish_tanh_gelu_hardtanh(
-    x_ptr,          # *f32 [M, N]
-    add_ptr,        # *f32 [N]
-    out_ptr,        # *f32 [M, N]
+    x_ptr,  # *f32 [M, N]
+    add_ptr,  # *f32 [N]
+    out_ptr,  # *f32 [M, N]
     M: tl.constexpr,
     N: tl.constexpr,
-    stride_xm,      # int
-    stride_xn,      # int
-    stride_om,      # int
-    stride_on,      # int
-    min_val,        # f32
-    max_val,        # f32
+    stride_xm,  # int
+    stride_xn,  # int
+    stride_om,  # int
+    stride_on,  # int
+    min_val,  # f32
+    max_val,  # f32
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
 ):
@@ -33,12 +34,16 @@ def _fused_add_swish_tanh_gelu_hardtanh(
     mask = mask_m[:, None] & mask_n[None, :]
 
     x_ptrs = x_ptr + offs_m[:, None] * stride_xm + offs_n[None, :] * stride_xn
-    out_ptrs = out_ptr + offs_m[:, None] * stride_om + offs_n[None, :] * stride_on
+    out_ptrs = out_ptr + offs_m[:,
+                                None] * stride_om + offs_n[None, :] * stride_on
 
     # Load tile and broadcast add vector across rows
     # Use cache modifiers: x is read-once -> prefer L2 (.cg), add vector reused across rows -> keep in cache (.ca)
     x = tl.load(x_ptrs, mask=mask, other=0.0, cache_modifier=".cg")
-    add = tl.load(add_ptr + offs_n, mask=mask_n, other=0.0, cache_modifier=".ca")[None, :]
+    add = tl.load(add_ptr + offs_n,
+                  mask=mask_n,
+                  other=0.0,
+                  cache_modifier=".ca")[None, :]
 
     # (x + add) -> Swish -> Tanh -> GELU(exact) -> Hardtanh
     y = x + add

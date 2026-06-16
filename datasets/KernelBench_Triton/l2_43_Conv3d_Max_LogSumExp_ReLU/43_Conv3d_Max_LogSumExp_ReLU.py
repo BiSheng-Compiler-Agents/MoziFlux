@@ -1,16 +1,27 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _pool_lse_relu_stream_kernel(
-    x_ptr,           # *input  (N, C, D, H, W)
-    y_ptr,           # *output (N, 1, DO, HO, WO)
-    M,               # total positions over (N, DO, HO, WO)
-    DO, HO, WO,      # pooled spatial sizes
-    sxn, sxc, sxd, sxh, sxw,  # input strides
-    syn, syc, syd, syh, syw,  # output strides
-    C: tl.constexpr,          # channels to reduce over (compile-time)
-    BLOCK: tl.constexpr,      # vector width
+        x_ptr,  # *input  (N, C, D, H, W)
+        y_ptr,  # *output (N, 1, DO, HO, WO)
+        M,  # total positions over (N, DO, HO, WO)
+        DO,
+        HO,
+        WO,  # pooled spatial sizes
+        sxn,
+        sxc,
+        sxd,
+        sxh,
+        sxw,  # input strides
+        syn,
+        syc,
+        syd,
+        syh,
+        syw,  # output strides
+        C: tl.constexpr,  # channels to reduce over (compile-time)
+        BLOCK: tl.constexpr,  # vector width
 ):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK + tl.arange(0, BLOCK)
@@ -65,9 +76,9 @@ def _pool_lse_relu_stream_kernel(
     o7 = sxd + sxh + sxw
 
     # Streaming logsumexp across channels in float32
-    neg_inf = tl.full((BLOCK,), float("-inf"), tl.float32)
+    neg_inf = tl.full((BLOCK, ), float("-inf"), tl.float32)
     m = neg_inf
-    s = tl.zeros((BLOCK,), dtype=tl.float32)
+    s = tl.zeros((BLOCK, ), dtype=tl.float32)
 
     p0 = x_ptr + base_x
     # Iterate channels; for each channel compute maxpool(2x2x2) then update running LSE
@@ -98,19 +109,22 @@ def _pool_lse_relu_stream_kernel(
     out = tl.maximum(out, 0.0)
     tl.store(y_ptr + base_y, out, mask=mask)
 
+
 @triton.jit
 def _lse_relu_reduce_c_kernel(
-    x_ptr,            # input pointer (N, C, Z, Y, X)
-    out_ptr,          # output pointer (N, 1, Z, Y, X)
-    M,                # total number of (N, Z, Y, X) positions
-    Z, Y, X,          # spatial dims after pooling
-    stride_n,         # strides of input
-    stride_c,
-    stride_z,
-    stride_y,
-    stride_x,
-    C: tl.constexpr,  # number of channels to reduce over (compile-time)
-    BLOCK: tl.constexpr,  # vector width per program
+        x_ptr,  # input pointer (N, C, Z, Y, X)
+        out_ptr,  # output pointer (N, 1, Z, Y, X)
+        M,  # total number of (N, Z, Y, X) positions
+        Z,
+        Y,
+        X,  # spatial dims after pooling
+        stride_n,  # strides of input
+        stride_c,
+        stride_z,
+        stride_y,
+        stride_x,
+        C: tl.constexpr,  # number of channels to reduce over (compile-time)
+        BLOCK: tl.constexpr,  # vector width per program
 ):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK + tl.arange(0, BLOCK)
@@ -148,9 +162,10 @@ def _lse_relu_reduce_c_kernel(
     base_out = n64 * ZYX64 + z64 * YX64 + y64 * X64 + x64
 
     # Streaming log-sum-exp across channel dimension in float32
-    neg_inf = tl.full((BLOCK,), float("-inf"), tl.float32)
+    neg_inf = tl.full((BLOCK, ), float("-inf"), tl.float32)
     m = neg_inf  # running max
-    s = tl.zeros((BLOCK,), dtype=tl.float32)  # running sum of exp shifted by max
+    s = tl.zeros((BLOCK, ),
+                 dtype=tl.float32)  # running sum of exp shifted by max
 
     # Pointer to the first channel and prefetch pipeline
     p = x_ptr + base_in

@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config({"BLOCK_SIZE": 1024}, num_warps=2, num_stages=2),
@@ -12,13 +13,13 @@ import triton.language as tl
 )
 @triton.jit
 def _bias_scale_sigmoid_kernel(
-    x_ptr,            # *f32 [N, C, H, W] contiguous
-    bias_ptr,         # *f32 [C, 1, 1] contiguous
-    scale_ptr,        # *f32 [C, 1, 1] contiguous
-    y_ptr,            # *f32 [N, C, H, W] contiguous
-    HW: tl.constexpr, # H * W
+    x_ptr,  # *f32 [N, C, H, W] contiguous
+    bias_ptr,  # *f32 [C, 1, 1] contiguous
+    scale_ptr,  # *f32 [C, 1, 1] contiguous
+    y_ptr,  # *f32 [N, C, H, W] contiguous
+    HW: tl.constexpr,  # H * W
     C: tl.constexpr,  # channels
-    n_elements,       # total elements N*C*H*W
+    n_elements,  # total elements N*C*H*W
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)

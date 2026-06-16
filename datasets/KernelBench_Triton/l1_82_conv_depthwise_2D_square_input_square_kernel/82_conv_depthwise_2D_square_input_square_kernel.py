@@ -1,27 +1,40 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _dwconv2d_kernel(
-    x_ptr,        # *f32 [N, C, H, W]
-    w_ptr,        # *f32 [C, 1, K, K]
-    b_ptr,        # *f32 [C] or dummy
-    y_ptr,        # *f32 [N, C, H_OUT, W_OUT]
-    N, C, H, W,
-    H_OUT, W_OUT,
-    S: tl.constexpr,     # stride (square)
-    P: tl.constexpr,     # padding (square)
-    K: tl.constexpr,     # kernel size (square)
-    stride_xN, stride_xC, stride_xH, stride_xW,
-    stride_wC, stride_wH, stride_wW,
-    stride_yN, stride_yC, stride_yH, stride_yW,
+    x_ptr,  # *f32 [N, C, H, W]
+    w_ptr,  # *f32 [C, 1, K, K]
+    b_ptr,  # *f32 [C] or dummy
+    y_ptr,  # *f32 [N, C, H_OUT, W_OUT]
+    N,
+    C,
+    H,
+    W,
+    H_OUT,
+    W_OUT,
+    S: tl.constexpr,  # stride (square)
+    P: tl.constexpr,  # padding (square)
+    K: tl.constexpr,  # kernel size (square)
+    stride_xN,
+    stride_xC,
+    stride_xH,
+    stride_xW,
+    stride_wC,
+    stride_wH,
+    stride_wW,
+    stride_yN,
+    stride_yC,
+    stride_yH,
+    stride_yW,
     HAS_BIAS: tl.constexpr,
     BLOCK_W: tl.constexpr,
 ):
     # program ids
-    pid_nc = tl.program_id(0)      # over N*C
-    pid_h = tl.program_id(1)       # over H_OUT
-    pid_w = tl.program_id(2)       # over W_OUT tiles
+    pid_nc = tl.program_id(0)  # over N*C
+    pid_h = tl.program_id(1)  # over H_OUT
+    pid_w = tl.program_id(2)  # over W_OUT tiles
 
     # derive n, c from pid_nc
     n = pid_nc // C

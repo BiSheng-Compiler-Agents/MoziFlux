@@ -1,14 +1,15 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _bias_sub_tanh_kernel(
-    x_ptr,         # *T: input/output tensor (N, C, H, W) flattened
-    b_ptr,         # *T: bias tensor (C)
-    y_ptr,         # *T: output tensor (same as x)
-    HW: tl.constexpr,   # H * W
-    C: tl.constexpr,    # number of channels
-    NCHW: tl.constexpr, # total number of elements
+    x_ptr,  # *T: input/output tensor (N, C, H, W) flattened
+    b_ptr,  # *T: bias tensor (C)
+    y_ptr,  # *T: output tensor (same as x)
+    HW: tl.constexpr,  # H * W
+    C: tl.constexpr,  # number of channels
+    NCHW: tl.constexpr,  # total number of elements
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(0)

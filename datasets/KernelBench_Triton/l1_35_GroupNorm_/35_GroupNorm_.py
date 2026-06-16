@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _groupnorm_stats_kernel(
     x_ptr,
@@ -46,6 +47,7 @@ def _groupnorm_stats_kernel(
 
     tl.store(mean_ptr + pid, mean)
     tl.store(rstd_ptr + pid, rstd)
+
 
 @triton.jit
 def _groupnorm_fwd_kernel(

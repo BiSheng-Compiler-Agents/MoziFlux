@@ -1,12 +1,13 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_epilogue_swish_div_clamp_tanh(
-    x_ptr,  # input pointer
-    y_ptr,  # output pointer
-    n_elements,  # total number of elements
-    BLOCK: tl.constexpr,  # block size
+        x_ptr,  # input pointer
+        y_ptr,  # output pointer
+        n_elements,  # total number of elements
+        BLOCK: tl.constexpr,  # block size
 ):
     pid = tl.program_id(axis=0)
     offsets = pid * BLOCK + tl.arange(0, BLOCK)

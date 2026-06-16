@@ -1,15 +1,32 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _softmax_pool2_fused_kernel(
-    x_ptr, y_ptr,
-    x_stride_n, x_stride_c, x_stride_d, x_stride_h, x_stride_w,
-    y_stride_n, y_stride_c, y_stride_d, y_stride_h, y_stride_w,
-    N, C, D, H, W, OD, OH, OW,
-    K: tl.constexpr,                 # fused kernel size (K1 * K1)
-    BLOCK_C: tl.constexpr,           # channel tile (>= C, padded to pow2)
-    BLOCK_OW: tl.constexpr,          # width tile
+        x_ptr,
+        y_ptr,
+        x_stride_n,
+        x_stride_c,
+        x_stride_d,
+        x_stride_h,
+        x_stride_w,
+        y_stride_n,
+        y_stride_c,
+        y_stride_d,
+        y_stride_h,
+        y_stride_w,
+        N,
+        C,
+        D,
+        H,
+        W,
+        OD,
+        OH,
+        OW,
+        K: tl.constexpr,  # fused kernel size (K1 * K1)
+        BLOCK_C: tl.constexpr,  # channel tile (>= C, padded to pow2)
+        BLOCK_OW: tl.constexpr,  # width tile
 ):
     # Grid:
     #  axis 0 => over (N * OD * OH)
@@ -50,26 +67,19 @@ def _softmax_pool2_fused_kernel(
             ow_offsets = offs_ow * K  # [BLOCK_OW]
             for kw in range(0, K):
                 # Build 2D pointers [BLOCK_C, BLOCK_OW]
-                ptrs = (x_ptr
-                        + slice_base
-                        + ow_offsets[None, :] * x_stride_w
-                        + kw * x_stride_w
-                        + offs_c[:, None] * x_stride_c)
+                ptrs = (x_ptr + slice_base + ow_offsets[None, :] * x_stride_w +
+                        kw * x_stride_w + offs_c[:, None] * x_stride_c)
                 m2d = mask_c[:, None] & mask_ow[None, :]
                 x = tl.load(ptrs, mask=m2d, other=-float("inf")).to(tl.float32)
                 # Channel-wise softmax for each spatial position in the tile
-                x_max = tl.max(x, axis=0)                          # [BLOCK_OW]
-                x = tl.exp(x - x_max[None, :])                     # [BLOCK_C, BLOCK_OW]
-                x_sum = tl.sum(x, axis=0)                          # [BLOCK_OW]
-                y_tile = x / x_sum[None, :]                        # [BLOCK_C, BLOCK_OW]
+                x_max = tl.max(x, axis=0)  # [BLOCK_OW]
+                x = tl.exp(x - x_max[None, :])  # [BLOCK_C, BLOCK_OW]
+                x_sum = tl.sum(x, axis=0)  # [BLOCK_OW]
+                y_tile = x / x_sum[None, :]  # [BLOCK_C, BLOCK_OW]
                 # Max-pool over the fused window
                 acc = tl.maximum(acc, y_tile)
 
     # Store results
-    out_ptrs = (y_ptr
-                + n * y_stride_n
-                + od * y_stride_d
-                + oh * y_stride_h
-                + ow[None, :] * y_stride_w
-                + offs_c[:, None] * y_stride_c)
+    out_ptrs = (y_ptr + n * y_stride_n + od * y_stride_d + oh * y_stride_h +
+                ow[None, :] * y_stride_w + offs_c[:, None] * y_stride_c)
     tl.store(out_ptrs, acc, mask=(mask_c[:, None] & mask_ow[None, :]))

@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _log_softmax_row_fused_kernel(x_ptr, y_ptr, D, BLOCK_SIZE: tl.constexpr):
     """

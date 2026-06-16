@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config({"BLOCK_SIZE": 128}, num_warps=2, num_stages=2),
@@ -13,13 +14,13 @@ import triton.language as tl
 )
 @triton.jit
 def _spatial_mean_subtract_kernel(
-    x_ptr,       # *: [N, C, D, H, W] contiguous in spatial dims
-    y_ptr,       # *: [N, C, D, H, W] output
-    stride_n,    # stride along N dimension (elements)
-    stride_c,    # stride along C dimension (elements)
-    S,           # total spatial elements per (n, c) = D*H*W
-    N,           # batch size
-    C,           # channels
+    x_ptr,  # *: [N, C, D, H, W] contiguous in spatial dims
+    y_ptr,  # *: [N, C, D, H, W] output
+    stride_n,  # stride along N dimension (elements)
+    stride_c,  # stride along C dimension (elements)
+    S,  # total spatial elements per (n, c) = D*H*W
+    N,  # batch size
+    C,  # channels
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -40,7 +41,10 @@ def _spatial_mean_subtract_kernel(
     while i < S:
         idx = i + offsets
         mask = idx < S
-        vals = tl.load(base_x + idx, mask=mask, other=0.0, eviction_policy="evict_last").to(tl.float32)
+        vals = tl.load(base_x + idx,
+                       mask=mask,
+                       other=0.0,
+                       eviction_policy="evict_last").to(tl.float32)
         sum_acc += tl.sum(vals, axis=0)
         i += BLOCK_SIZE
 
@@ -52,7 +56,10 @@ def _spatial_mean_subtract_kernel(
     while i < S:
         idx = i + offsets
         mask = idx < S
-        vals = tl.load(base_x + idx, mask=mask, other=0.0, eviction_policy="evict_last")
+        vals = tl.load(base_x + idx,
+                       mask=mask,
+                       other=0.0,
+                       eviction_policy="evict_last")
         out = vals.to(tl.float32) - mean
         tl.store(base_y + idx, out.to(vals.dtype), mask=mask)
         i += BLOCK_SIZE

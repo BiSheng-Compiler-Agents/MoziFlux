@@ -1,12 +1,18 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _kl_div_batch_sum_kernel(
-    pred_ptr, targ_ptr, out_ptr,
-    B, D,
-    stride_pb, stride_pd,
-    stride_tb, stride_td,
+    pred_ptr,
+    targ_ptr,
+    out_ptr,
+    B,
+    D,
+    stride_pb,
+    stride_pd,
+    stride_tb,
+    stride_td,
     BLOCK_SIZE: tl.constexpr,
 ):
     row = tl.program_id(0)
@@ -19,15 +25,17 @@ def _kl_div_batch_sum_kernel(
     targ_row_ptr = targ_ptr + row * stride_tb
 
     # Accumulate per-lane and reduce once at the end
-    acc = tl.zeros((BLOCK_SIZE,), dtype=tl.float32)
+    acc = tl.zeros((BLOCK_SIZE, ), dtype=tl.float32)
     n_iters = tl.cdiv(D, BLOCK_SIZE)
 
     for k in range(0, n_iters, 2):
         # First tile
         cols0 = k * BLOCK_SIZE + offs
         mask0 = cols0 < D
-        p0 = tl.load(pred_row_ptr + cols0 * stride_pd, mask=mask0, other=1.0).to(tl.float32)
-        t0 = tl.load(targ_row_ptr + cols0 * stride_td, mask=mask0, other=0.0).to(tl.float32)
+        p0 = tl.load(pred_row_ptr + cols0 * stride_pd, mask=mask0,
+                     other=1.0).to(tl.float32)
+        t0 = tl.load(targ_row_ptr + cols0 * stride_td, mask=mask0,
+                     other=0.0).to(tl.float32)
 
         # Safe t0 * log(t0): define 0*log(0)=0
         t0_pos = t0 > 0.0
@@ -42,8 +50,12 @@ def _kl_div_batch_sum_kernel(
         if k1 < n_iters:
             cols1 = k1 * BLOCK_SIZE + offs
             mask1 = cols1 < D
-            p1 = tl.load(pred_row_ptr + cols1 * stride_pd, mask=mask1, other=1.0).to(tl.float32)
-            t1 = tl.load(targ_row_ptr + cols1 * stride_td, mask=mask1, other=0.0).to(tl.float32)
+            p1 = tl.load(pred_row_ptr + cols1 * stride_pd,
+                         mask=mask1,
+                         other=1.0).to(tl.float32)
+            t1 = tl.load(targ_row_ptr + cols1 * stride_td,
+                         mask=mask1,
+                         other=0.0).to(tl.float32)
 
             t1_pos = t1 > 0.0
             t1_safe = tl.where(t1_pos, t1, 1.0)

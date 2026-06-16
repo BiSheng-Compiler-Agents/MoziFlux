@@ -1,8 +1,11 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
-def _act_softplus_tanh_mul_kernel(x_ptr, y_ptr, n_elements, THRESHOLD: tl.constexpr, BLOCK_SIZE: tl.constexpr):
+def _act_softplus_tanh_mul_kernel(x_ptr, y_ptr, n_elements,
+                                  THRESHOLD: tl.constexpr,
+                                  BLOCK_SIZE: tl.constexpr):
     """
     Compute y = x * tanh(softplus(x)) elementwise with PyTorch's softplus default (beta=1.0, threshold=20.0).
     For x <= THRESHOLD:

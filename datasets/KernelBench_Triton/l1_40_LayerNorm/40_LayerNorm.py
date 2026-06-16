@@ -1,12 +1,13 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _layernorm_sums_kernel(
-    x_ptr,         # (rows, M)
-    sums_ptr,      # (rows,)
-    sumsq_ptr,     # (rows,)
-    M,             # int: number of features to normalize over
+    x_ptr,  # (rows, M)
+    sums_ptr,  # (rows,)
+    sumsq_ptr,  # (rows,)
+    M,  # int: number of features to normalize over
     BLOCK_SIZE: tl.constexpr,
 ):
     pid_row = tl.program_id(axis=0)
@@ -27,14 +28,15 @@ def _layernorm_sums_kernel(
     tl.atomic_add(sums_ptr + pid_row, s)
     tl.atomic_add(sumsq_ptr + pid_row, s2)
 
+
 @triton.jit
 def _layernorm_stats_kernel(
-    sums_ptr,      # (rows,)
-    sumsq_ptr,     # (rows,)
-    mean_ptr,      # (rows,)
-    rstd_ptr,      # (rows,)
-    INV_M,         # float32 = 1.0 / M
-    EPSILON,       # float32
+        sums_ptr,  # (rows,)
+        sumsq_ptr,  # (rows,)
+        mean_ptr,  # (rows,)
+        rstd_ptr,  # (rows,)
+        INV_M,  # float32 = 1.0 / M
+        EPSILON,  # float32
 ):
     pid = tl.program_id(axis=0)
     s = tl.load(sums_ptr + pid).to(tl.float32)
@@ -45,15 +47,16 @@ def _layernorm_stats_kernel(
     tl.store(mean_ptr + pid, mean)
     tl.store(rstd_ptr + pid, rstd)
 
+
 @triton.jit
 def _layernorm_apply_kernel(
-    x_ptr,         # (rows, M)
-    w_ptr,         # (M,)
-    b_ptr,         # (M,)
-    mean_ptr,      # (rows,)
-    rstd_ptr,      # (rows,)
-    y_ptr,         # (rows, M)
-    M,             # int
+    x_ptr,  # (rows, M)
+    w_ptr,  # (M,)
+    b_ptr,  # (M,)
+    mean_ptr,  # (rows,)
+    rstd_ptr,  # (rows,)
+    y_ptr,  # (rows, M)
+    M,  # int
     BLOCK_SIZE: tl.constexpr,
 ):
     pid_row = tl.program_id(axis=0)

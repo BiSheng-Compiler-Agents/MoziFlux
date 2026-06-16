@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _rowwise_cumsum_kernel(
     x_ptr,
@@ -9,8 +10,10 @@ def _rowwise_cumsum_kernel(
     carry_out_ptr,
     N,
     chunk_start,
-    stride_x0, stride_x1,
-    stride_y0, stride_y1,
+    stride_x0,
+    stride_x1,
+    stride_y0,
+    stride_y1,
     BLOCK_N: tl.constexpr,
 ):
     row = tl.program_id(0)
