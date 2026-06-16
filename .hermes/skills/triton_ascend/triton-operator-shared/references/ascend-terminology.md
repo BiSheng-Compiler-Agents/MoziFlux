@@ -48,11 +48,11 @@ aligned_bytes = ((actual_bytes + 31) // 32) * 32
 
 ## HIVM IR Mapping Reference
 ### Triton Constructs to HIVM IR Mapping
-| Triton Construct | HIVM IR | Description | 
+| Triton Construct | HIVM IR | Description |
 |------------------|---------|-------------|
-| tl.load() | hivm.load | PIPE_MTE2 (GM→UB) | 
-| tl.store() | hivm.store | PIPE_MTE3 (UB→GM) | 
-| tl.dot() | Cube mmad | PIPE_M (matrix computation) | 
+| tl.load() | hivm.load | PIPE_MTE2 (GM→UB) |
+| tl.store() | hivm.store | PIPE_MTE3 (UB→GM) |
+| tl.dot() | Cube mmad | PIPE_M (matrix computation) |
 | Element operations (add/sub/mul) | hivm.vexp, hivm.vabs, hivm.vadd | PIPE_V (vector computation) |
 | al.parallel(bind_sub_block=True) | get_sub_block_idx/get_sub_block_num | Distribute to vector cores |
 | sync_block_set/wait | hivm.sync_block [SET/WAIT] | Cube-Vector signal synchronization |
@@ -61,11 +61,11 @@ aligned_bytes = ((actual_bytes + 31) // 32) * 32
 | tl.sort() | hivm.sort | Hardware-accelerated sort |
 
 ### HIVM Instruction Pipeline Mapping
-| HIVM Pipe | Corresponding Triton Operations | Description | 
+| HIVM Pipe | Corresponding Triton Operations | Description |
 |-----------|---------------------------------|-------------|
-| PIPE_S | Scalar computation | Integer division, loop control | 
-| PIPE_V | Vector computation | Element-wise ops, reduction, activation | 
-| PIPE_M | Matrix computation | tl.dot, matrix multiplication | 
-| PIPE_MTE1 | UB ↔ GM | Vector tl.load/tl.store | 
-| PIPE_MTE2 | L1 ↔ GM | Cube input loading | 
+| PIPE_S | Scalar computation | Integer division, loop control |
+| PIPE_V | Vector computation | Element-wise ops, reduction, activation |
+| PIPE_M | Matrix computation | tl.dot, matrix multiplication |
+| PIPE_MTE1 | UB ↔ GM | Vector tl.load/tl.store |
+| PIPE_MTE2 | L1 ↔ GM | Cube input loading |
 | PIPE_MTE3 | L1 ↔ GM | Cube result write-back |

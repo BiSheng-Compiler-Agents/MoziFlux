@@ -12,7 +12,7 @@ Keywords: code review, static analysis.
 ### Severity Levels
 
 | Level | Meaning | Typical Issues |
-|-------|---------|-----------------| 
+|-------|---------|-----------------|
 | **P0** | Guaranteed crash or incorrect results | Missing mask, core type mismatch, atomic loop deadlock |
 | **P1** | High probability of precision/functionality issues | Reduction without upcasting, Softmax without max subtraction |
 | **P2** | Performance/maintainability | Redundant memory access, unaligned BLOCK |

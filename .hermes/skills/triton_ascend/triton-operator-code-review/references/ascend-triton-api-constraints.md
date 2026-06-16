@@ -22,11 +22,11 @@ block_ptr = tl.advance(block_ptr, (0, BLOCK_N))
 ```
 
 ## 2. BLOCK_SIZE Constraints (Statically Checkable)
-| Check Item | How to Identify in Code | 
+| Check Item | How to Identify in Code |
 |------------|-------------------------|
 | BLOCK_SIZE not constexpr | Function parameter missing : tl.constexpr declaration |
 | Matrix BLOCK not multiple of 16 | Literals like BLOCK_M=100, BLOCK_N=50 |
-| BLOCK_K not aligned | Not calculated according to kalign = 32 // dtype_bytes | 
+| BLOCK_K not aligned | Not calculated according to kalign = 32 // dtype_bytes |
 
 ```python
 # BLOCK_K alignment (from official test cases)
@@ -38,9 +38,9 @@ BLOCK_K = min(max(K, kalign), 32)
 ## 3. Precision Constraints (Statically Checkable)
 | Code Pattern | Issue |
 |--------------|-------|
-| tl.sum(x_fp16, ...) without preceding .to(tl.float32) | Reduction without upcasting | 
+| tl.sum(x_fp16, ...) without preceding .to(tl.float32) | Reduction without upcasting |
 | tl.dot(a, b) without explicit out_dtype | fp32 default for floats, only int32 available for int8; explicit specification not required |
-| tl.exp(x) instead of tl.exp(x - max_x) | Softmax numerically unstable | 
+| tl.exp(x) instead of tl.exp(x - max_x) | Softmax numerically unstable |
 
 **Matrix Multiplication Precision Pattern (from official test cases):**
 ```python
@@ -63,8 +63,8 @@ c = accumulator.to(c_ptr.dtype.element_ty)
 | Code Pattern | Issue |
 |--------------|-------|
 | Literals like grid = (20,) | Hardcoded core count |
-| Using num_vectorcore for matrix kernel | Kernels with tl.dot must use AI Core | 
-| Matrix multiplication without tl.dot (implementing matmul/GEMV with element-wise multiply-add) | Cube Core throughput far exceeds Vector Core; even for N=1, must pad and use tl.dot | 
+| Using num_vectorcore for matrix kernel | Kernels with tl.dot must use AI Core |
+| Matrix multiplication without tl.dot (implementing matmul/GEMV with element-wise multiply-add) | Cube Core throughput far exceeds Vector Core; even for N=1, must pad and use tl.dot |
 | Using num_aicore for element-wise kernel | Kernels without tl.dot must use Vector Core |
 
 ```python
@@ -86,14 +86,14 @@ num_vectorcore = driver.active.utils.get_device_properties(device)["num_vectorco
 
 The following constraints are based on actual enablement status from official test cases:
 
-| Op | Constraint | Test Case Status | 
+| Op | Constraint | Test Case Status |
 |----|------------|------------------|
 | tl.dot | Inputs only support int8/fp16/fp32/bf16 | generalization_cases enabled |
-| dot_scaled | ⚠ Conditionally supported (lhs/rhs only bf16/fp16, scale only int8 ue8m0, output only fp32) | Conditionally enabled | 
-| tl.sort | Supports 1D~5D | Both generalization_cases and pytest_ut enabled | 
+| dot_scaled | ⚠ Conditionally supported (lhs/rhs only bf16/fp16, scale only int8 ue8m0, output only fp32) | Conditionally enabled |
+| tl.sort | Supports 1D~5D | Both generalization_cases and pytest_ut enabled |
 | tl.gather | Supports multiple axes (axis 0~4) | generalization_cases enabled; pytest_ut marked skip |
-| permute/trans (2,1,0) | 3D non-adjacent axis transpose | generalization_cases commented out; pytest_ut test_permute_full enabled | 
-| permute/trans | Does not support int64 | generalization_cases enabled but excludes int64 | 
+| permute/trans (2,1,0) | 3D non-adjacent axis transpose | generalization_cases commented out; pytest_ut test_permute_full enabled |
+| permute/trans | Does not support int64 | generalization_cases enabled but excludes int64 |
 | tensor_descriptor | make/load/store must be used together | generalization_cases enabled |
 
 ## 7. Code Pattern Constraints (Statically Checkable)
@@ -102,14 +102,14 @@ The following constraints are based on actual enablement status from official te
 | for i in range(N): in kernel | When loop count is small and fixed, consider tl.static_range; for large loops, benefit may be unclear or even degrading, should not blindly replace |
 | import numpy/import xxx in kernel | Cannot call third-party libraries inside kernel |
 | BLOCK_SIZE parameter missing : tl.constexpr | Must be compile-time constant |
-| tensor.item() in host loop | CPU-NPU synchronization bottleneck | 
+| tensor.item() in host loop | CPU-NPU synchronization bottleneck |
 
 ## 8. Control Flow Constraints (Statically Checkable)
 
 Triton kernels compile to MLIR structured control flow (scf.for/scf.while) and do not support early exit.
-| Code Pattern | Issue | 
+| Code Pattern | Issue |
 |--------------|-------|
-| return inside for/while loop | Compilation error: "Cannot have return statements inside while or for" (including returns in child functions, transitively checked) | 
+| return inside for/while loop | Compilation error: "Cannot have return statements inside while or for" (including returns in child functions, transitively checked) |
 | break inside for loop | Compilation error: "unsupported AST node type: Break" |
 ```python
 # ❌ return inside loop
@@ -141,8 +141,8 @@ Triton tensors do not support Python-style [] subscript operations (both reading
 | Code Pattern | Issue |
 |--------------|-------|
 |tensor[i] = val | AssertionError (ctx not Load in visit_Subscript) |
-| val = tensor[i] | AssertionError | 
-| tensor[i:j] slicing | Compilation error, Python slicing not supported | 
+| val = tensor[i] | AssertionError |
+| tensor[i:j] slicing | Compilation error, Python slicing not supported |
 ```python
 # ❌ Index assignment
 local_vector = tl.zeros((BLOCK_SIZE,), dtype=tl.float32)
@@ -210,7 +210,7 @@ Controls type conversion overflow behavior:
 | Parameter | Behavior | Performance |
 |-----------|----------|-------------|
 | "trunc" (default) | Truncates high bits | Fast |
-| "saturate" | Clamps to target type min/max | On A2/A3, goes through FP32, slower | 
+| "saturate" | Clamps to target type min/max | On A2/A3, goes through FP32, slower |
 
 ```python
 # ✅ Correct usage: explicitly specify when saturation is needed

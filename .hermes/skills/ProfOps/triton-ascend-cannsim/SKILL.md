@@ -422,7 +422,7 @@ representative trace. Core 0 is not guaranteed to be representative.
 The trace_core0.json file contains a full execution trace for all events, which is too large of a data dump.
 So, DO NOT attempt to read that fully into your context. Instead, run the accompanying aggregation/ summarizing script as below,
 which will output a condensed summary of the key metrics in a human/LLM readable format into a file at the same location named trace_summary.txt
-```bash 
+```bash
 python scripts/aggregate_trace.py /path/to/report/trace_core0.json
 ```
 
@@ -478,7 +478,7 @@ Main resources:
 Note on annotations BOTTLENECK and CRITICAL:
 
 * BOTTLENECK: the pipeline with the highest busy_cyc (most occupied pipeline in the trace window).
-* CRITICAL: an instruction that either has the highest total_cyc across all top instructions, 
+* CRITICAL: an instruction that either has the highest total_cyc across all top instructions,
   or whose per-event average duration (avg_cyc) is ≥ 25% of total wall-clock cycles.
 
 ---
