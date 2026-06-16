@@ -105,7 +105,7 @@ Retrieved episodes:
 > 1. Strip hyphens / colons / quotes from the query and retry
 >    (`"element wise softmax"` instead of `"element-wise softmax"`).
 > 2. Patch the plugin's `_retrieve_episodes` in
->    `~/CompilerClaw/.hermes/plugins/kernel-episodes/__init__.py` to call a
+>    `~/CompilerClaw/.hermes/plugins/kernel_episodes/__init__.py` to call a
 >    `_sanitize_fts_query()` helper that:
 >      - splits the query on whitespace,
 >      - strips FTS-special chars (`:` `-` `"` `(` `)` `*` `^`) from each token,

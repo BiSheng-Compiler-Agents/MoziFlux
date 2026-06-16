@@ -7,7 +7,7 @@ description: >
   CANN 9.0.0 + Ascend910_9589 target.
 tags: [triton, ascend, npu, cannsim, cann, simulation]
 required_plugins:
-  - cannsim-remote
+  - cannsim_remote
 metadata:
   hermes:
     requires_tools:
@@ -106,7 +106,7 @@ f"--target={NPUUtils().get_arch()}",
 f"--target={get_ascend_arch_from_env() or NPUUtils().get_arch()}",
 ```
 
-> Both patches are idempotent. The `cannsim-remote` Hermes plugin applies them
+> Both patches are idempotent. The `cannsim_remote` Hermes plugin applies them
 > automatically on the remote machine before each run.
 
 ---
@@ -330,7 +330,7 @@ runs the build step inside `run_kernel.sh`, runs `cannsim record`, runs
 `trace_core0.json` back to `result["trace_local_path"]`.
 
 
-### Run on remote via `cannsim-remote` plugin
+### Run on remote via `cannsim_remote` plugin
 
 ```python
 cannsim_remote_run(
@@ -483,9 +483,9 @@ Note on annotations BOTTLENECK and CRITICAL:
 
 ---
 
-## Remote cannsim execution via `cannsim-remote` Hermes plugin
+## Remote cannsim execution via `cannsim_remote` Hermes plugin
 
-**Required plugin:** `cannsim-remote`
+**Required plugin:** `cannsim_remote`
 
 Use this when cannsim needs ≥32 GB RAM not available locally. The plugin:
 1. Auto-applies the triton patches on the remote (idempotent, skips if already applied)
@@ -540,7 +540,7 @@ Returns: `success`, `job_name`, `remote_job_dir`, `remote_experiment_dir`, `patc
 >    If your build emits the binary to `cannsim_host/build/bin/`, `run_kernel.sh`
 >    must copy BOTH the binary AND the npubin into `$SCRIPT_DIR` before exec.
 
-### Pitfalls discovered running cannsim-remote in practice
+### Pitfalls discovered running cannsim_remote in practice
 
 - **conda not on PATH over SSH** — non-interactive SSH sessions don't source
   `.bashrc`. Search common conda locations: `~/miniconda3/bin/conda`,
@@ -614,13 +614,13 @@ index decomposition, and the **correct CANN 9.0.0 `cannsim report` command**
 **Key pitfall: do NOT pass `-o <output_dir>` to `cannsim record`.**
 When `-o` is used, cannsim changes CWD to the timestamped subdir, so
 `./log_ca` is not found → `instr.bin` may be truncated → no usable trace.
-The `cannsim-remote` plugin never uses `-o` and handles this correctly.
+The `cannsim_remote` plugin never uses `-o` and handles this correctly.
 
 ---
 
 ## Pitfalls
 
-### Handled automatically by the `cannsim-remote` plugin
+### Handled automatically by the `cannsim_remote` plugin
 These issues do NOT require action when using `cannsim_remote_run` — the plugin
 takes care of them:
 - **`-o <dir>` on `cannsim record`** — plugin never passes `-o`; always cd's into job dir

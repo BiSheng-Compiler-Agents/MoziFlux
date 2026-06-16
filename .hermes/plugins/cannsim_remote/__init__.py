@@ -1,5 +1,5 @@
 """
-cannsim-remote plugin
+cannsim_remote plugin
 =====================
 Transfers a local directory (containing a compiled Triton npubin + C++ host
 source files + run script) to a remote machine via SFTP, patches the remote
@@ -258,7 +258,7 @@ def _cannsim_remote_run(
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
     try:
-        logger.info(f"cannsim-remote: connecting to {user}@{host}:{port}")
+        logger.info(f"cannsim_remote: connecting to {user}@{host}:{port}")
         ssh.connect(host, port=port, username=user, password=password)
 
         # 1. Resolve remote $HOME (SFTP cannot expand ~)
@@ -278,7 +278,7 @@ def _cannsim_remote_run(
 
         # 3. Upload local_dir contents via SFTP
         logger.info(
-            f"cannsim-remote: uploading {local_dir} → {remote_job_dir}")
+            f"cannsim_remote: uploading {local_dir} → {remote_job_dir}")
         sftp = ssh.open_sftp()
         try:
             sftp.chdir(remote_job_dir)
@@ -291,9 +291,9 @@ def _cannsim_remote_run(
         _ssh_exec(ssh, f"chmod +x {remote_job_dir}/*", timeout=10)
 
         # 5. Apply triton patches on remote
-        logger.info("cannsim-remote: applying triton patches on remote...")
+        logger.info("cannsim_remote: applying triton patches on remote...")
         patch_ok, patch_log = _apply_remote_patches(ssh, conda_env)
-        logger.info(f"cannsim-remote: patch result:\n{patch_log}")
+        logger.info(f"cannsim_remote: patch result:\n{patch_log}")
         if not patch_ok:
             return {
                 "success": False,
@@ -313,7 +313,7 @@ def _cannsim_remote_run(
             f"$CONDA_BIN run -n {conda_env} bash -c "
             f"'source {setenv} && cd {remote_job_dir} && {effective_build_cmd}'"
         )
-        logger.info(f"cannsim-remote: building binary: {build_full_cmd}")
+        logger.info(f"cannsim_remote: building binary: {build_full_cmd}")
         rc, build_out, build_err = _ssh_exec(ssh, build_full_cmd, timeout=300)
         build_log = (build_out + "\n" + build_err).strip()
         if rc != 0:
@@ -322,7 +322,7 @@ def _cannsim_remote_run(
                 "error": f"Build step failed (exit {rc}):\n{build_log}",
                 "build_log": build_log,
             }
-        logger.info(f"cannsim-remote: build OK:\n{build_log[-1000:]}")
+        logger.info(f"cannsim_remote: build OK:\n{build_log[-1000:]}")
 
         # 7. Run cannsim record — wrap the BINARY, not the run script
         #    Flags MUST come before the -- separator.
@@ -341,7 +341,7 @@ def _cannsim_remote_run(
             f"cd {remote_job_dir} && "
             f"cannsim record -s {soc} -- {remote_binary}").strip()
 
-        logger.info(f"cannsim-remote: running: {cannsim_record_cmd}")
+        logger.info(f"cannsim_remote: running: {cannsim_record_cmd}")
         rc, record_out, record_err = _ssh_exec(ssh,
                                                cannsim_record_cmd,
                                                timeout=timeout)
@@ -378,7 +378,7 @@ def _cannsim_remote_run(
 
             if not exp_dir:
                 logger.warning(
-                    "cannsim-remote: experiment dir not found; skipping report"
+                    "cannsim_remote: experiment dir not found; skipping report"
                 )
                 report_log = "experiment dir not found"
             else:
@@ -390,7 +390,7 @@ def _cannsim_remote_run(
                     f"cd {exp_dir} && "
                     f"cannsim report -e {exp_dir} -o {report_out_dir} -n 0")
                 logger.info(
-                    f"cannsim-remote: running report: {cannsim_report_cmd}")
+                    f"cannsim_remote: running report: {cannsim_report_cmd}")
                 rc_rep, rep_out, rep_err = _ssh_exec(ssh,
                                                      cannsim_report_cmd,
                                                      timeout=report_timeout)
@@ -425,11 +425,11 @@ def _cannsim_remote_run(
                             raw = f.read()
                         trace_json_content = raw[:200_000]
                         logger.info(
-                            f"cannsim-remote: trace downloaded to {trace_local_path} ({len(raw)} bytes)"
+                            f"cannsim_remote: trace downloaded to {trace_local_path} ({len(raw)} bytes)"
                         )
                     else:
                         logger.warning(
-                            "cannsim-remote: trace_core0.json not found after report"
+                            "cannsim_remote: trace_core0.json not found after report"
                         )
 
         return {
@@ -447,7 +447,7 @@ def _cannsim_remote_run(
         }
 
     except Exception as e:
-        logger.exception("cannsim-remote: unexpected error")
+        logger.exception("cannsim_remote: unexpected error")
         return {"success": False, "error": str(e)}
     finally:
         ssh.close()

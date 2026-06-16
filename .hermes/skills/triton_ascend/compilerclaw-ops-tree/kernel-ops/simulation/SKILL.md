@@ -83,7 +83,7 @@ f"--target={NPUUtils().get_arch()}",
 f"--target={get_ascend_arch_from_env() or NPUUtils().get_arch()}",
 ```
 
-> Both patches are idempotent. The `cannsim-remote` Hermes plugin applies them
+> Both patches are idempotent. The `cannsim_remote` Hermes plugin applies them
 > automatically on the remote machine before each run.
 
 ---
@@ -408,7 +408,7 @@ Threshold empirically: HW ≤ 1024 → persistent; HW > 1024 → loop kernel.
 
 ## Pitfalls
 
-Handled automatically by the `cannsim-remote` plugin (no action needed when using `cannsim_remote_run`):
+Handled automatically by the `cannsim_remote` plugin (no action needed when using `cannsim_remote_run`):
 - `-o <dir>` on `cannsim record` — plugin never passes `-o`
 - `conda: command not found` in SSH — plugin finds conda via full path
 - `~` not expanded by paramiko SFTP — plugin resolves `$HOME` over SSH

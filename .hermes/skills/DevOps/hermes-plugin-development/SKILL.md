@@ -220,9 +220,9 @@ This is profile-safe.
 
 ---
 
-## 8. Real-World Plugin: phoenix-tracer
+## 8. Real-World Plugin: phoenix_tracer
 
-A working Phoenix/OTel tracer plugin lives at `~/.hermes/plugins/phoenix-tracer/`.
+A working Phoenix/OTel tracer plugin lives at `~/.hermes/plugins/phoenix_tracer/`.
 It registers 7 hooks and sends spans to Arize Phoenix via OTLP/gRPC, producing a
 3-level span hierarchy: `hermes.session` → `hermes.turn` → `hermes.tool.<name>`.
 

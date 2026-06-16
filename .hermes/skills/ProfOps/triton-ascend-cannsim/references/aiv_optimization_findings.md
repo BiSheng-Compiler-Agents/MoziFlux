@@ -141,7 +141,7 @@ cannsim report -e ./cannsim_<timestamp>_<binary> \
 - `-n 0` — core 0 (the AIV core); try 0–5 if core 0 shows only SCALAR work
 - **No `--timeline` flag** — it does not exist in CANN 9.0.0; argparse rejects it
 
-The `cannsim-remote` plugin handles all of this automatically via `cannsim_remote_run(gen_report=True)`.
+The `cannsim_remote` plugin handles all of this automatically via `cannsim_remote_run(gen_report=True)`.
 
 Key fields in the Chrome-trace JSON (analysed via aggregate_trace.py):
 - Wall cycles: `t_end - t_start` across all X-events
