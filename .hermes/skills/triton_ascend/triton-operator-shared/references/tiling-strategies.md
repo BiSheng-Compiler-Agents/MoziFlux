@@ -286,7 +286,7 @@ The NPU chip is more affinity to 512-byte aligned scenarios. In matrix multiplic
 | Data Type | Number of Elements for 512B | Cube Granularity Multiple |
 |-----------|-----------------------------|---------------------------|
 | FP16 (2B) | 256 | 16 |
-| FP32 (4B) | 128 | 8 | 
+| FP32 (4B) | 128 | 8 |
 | BF16 (2B) | 256 | 16 |
 
 **Optimal BLOCK Sizes (FP16 matrix multiplication):**

@@ -1,6 +1,6 @@
 ---
 name: triton-operator-performance-optim
-description: Optimize Ascend NPU-native Triton operator performance. Solve UB overflow, improve Cube utilization, design tiling strategies. 
+description: Optimize Ascend NPU-native Triton operator performance. Solve UB overflow, improve Cube utilization, design tiling strategies.
 tags: [triton, ascend, npu, optimization, kernelbench, performance]
 metadata:
   hermes:
@@ -32,7 +32,7 @@ Review the algorithm itself before optimization. An inefficient algorithm has in
 ### Phase 1: Hierarchical Evaluation
 
 1. **Quick Screening**: If real NPU hardware is available, measure end-to-end with `time.time()` (cover small/medium/large sizes). Done if target is met.
-2. **Precise Diagnosis**: Use `cannsim` to measure kernel-side time when target is not met, identify the real bottleneck. Checkout `triton-ascend-cannsim` skill for more details. 
+2. **Precise Diagnosis**: Use `cannsim` to measure kernel-side time when target is not met, identify the real bottleneck. Checkout `triton-ascend-cannsim` skill for more details.
 
 ### Phase 2: Bottleneck Optimization
 

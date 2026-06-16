@@ -158,7 +158,7 @@ cols_cmp = cols.to(tl.float32)
 xbar = tl.where(cols_cmp < N, x - mean, 0.0)
 ```
 
---- 
+---
 
 ## Common Issues
 ### UB Overflow
@@ -202,10 +202,10 @@ xbar = tl.where(cols_cmp < N, x - mean, 0.0)
 ## Platform Differences (A2/A3 vs 910_95)
 | Feature | A2/A3 | 910_95 |
 |---------|-------|--------|
-| tl.multibuffer default | ✅ | ❌ | 
-| auto_bind_sub_block default | ✅ | ❌ | 
+| tl.multibuffer default | ✅ | ❌ |
+| auto_bind_sub_block default | ✅ | ❌ |
 | FP8 support | ❌ | ✅ |
-| sync_solver | ✅ | ❌ | 
+| sync_solver | ✅ | ❌ |
 | inject_block_all | ✅ | ❌ |
 | overflow_mode="saturate" | Via FP32 intermediate (slower) | Native support |
 

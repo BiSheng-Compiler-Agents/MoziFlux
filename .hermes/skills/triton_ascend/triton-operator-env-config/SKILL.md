@@ -26,7 +26,7 @@ description: Validate and build the Triton operator development environment on A
 **Environment checks must be performed in sequence, as each step depends on the success of the previous one.**
 
 ## Prerequisite: Get Latest Compatibility Requirements (MANDATORY)
-### Conda 
+### Conda
 1. For conda installation, first check for an existing conda environment using `conda init bash`. If it exists, skip to step 5. If not, proceed to step 2 to install.
 2. Run `uname -m` to confirm the current system architecture.
    - If the system architecture is aarch64, execute: `wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh`
@@ -38,18 +38,18 @@ description: Validate and build the Triton operator development environment on A
 
 The recommended python version as of June 2026 is 3.11.
 
-### CANN 
+### CANN
 
 You can download the CANN package from the [official website](https://www.hiascend.com/cann/download).
 
 The recommended version as of June 2026 is 9.0.0.
-Intallation in conda, Ubuntu OS, 950 Ascend product series, and x86 cpu architecture: 
-```bash 
+Intallation in conda, Ubuntu OS, 950 Ascend product series, and x86 cpu architecture:
+```bash
 #conda's directory requires 755 permissions
-conda config --add channels https://repo.huaweicloud.com/ascend/repos/conda/ 
+conda config --add channels https://repo.huaweicloud.com/ascend/repos/conda/
 conda install ascend::cann-toolkit==9.0.0
 conda install ascend::cann-950-ops==9.0.0
-``` 
+```
 
 Verification:
 ```bash
@@ -60,7 +60,7 @@ python3 -c "import acl;print(acl.get_soc_name())"
 
 ### torch_npu
 The recommended version as of June 2026 is 2.7.1.
-You should first install the torch cpu version:  
+You should first install the torch cpu version:
 ```bash
 pip install torch==2.7.1+cpu --index-url https://download.pytorch.org/whl/cpu
 ```
@@ -77,8 +77,3 @@ The recommended version as of June 2026 is 3.2.1:
 ```bash
 pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
 ```
-
-
-
-
-
