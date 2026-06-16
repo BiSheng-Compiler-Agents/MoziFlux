@@ -43,7 +43,6 @@ Usage:
 import argparse
 import json
 import logging
-import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -174,7 +173,6 @@ def kernel_is_complete(kernel_dir: Path) -> tuple[bool, list[str]]:
     Returns (is_complete, list_of_missing_files).
     """
     files = [f.name for f in kernel_dir.glob("*.py")]
-    baseline = get_baseline_file(kernel_dir)
     missing = []
 
     has_opt = any(f.startswith("opt_") for f in files)
@@ -253,7 +251,7 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
     try:
         mark_kernel(state, name, "running",
                     f"started {datetime.now(timezone.utc).isoformat()}")
-        result = agent.run_conversation(
+        result = agent.run_conversation(  # noqa: F841
             user_message=prompt,
             task_id=f"kernelbench-{name}",
         )

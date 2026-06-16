@@ -48,7 +48,10 @@ class ModelNew(nn.Module):
 
         y = torch.empty_like(x_contig)
         block_size = 4096
-        grid = lambda meta: (triton.cdiv(n_elements, block_size), )
+
+        def grid(meta):
+            return (triton.cdiv(n_elements, block_size), )
+
         _gelu_fwd_kernel[grid](
             x_contig.view(-1),
             y.view(-1),

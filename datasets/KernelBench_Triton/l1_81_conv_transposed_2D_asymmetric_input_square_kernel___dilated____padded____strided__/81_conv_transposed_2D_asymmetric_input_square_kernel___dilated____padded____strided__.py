@@ -17,7 +17,7 @@ def _flip_transpose_4d_kernel(
     offs = base + tl.arange(0, BLOCK)
     mask = offs < n_elements
 
-    stride_out_kw = 1
+    stride_out_kw = 1  # noqa: F841
     stride_out_kh = K
     stride_out_ci = K * K
     stride_out_co = Cin * stride_out_ci
@@ -69,7 +69,7 @@ def _stride_insert_zeros_2d_kernel(
     offs = base + tl.arange(0, BLOCK)
     mask = offs < n_elements
 
-    stride_w_linear = 1
+    stride_w_linear = 1  # noqa: F841
     stride_h_linear = W
     stride_c_linear = H * W
     stride_n_linear = C * stride_c_linear

@@ -9,7 +9,7 @@ def _fused_linear_sigmoid_sum_kernel(
         b_ptr,  # float* [H]
         out_ptr,  # float* [B, 1]
         B: tl.constexpr,
-        I: tl.constexpr,
+        I: tl.constexpr,  # noqa: E741
         H: tl.constexpr,
         stride_xb,
         stride_xi,

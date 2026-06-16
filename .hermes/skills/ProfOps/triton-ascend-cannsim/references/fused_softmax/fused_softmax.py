@@ -8,7 +8,9 @@ This script is intended to run on the remote cannsim machine via run_kernel.sh,
 not locally. It requires a CANN-patched triton-ascend environment (compilerclaw).
 run_kernel.sh invokes it automatically as part of the build step.
 """
-import os, glob, shutil
+import os
+import glob
+import shutil
 
 DUMP_DIR = "/tmp/triton_dump_softmax"
 NPUBIN_DEST = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -19,10 +21,11 @@ os.environ["TRITON_DUMP_DIR"] = DUMP_DIR
 os.environ["TRITON_ASCEND_ARCH"] = "Ascend910_9589"
 os.environ["TRITON_COMPILE_ONLY"] = "1"
 
-import triton
-import triton.language as tl
-from triton.compiler import compile, ASTSource
-from triton.backends.compiler import GPUTarget
+if True:  # noqa: E402
+    import triton
+    import triton.language as tl
+    from triton.compiler import compile, ASTSource
+    from triton.backends.compiler import GPUTarget
 
 # ---------------------------------------------------------------------------
 # Fused Softmax kernel

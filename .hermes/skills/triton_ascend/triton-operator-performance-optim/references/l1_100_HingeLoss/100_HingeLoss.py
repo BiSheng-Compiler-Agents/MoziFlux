@@ -85,7 +85,9 @@ class ModelNew(nn.Module):
         else:
             num_warps, num_stages = 1, 1
 
-        grid = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]), )
+        def grid(meta):
+            return (triton.cdiv(N, meta["BLOCK_SIZE"]), )
+
         _hinge_loss_sum_kernel[grid](p,
                                      t,
                                      sum_buf,
