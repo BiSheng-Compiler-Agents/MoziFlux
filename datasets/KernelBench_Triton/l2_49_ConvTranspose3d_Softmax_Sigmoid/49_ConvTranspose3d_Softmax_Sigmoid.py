@@ -43,7 +43,7 @@ def _softmax_sigmoid_fused_5d(
         m = tl.maximum(m, tl.max(x.to(tl.float32), axis=0))
         c0 += BLOCK_C
 
-    l = 0.0
+    l = 0.0  # noqa: E741
     c0 = 0
     while c0 < C:
         ch = c0 + ch_offsets
@@ -51,7 +51,7 @@ def _softmax_sigmoid_fused_5d(
         ptrs = x_ptr + base + (ch * stride_c)
         x = tl.load(ptrs, mask=row_mask & ch_mask,
                     other=-float("inf")).to(tl.float32)
-        l += tl.sum(tl.exp(x - m), axis=0)
+        l += tl.sum(tl.exp(x - m), axis=0)  # noqa: E741
         c0 += BLOCK_C
 
     inv_l = 1.0 / l

@@ -20,7 +20,7 @@ def _flip_transpose_5d(
     mask = offs < n_elements
 
     # Out tensor strides for [Cout, Cin, Kd, Kh, Kw]
-    stride_out_kw = 1
+    stride_out_kw = 1  # noqa: F841
     stride_out_kh = Kw
     stride_out_kd = Kh * Kw
     stride_out_ci = Kd * stride_out_kd

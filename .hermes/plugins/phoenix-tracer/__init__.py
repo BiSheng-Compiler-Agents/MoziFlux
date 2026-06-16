@@ -72,7 +72,6 @@ logger = logging.getLogger(__name__)
 
 # ── OTel setup ────────────────────────────────────────────────────────────────
 try:
-    from opentelemetry import context as context_api
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor

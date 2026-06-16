@@ -74,8 +74,10 @@ class ModelNew(nn.Module):
         is_fp = x_contig.dtype in (torch.float16, torch.bfloat16,
                                    torch.float32)
 
-        grid = lambda meta: (
-            (n_elements + meta["BLOCK_SIZE"] - 1) // meta["BLOCK_SIZE"], )
+        def grid(meta):
+            return ((n_elements + meta["BLOCK_SIZE"] - 1) //
+                    meta["BLOCK_SIZE"], )
+
         _relu_kernel[grid](
             x_contig.view(-1),
             y.view(-1),

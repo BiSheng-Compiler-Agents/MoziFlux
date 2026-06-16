@@ -97,7 +97,10 @@ class ModelNew(nn.Module):
             return 1 if x <= 1 else 1 << (x - 1).bit_length()
 
         BLOCK_SIZE = min(4096, max(256, next_pow2(N)))
-        grid = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]), )
+
+        def grid(meta):
+            return (triton.cdiv(N, meta["BLOCK_SIZE"]), )
+
         _hinge_loss_sum_generic_kernel[grid](p,
                                              t,
                                              sum_buf,

@@ -13,7 +13,7 @@ def _rowwise_linear_sum_kernel(
     wsum_ptr,  # (I,)
     out_ptr,  # (B,) result
     B: tl.constexpr,
-    I: tl.constexpr,
+    I: tl.constexpr,  # noqa: E741
     stride_x_b,
     stride_x_i,
     stride_wsum,
@@ -106,7 +106,6 @@ class ModelNew(nn.Module):
         if self._cache_key == current_key and self._cached_wsum is not None:
             return
 
-        weight_npu = weight.to(device=device)
         weight_fp32 = weight.to(device=device,
                                 dtype=torch.float32).contiguous()
         self._cached_wsum = weight_fp32.sum(dim=0).contiguous()
@@ -137,7 +136,7 @@ class ModelNew(nn.Module):
         # sum_j (x @ W^T + b)_j = x @ (sum_j W_j)^T + sum_j b_j
         # Cache the invariant weight/bias reductions in the wrapper and let the
         # Triton kernel only compute the rowwise dot product.
-        B, I = x.shape
+        B, I = x.shape  # noqa: E741
 
         x_c = x.contiguous()
         self._refresh_reduction_cache(x.device)

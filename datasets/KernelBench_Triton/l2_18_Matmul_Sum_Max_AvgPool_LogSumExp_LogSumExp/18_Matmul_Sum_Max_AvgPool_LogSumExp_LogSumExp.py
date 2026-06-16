@@ -8,7 +8,7 @@ def _rowwise_linear_sum_kernel(
     wsum_ptr,  # (I,)
     out_ptr,  # (B,) result
     B: tl.constexpr,
-    I: tl.constexpr,
+    I: tl.constexpr,  # noqa: E741
     stride_x_b,
     stride_x_i,
     stride_wsum,
@@ -73,8 +73,8 @@ def _fused_linear_sum_kernel(
     b_ptr,  # *f32 (O,) - can be dummy if O_b==0
     out_ptr,  # *f32 (B,)
     B,
-    I,
-    O,  # int32 sizes
+    I,  # noqa: E741
+    O,  # noqa: E741, int32 sizes
     stride_x_b,  # int32
     stride_x_i,  # int32
     stride_w_o,  # int32

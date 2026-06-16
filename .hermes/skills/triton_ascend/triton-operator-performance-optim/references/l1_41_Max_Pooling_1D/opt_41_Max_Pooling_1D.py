@@ -1,7 +1,5 @@
-import math
 import torch
 import torch.nn as nn
-import torch_npu
 import triton
 import triton.language as tl
 

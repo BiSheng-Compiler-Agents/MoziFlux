@@ -79,13 +79,13 @@ def _avgpool3d_gelu_kernel(x_ptr, y_ptr, N, C, D, H, W, Do, Ho, Wo, TOT_ROWS,
     w = tl.arange(0, BLOCK_W)
 
     # Precompute input/output strides
-    in_stride_w = 1
+    in_stride_w = 1  # noqa: F841
     in_stride_h = W
     in_stride_d = H * W
     in_stride_c = D * H * W
     in_stride_n = C * D * H * W
 
-    out_stride_w = 1
+    out_stride_w = 1  # noqa: F841
     out_stride_h = Wo
     out_stride_d = Ho * Wo
     out_stride_c = Do * Ho * Wo

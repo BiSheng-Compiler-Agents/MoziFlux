@@ -23,10 +23,8 @@ import sys
 from pathlib import Path
 
 import torch
-import torch.nn as nn
 import torch_npu  # noqa: F401
 import triton
-import triton.language as tl
 
 # ── Load baseline and optimized modules from sibling files ─────────────────────
 _DIR = Path(__file__).parent
@@ -140,11 +138,11 @@ def benchmark(label, mode):
     bias_flat = bias.reshape(-1)
 
     if mode == "torch_ref":
-        fn = lambda: _run_torch_ref(x, bias)
+        fn = lambda: _run_torch_ref(x, bias)  # noqa: E731
     elif mode == "baseline":
-        fn = lambda: _run_baseline(x, bias_flat)
+        fn = lambda: _run_baseline(x, bias_flat)  # noqa: E731
     else:
-        fn = lambda: _run_optimized(x, bias)
+        fn = lambda: _run_optimized(x, bias)  # noqa: E731
 
     return triton.testing.do_bench(fn, warmup=25, rep=200, return_mode="mean")
 

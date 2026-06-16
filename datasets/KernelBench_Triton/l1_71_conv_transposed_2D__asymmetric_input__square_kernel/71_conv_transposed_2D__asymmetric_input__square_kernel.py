@@ -17,7 +17,7 @@ def _flip_transpose_4d_kernel(
     offs = base + tl.arange(0, BLOCK)
     mask = offs < n_elements
 
-    stride_out_kw = 1
+    stride_out_kw = 1  # noqa: F841
     stride_out_kh = K
     stride_out_ci = K * K
     stride_out_co = Cin * stride_out_ci
