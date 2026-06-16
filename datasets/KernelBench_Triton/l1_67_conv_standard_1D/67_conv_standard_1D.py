@@ -1,22 +1,31 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def conv1d_fwd_kernel(
     x_ptr,  # float32[B, C, L_IN]
     w_ptr,  # float32[OC, C, K]
     y_ptr,  # float32[B, OC, L_OUT]
-    B, C, L_IN, OC, K,
-    STRIDE, PADDING, DILATION, L_OUT, CK,
+    B,
+    C,
+    L_IN,
+    OC,
+    K,
+    STRIDE,
+    PADDING,
+    DILATION,
+    L_OUT,
+    CK,
     BLOCK_OC: tl.constexpr,  # tile size in output-channel dimension
-    BLOCK_T: tl.constexpr,   # tile size in time/output-length dimension
-    BLOCK_P: tl.constexpr,   # tile size in reduction dimension (C*K)
+    BLOCK_T: tl.constexpr,  # tile size in time/output-length dimension
+    BLOCK_P: tl.constexpr,  # tile size in reduction dimension (C*K)
     NUM_P_ITERS: tl.constexpr,
 ):
     # Program IDs (PID logic must not be changed)
-    pid_t = tl.program_id(0)   # tile id for output length (time)
+    pid_t = tl.program_id(0)  # tile id for output length (time)
     pid_oc = tl.program_id(1)  # tile id for output channels
-    pid_b = tl.program_id(2)   # batch id
+    pid_b = tl.program_id(2)  # batch id
 
     # Tile start indices
     t_start = pid_t * BLOCK_T
@@ -24,8 +33,8 @@ def conv1d_fwd_kernel(
     b = pid_b
 
     # Indices in this tile
-    t_idx = t_start + tl.arange(0, BLOCK_T)            # [BLOCK_T]
-    oc_idx = oc_start + tl.arange(0, BLOCK_OC)         # [BLOCK_OC]
+    t_idx = t_start + tl.arange(0, BLOCK_T)  # [BLOCK_T]
+    oc_idx = oc_start + tl.arange(0, BLOCK_OC)  # [BLOCK_OC]
     tl.max_contiguous(t_idx, BLOCK_T)
     tl.max_contiguous(oc_idx, BLOCK_OC)
 
@@ -47,9 +56,9 @@ def conv1d_fwd_kernel(
 
         # Prefetch first chunk
         p0 = 0
-        p_idx = p0 + ar_p                             # [BLOCK_P]
-        ic_idx = p_idx // K                           # [BLOCK_P]
-        k_idx = p_idx % K                             # [BLOCK_P]
+        p_idx = p0 + ar_p  # [BLOCK_P]
+        ic_idx = p_idx // K  # [BLOCK_P]
+        k_idx = p_idx % K  # [BLOCK_P]
 
         pos = t_term + k_idx[:, None] * DILATION  # [BLOCK_P, BLOCK_T]
         mask_x = (p_idx < CK)[:, None] & (pos >= 0) & (pos < L_IN)
@@ -60,8 +69,10 @@ def conv1d_fwd_kernel(
         mask_p = p_idx < CK
         mask_w = mask_oc[:, None] & mask_p[None, :]
 
-        x_tile = tl.load(x_ptr + x_offsets, mask=mask_x, other=0.0)  # [BLOCK_P, BLOCK_T]
-        w_tile = tl.load(w_ptr + w_offsets, mask=mask_w, other=0.0)  # [BLOCK_OC, BLOCK_P]
+        x_tile = tl.load(x_ptr + x_offsets, mask=mask_x,
+                         other=0.0)  # [BLOCK_P, BLOCK_T]
+        w_tile = tl.load(w_ptr + w_offsets, mask=mask_w,
+                         other=0.0)  # [BLOCK_OC, BLOCK_P]
 
         # Iterate remaining chunks with prefetch of next
         for it in tl.static_range(1, NUM_P_ITERS):

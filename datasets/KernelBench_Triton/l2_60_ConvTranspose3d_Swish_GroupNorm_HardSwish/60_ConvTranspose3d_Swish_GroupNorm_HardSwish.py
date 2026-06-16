@@ -1,17 +1,24 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _swish_reduce_3d(
-    x_ptr,                 # *f32 [N, C, D, H, W]
-    sum_ptr,               # *f32 [N * G * D]
-    sumsq_ptr,             # *f32 [N * G * D]
-    N: tl.constexpr,       # int
-    C: tl.constexpr,       # int
-    D, H, W,               # int (runtime)
-    strideN, strideC, strideD, strideH, strideW,  # int strides
-    group_size,            # int
-    num_groups,            # int
+    x_ptr,  # *f32 [N, C, D, H, W]
+    sum_ptr,  # *f32 [N * G * D]
+    sumsq_ptr,  # *f32 [N * G * D]
+    N: tl.constexpr,  # int
+    C: tl.constexpr,  # int
+    D,
+    H,
+    W,  # int (runtime)
+    strideN,
+    strideC,
+    strideD,
+    strideH,
+    strideW,  # int strides
+    group_size,  # int
+    num_groups,  # int
     BLOCK_H: tl.constexpr,
     BLOCK_W: tl.constexpr,
 ):
@@ -37,13 +44,8 @@ def _swish_reduce_3d(
     mask = (h_idx < H) & (w_idx < W)
 
     # Offsets for the tile
-    offs = (
-        n * strideN
-        + c * strideC
-        + d * strideD
-        + h_idx * strideH
-        + w_idx * strideW
-    )
+    offs = (n * strideN + c * strideC + d * strideD + h_idx * strideH +
+            w_idx * strideW)
 
     # Load and compute Swish
     x = tl.load(x_ptr + offs, mask=mask, other=0.0)
@@ -62,20 +64,27 @@ def _swish_reduce_3d(
     tl.atomic_add(sum_ptr + idx, tile_sum)
     tl.atomic_add(sumsq_ptr + idx, tile_sumsq)
 
+
 @triton.jit
 def _apply_gn_hswish_3d(
-    x_ptr,                 # *f32 [N, C, D, H, W]
-    mean_ptr,              # *f32 [N * G]
-    invstd_ptr,            # *f32 [N * G]
-    weight_ptr,            # *f32 [C]
-    bias_ptr,              # *f32 [C]
-    y_ptr,                 # *f32 [N, C, D, H, W]
-    N: tl.constexpr,       # int
-    C: tl.constexpr,       # int
-    D, H, W,               # int
-    strideN, strideC, strideD, strideH, strideW,  # int strides
-    group_size,            # int
-    num_groups,            # int
+    x_ptr,  # *f32 [N, C, D, H, W]
+    mean_ptr,  # *f32 [N * G]
+    invstd_ptr,  # *f32 [N * G]
+    weight_ptr,  # *f32 [C]
+    bias_ptr,  # *f32 [C]
+    y_ptr,  # *f32 [N, C, D, H, W]
+    N: tl.constexpr,  # int
+    C: tl.constexpr,  # int
+    D,
+    H,
+    W,  # int
+    strideN,
+    strideC,
+    strideD,
+    strideH,
+    strideW,  # int strides
+    group_size,  # int
+    num_groups,  # int
     BLOCK_H: tl.constexpr,
     BLOCK_W: tl.constexpr,
 ):
@@ -96,13 +105,8 @@ def _apply_gn_hswish_3d(
     w_idx = w_start + tl.arange(0, BLOCK_W)[None, :]
     mask = (h_idx < H) & (w_idx < W)
 
-    offs = (
-        n * strideN
-        + c * strideC
-        + d * strideD
-        + h_idx * strideH
-        + w_idx * strideW
-    )
+    offs = (n * strideN + c * strideC + d * strideD + h_idx * strideH +
+            w_idx * strideW)
 
     # Load input and compute Swish again (no large intermediate buffer)
     x = tl.load(x_ptr + offs, mask=mask, other=0.0)

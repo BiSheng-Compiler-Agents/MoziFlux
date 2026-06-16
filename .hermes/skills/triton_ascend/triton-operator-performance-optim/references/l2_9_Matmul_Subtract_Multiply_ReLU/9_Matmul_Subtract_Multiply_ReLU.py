@@ -12,10 +12,15 @@ def _fused_linear_sub_mul_relu_kernel(
     C_ptr,  # [M, N]
     SUB_VAL: tl.constexpr,  # scalar subtraction value
     MUL_VAL: tl.constexpr,  # scalar multiplication value
-    M, N, K,
-    stride_am, stride_ak,
-    stride_wk, stride_wn,  # treat weight as [K, N] with these strides
-    stride_cm, stride_cn,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_wk,
+    stride_wn,  # treat weight as [K, N] with these strides
+    stride_cm,
+    stride_cn,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -33,8 +38,10 @@ def _fused_linear_sub_mul_relu_kernel(
     for k0 in range(0, K, BLOCK_K):
         offs_k = k0 + tl.arange(0, BLOCK_K)
 
-        a_ptrs = A_ptr + (offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak)
-        w_ptrs = W_ptr + (offs_k[:, None] * stride_wk + offs_n[None, :] * stride_wn)
+        a_ptrs = A_ptr + (offs_m[:, None] * stride_am +
+                          offs_k[None, :] * stride_ak)
+        w_ptrs = W_ptr + (offs_k[:, None] * stride_wk +
+                          offs_n[None, :] * stride_wn)
 
         a_mask = (mask_m[:, None]) & (offs_k[None, :] < K)
         w_mask = (offs_k[:, None] < K) & (mask_n[None, :])
@@ -52,7 +59,8 @@ def _fused_linear_sub_mul_relu_kernel(
     acc = (acc - SUB_VAL) * MUL_VAL
     acc = tl.maximum(acc, 0.0)
 
-    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm +
+                      offs_n[None, :] * stride_cn)
     tl.store(c_ptrs, acc, mask=(mask_m[:, None] & mask_n[None, :]))
 
 
@@ -60,6 +68,7 @@ class ModelNew(nn.Module):
     """
     Model that performs a matrix multiplication, subtraction, multiplication, and ReLU activation.
     """
+
     def __init__(
         self,
         in_features=10,
@@ -74,9 +83,11 @@ class ModelNew(nn.Module):
 
     def forward(self, x):
         if x.ndim != 2:
-            raise ValueError(f"Expected a 2D input tensor, but got shape {tuple(x.shape)}")
+            raise ValueError(
+                f"Expected a 2D input tensor, but got shape {tuple(x.shape)}")
         if x.dtype not in (torch.float16, torch.float32):
-            raise TypeError(f"Expected float16 or float32 input, but got {x.dtype}")
+            raise TypeError(
+                f"Expected float16 or float32 input, but got {x.dtype}")
         if x.shape[1] != self.linear.weight.shape[1]:
             raise ValueError(
                 f"Expected input feature size {self.linear.weight.shape[1]}, got {x.shape[1]}"
@@ -84,14 +95,19 @@ class ModelNew(nn.Module):
         if x.device.type != "npu":
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if self.linear.weight.device.type != "npu":
-            raise RuntimeError("ModelNew weights must be placed on Ascend NPU before execution")
+            raise RuntimeError(
+                "ModelNew weights must be placed on Ascend NPU before execution"
+            )
         if self.linear.bias is None or self.linear.bias.device.type != "npu":
-            raise RuntimeError("ModelNew bias must be present on Ascend NPU before execution")
+            raise RuntimeError(
+                "ModelNew bias must be present on Ascend NPU before execution")
         if self.linear.weight.dtype != x.dtype or self.linear.bias.dtype != x.dtype:
-            raise TypeError("ModelNew expects input, weight, and bias to share the same dtype")
+            raise TypeError(
+                "ModelNew expects input, weight, and bias to share the same dtype"
+            )
 
         W = self.linear.weight  # [out_features, in_features] == [N, K]
-        B = self.linear.bias    # [N]
+        B = self.linear.bias  # [N]
         M, K = x.shape
         N = W.shape[0]
 
@@ -107,23 +123,40 @@ class ModelNew(nn.Module):
 
         grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(N, BLOCK_N))
         _fused_linear_sub_mul_relu_kernel[grid](
-            x, W, B, out,
-            self.subtract_value, self.multiply_value,
-            M, N, K,
-            stride_am, stride_ak,
-            stride_wk, stride_wn,
-            stride_cm, stride_cn,
-            BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N, BLOCK_K=BLOCK_K,
-            num_warps=4, num_stages=3,
+            x,
+            W,
+            B,
+            out,
+            self.subtract_value,
+            self.multiply_value,
+            M,
+            N,
+            K,
+            stride_am,
+            stride_ak,
+            stride_wk,
+            stride_wn,
+            stride_cm,
+            stride_cn,
+            BLOCK_M=BLOCK_M,
+            BLOCK_N=BLOCK_N,
+            BLOCK_K=BLOCK_K,
+            num_warps=4,
+            num_stages=3,
         )
         return out
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
 subtract_value = 2.0
 multiply_value = 1.5
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features, subtract_value, multiply_value]

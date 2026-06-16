@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config({"BLOCK_SIZE": 1024}, num_warps=4, num_stages=2),
@@ -14,8 +15,10 @@ import triton.language as tl
 )
 @triton.jit
 def _fused_min_gelu_mul_kernel(
-    x_ptr, y_ptr,
-    add_value, multiply_value,
+    x_ptr,
+    y_ptr,
+    add_value,
+    multiply_value,
     n_elements,
     BLOCK_SIZE: tl.constexpr,
 ):

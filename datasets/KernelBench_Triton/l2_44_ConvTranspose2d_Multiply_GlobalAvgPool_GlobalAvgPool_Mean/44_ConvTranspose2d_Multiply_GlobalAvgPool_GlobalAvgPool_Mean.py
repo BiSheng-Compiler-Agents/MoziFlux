@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _global_avg_mul_kernel(
     x_ptr,

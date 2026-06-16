@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _touch_tensor_kernel(x_ptr, n_elements, BLOCK: tl.constexpr):
     pid = tl.program_id(0)

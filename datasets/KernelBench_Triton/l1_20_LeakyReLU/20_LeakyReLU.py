@@ -1,8 +1,10 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
-def _leaky_relu_kernel(x_ptr, y_ptr, n_elements, neg, BLOCK_SIZE: tl.constexpr):
+def _leaky_relu_kernel(x_ptr, y_ptr, n_elements, neg,
+                       BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     mask = offsets < n_elements

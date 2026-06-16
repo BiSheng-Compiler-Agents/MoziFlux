@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _touch_tensor_kernel(x_ptr, n_elements, BLOCK: tl.constexpr):
     pid = tl.program_id(axis=0)
@@ -8,13 +9,25 @@ def _touch_tensor_kernel(x_ptr, n_elements, BLOCK: tl.constexpr):
     mask = offs < n_elements
     _ = tl.load(x_ptr + offs, mask=mask, other=0.0)
 
+
 @triton.jit
 def _permute_flip_weight_kernel(
     src_ptr,  # (in_c, out_c_per_group, kH, kW)
     dst_ptr,  # (out_c, in_c_per_group, kH, kW)
-    s_wi, s_wo, s_wh, s_ww,
-    s_do, s_di, s_dh, s_dw,
-    in_c, out_c, kH, kW, groups, num_kw_tiles,
+    s_wi,
+    s_wo,
+    s_wh,
+    s_ww,
+    s_do,
+    s_di,
+    s_dh,
+    s_dw,
+    in_c,
+    out_c,
+    kH,
+    kW,
+    groups,
+    num_kw_tiles,
     BLOCK_KW: tl.constexpr,
 ):
     # Program IDs
@@ -42,21 +55,11 @@ def _permute_flip_weight_kernel(
     kw_flipped = (kW - 1) - kw_offsets
 
     # Source pointer (flip along h and w)
-    src_ptrs = (
-        src_ptr
-        + i_total * s_wi
-        + o_within * s_wo
-        + (kH - 1 - kh_idx) * s_wh
-        + kw_flipped * s_ww
-    )
+    src_ptrs = (src_ptr + i_total * s_wi + o_within * s_wo +
+                (kH - 1 - kh_idx) * s_wh + kw_flipped * s_ww)
     vals = tl.load(src_ptrs, mask=mask_kw, other=0, cache_modifier=".cg")
 
     # Destination pointer (permute to (out_c, in_c_per_group, kH, kW))
-    dst_ptrs = (
-        dst_ptr
-        + pid_o * s_do
-        + pid_i * s_di
-        + kh_idx * s_dh
-        + kw_offsets * s_dw
-    )
+    dst_ptrs = (dst_ptr + pid_o * s_do + pid_i * s_di + kh_idx * s_dh +
+                kw_offsets * s_dw)
     tl.store(dst_ptrs, vals, mask=mask_kw)

@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _softplus_kernel(
     x_ptr,  # *const input

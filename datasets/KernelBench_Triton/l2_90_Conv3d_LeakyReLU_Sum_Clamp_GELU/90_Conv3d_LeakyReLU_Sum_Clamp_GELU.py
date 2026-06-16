@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config({"BLOCK_SIZE": 16384}, num_warps=8, num_stages=4),
@@ -13,12 +14,12 @@ import triton.language as tl
 )
 @triton.jit
 def _fused_post_conv_kernel(
-    x_ptr,          # *float32, input from conv: [N, C, D, H, W] flattened
-    sum_ptr,        # *float32, per-channel bias: [C]
-    y_ptr,          # *float32, output buffer (same shape as x)
-    inner,          # int32, D*H*W
-    C,              # int32, number of channels
-    n_elements,     # int32, total number of elements in x
+    x_ptr,  # *float32, input from conv: [N, C, D, H, W] flattened
+    sum_ptr,  # *float32, per-channel bias: [C]
+    y_ptr,  # *float32, output buffer (same shape as x)
+    inner,  # int32, D*H*W
+    C,  # int32, number of channels
+    n_elements,  # int32, total number of elements in x
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)

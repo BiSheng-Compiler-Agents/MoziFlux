@@ -9,9 +9,9 @@ DEFAULT_OUT_FEATURES = 8192
 
 @triton.jit
 def _rowwise_linear_sum_kernel(
-    x_ptr,           # (B, I)
-    wsum_ptr,        # (I,)
-    out_ptr,         # (B,) result
+    x_ptr,  # (B, I)
+    wsum_ptr,  # (I,)
+    out_ptr,  # (B,) result
     B: tl.constexpr,
     I: tl.constexpr,
     stride_x_b,
@@ -81,6 +81,7 @@ class ModelNew(nn.Module):
         - LogSumExp
         - LogSumExp
     """
+
     def __init__(
         self,
         in_features=DEFAULT_IN_FEATURES,
@@ -106,12 +107,14 @@ class ModelNew(nn.Module):
             return
 
         weight_npu = weight.to(device=device)
-        weight_fp32 = weight.to(device=device, dtype=torch.float32).contiguous()
+        weight_fp32 = weight.to(device=device,
+                                dtype=torch.float32).contiguous()
         self._cached_wsum = weight_fp32.sum(dim=0).contiguous()
         if bias is None:
             self._cached_bias_sum = None
         else:
-            self._cached_bias_sum = bias.to(device=device, dtype=torch.float32).contiguous().sum()
+            self._cached_bias_sum = bias.to(
+                device=device, dtype=torch.float32).contiguous().sum()
         self._cache_key = current_key
 
     def forward(self, x):
@@ -124,7 +127,8 @@ class ModelNew(nn.Module):
         if x.device.type != "npu":
             raise RuntimeError("ModelNew expects Ascend NPU tensors.")
         if x.requires_grad:
-            raise RuntimeError("ModelNew Triton path does not support autograd inputs.")
+            raise RuntimeError(
+                "ModelNew Triton path does not support autograd inputs.")
 
         if self.linear.weight.device != x.device:
             self.linear = self.linear.to(device=x.device)
@@ -140,16 +144,20 @@ class ModelNew(nn.Module):
         wsum = self._cached_wsum
         bias_sum = self._cached_bias_sum
 
-        out = torch.empty((B,), device=x.device, dtype=torch.float32)
+        out = torch.empty((B, ), device=x.device, dtype=torch.float32)
 
         BLOCK_B = 32
         BLOCK_K = 64
-        grid = (triton.cdiv(B, BLOCK_B),)
+        grid = (triton.cdiv(B, BLOCK_B), )
 
         _rowwise_linear_sum_kernel[grid](
-            x_c, wsum, out,
-            B, I,
-            x_c.stride(0), x_c.stride(1),
+            x_c,
+            wsum,
+            out,
+            B,
+            I,
+            x_c.stride(0),
+            x_c.stride(1),
             wsum.stride(0),
             out.stride(0),
             BLOCK_B=BLOCK_B,
@@ -161,11 +169,16 @@ class ModelNew(nn.Module):
             out += bias_sum
 
         return out.view(B, 1)
+
+
 batch_size = 1024
-in_features  = 8192  
+in_features = 8192
 out_features = 8192
+
 
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features]

@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _maxpool2d_kernel(
     x_ptr,  # *fp*  [N, C, H, W] contiguous
@@ -64,18 +65,12 @@ def _maxpool2d_kernel(
     ws0 = pid_wo * BLOCK_WO * STRIDE_W - PAD_W
     hs_last = hs0 + (BLOCK_HO - 1) * STRIDE_H + (K_H - 1) * DIL_H
     ws_last = ws0 + (BLOCK_WO - 1) * STRIDE_W + (K_W - 1) * DIL_W
-    tile_interior = tile_full_ho & tile_full_wo & (hs0 >= 0) & (hs_last < H) & (ws0 >= 0) & (ws_last < W)
+    tile_interior = tile_full_ho & tile_full_wo & (hs0 >= 0) & (
+        hs_last < H) & (ws0 >= 0) & (ws_last < W)
 
-    exact_4x4_stride1 = (
-        (K_H == 4)
-        and (K_W == 4)
-        and (STRIDE_H == 1)
-        and (STRIDE_W == 1)
-        and (PAD_H == 1)
-        and (PAD_W == 1)
-        and (DIL_H == 1)
-        and (DIL_W == 1)
-    )
+    exact_4x4_stride1 = ((K_H == 4) and (K_W == 4) and (STRIDE_H == 1)
+                         and (STRIDE_W == 1) and (PAD_H == 1) and (PAD_W == 1)
+                         and (DIL_H == 1) and (DIL_W == 1))
 
     if exact_4x4_stride1:
         if tile_interior:
@@ -119,7 +114,9 @@ def _maxpool2d_kernel(
                     iw_in = (iw >= 0) & (iw < W)
                     in_bounds = out_mask & ih_in & iw_in
                     safe_iw = tl.where(iw_in, iw, 0)
-                    val = tl.load(x_ptr + row_base + safe_iw, mask=in_bounds, other=-float("inf"))
+                    val = tl.load(x_ptr + row_base + safe_iw,
+                                  mask=in_bounds,
+                                  other=-float("inf"))
                     max_val = tl.maximum(max_val, val)
 
             tl.store(y_ptr + y_offs, max_val, mask=out_mask)
@@ -162,13 +159,21 @@ def _maxpool2d_kernel(
             row0_base = base_x + ih0 * W
             offs00 = row0_base + iw0
 
-            v00 = tl.load(x_ptr + offs00, mask=(mask_r0 & iw0_in), other=-float("inf"))
-            v01 = tl.load(x_ptr + (offs00 + step_w), mask=(mask_r0 & iw1_in), other=-float("inf"))
+            v00 = tl.load(x_ptr + offs00,
+                          mask=(mask_r0 & iw0_in),
+                          other=-float("inf"))
+            v01 = tl.load(x_ptr + (offs00 + step_w),
+                          mask=(mask_r0 & iw1_in),
+                          other=-float("inf"))
 
             row1_base = row0_base + step_h
             offs10 = row1_base + iw0
-            v10 = tl.load(x_ptr + offs10, mask=(mask_r1 & iw0_in), other=-float("inf"))
-            v11 = tl.load(x_ptr + (offs10 + step_w), mask=(mask_r1 & iw1_in), other=-float("inf"))
+            v10 = tl.load(x_ptr + offs10,
+                          mask=(mask_r1 & iw0_in),
+                          other=-float("inf"))
+            v11 = tl.load(x_ptr + (offs10 + step_w),
+                          mask=(mask_r1 & iw1_in),
+                          other=-float("inf"))
 
             m0 = tl.maximum(v00, v01)
             m1 = tl.maximum(v10, v11)
@@ -187,7 +192,9 @@ def _maxpool2d_kernel(
                 in_bounds = out_mask & ih_in & iw_in
                 safe_iw = tl.where(iw_in, iw, 0)
                 offs = row_base + safe_iw
-                val = tl.load(x_ptr + offs, mask=in_bounds, other=-float("inf"))
+                val = tl.load(x_ptr + offs,
+                              mask=in_bounds,
+                              other=-float("inf"))
                 max_val = tl.maximum(max_val, val)
 
         tl.store(y_ptr + y_offs, max_val, mask=out_mask)

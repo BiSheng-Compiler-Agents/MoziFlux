@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config({'BLOCK_POS': 32}, num_warps=1, num_stages=2),
@@ -15,10 +16,16 @@ import triton.language as tl
 )
 @triton.jit
 def _clamp_softmax_mul2_tiled_ncdhw(
-    x_ptr, y_ptr,
-    N, C, DHW,
-    stride_n, stride_c,
-    clamp_min, clamp_max, scale,
+    x_ptr,
+    y_ptr,
+    N,
+    C,
+    DHW,
+    stride_n,
+    stride_c,
+    clamp_min,
+    clamp_max,
+    scale,
     OUT_DTYPE: tl.constexpr,
     BLOCK_C: tl.constexpr,
     BLOCK_POS: tl.constexpr,
@@ -59,4 +66,6 @@ def _clamp_softmax_mul2_tiled_ncdhw(
     out = x * inv
 
     # write back
-    tl.store(y_ptr + base_n + offs_c[:, None] * stride_c + offs_p[None, :], out.to(OUT_DTYPE), mask=mask)
+    tl.store(y_ptr + base_n + offs_c[:, None] * stride_c + offs_p[None, :],
+             out.to(OUT_DTYPE),
+             mask=mask)

@@ -1,24 +1,39 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_leaky_mul_maxpool3d_2x2x2(
-    x_ptr,                # *f32 [N, C, D, H, W]
-    mult_ptr,             # *f32 [C, 1, 1, 1]
-    y_ptr,                # *f32 [N, C, D//2, H//2, W//2]
-    N, C, D, H, W,        # input sizes
-    x_sN, x_sC, x_sD, x_sH, x_sW,  # x strides
-    m_sC,                 # multiplier stride along C dim
-    oD, oH, oW,           # output sizes
-    y_sN, y_sC, y_sD, y_sH, y_sW,  # y strides
-    w_tiles,              # number of tiles along W for grid axis-2 decomposition
+    x_ptr,  # *f32 [N, C, D, H, W]
+    mult_ptr,  # *f32 [C, 1, 1, 1]
+    y_ptr,  # *f32 [N, C, D//2, H//2, W//2]
+    N,
+    C,
+    D,
+    H,
+    W,  # input sizes
+    x_sN,
+    x_sC,
+    x_sD,
+    x_sH,
+    x_sW,  # x strides
+    m_sC,  # multiplier stride along C dim
+    oD,
+    oH,
+    oW,  # output sizes
+    y_sN,
+    y_sC,
+    y_sD,
+    y_sH,
+    y_sW,  # y strides
+    w_tiles,  # number of tiles along W for grid axis-2 decomposition
     NEG_SLOPE: tl.constexpr,
     BLOCK_W: tl.constexpr,
 ):
     # Program ids
-    pid_nc = tl.program_id(0)      # ranges over N*C
-    pid_d = tl.program_id(1)       # ranges over outD
-    pid_hw = tl.program_id(2)      # ranges over outH * w_tiles
+    pid_nc = tl.program_id(0)  # ranges over N*C
+    pid_d = tl.program_id(1)  # ranges over outD
+    pid_hw = tl.program_id(2)  # ranges over outH * w_tiles
 
     # Decode (n, c)
     n = pid_nc // C

@@ -1,14 +1,23 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _triplet_margin_row_kernel(
-    anchor_ptr, pos_ptr, neg_ptr, out_ptr,
-    B, D,
-    stride_a0, stride_a1,
-    stride_p0, stride_p1,
-    stride_n0, stride_n1,
-    eps, margin,
+    anchor_ptr,
+    pos_ptr,
+    neg_ptr,
+    out_ptr,
+    B,
+    D,
+    stride_a0,
+    stride_a1,
+    stride_p0,
+    stride_p1,
+    stride_n0,
+    stride_n1,
+    eps,
+    margin,
     BLOCK_SIZE: tl.constexpr,
     N_ITERS: tl.constexpr,
 ):

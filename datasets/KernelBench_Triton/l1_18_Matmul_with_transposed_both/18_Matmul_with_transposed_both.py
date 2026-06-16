@@ -1,16 +1,65 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 64}, num_warps=4, num_stages=4),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 64}, num_warps=4, num_stages=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_warps=4, num_stages=3),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 32}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 32}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 256, "BLOCK_K": 64}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 64}, num_warps=8, num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_warps=4,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64
+        },
+                      num_warps=4,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32
+        },
+                      num_warps=4,
+                      num_stages=3),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 256,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 256,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 256,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=4),
     ],
     key=["M", "N", "K"],
 )
@@ -46,8 +95,10 @@ def _matmul_AT_BT_kernel(
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 
-    a_ptrs = A_ptr + (offs_k[:, None] * stride_a_k + offs_m[None, :] * stride_a_m)
-    b_ptrs = B_ptr + (offs_n[None, :] * stride_b_n + offs_k[:, None] * stride_b_k)
+    a_ptrs = A_ptr + (offs_k[:, None] * stride_a_k +
+                      offs_m[None, :] * stride_a_m)
+    b_ptrs = B_ptr + (offs_n[None, :] * stride_b_n +
+                      offs_k[:, None] * stride_b_k)
 
     m_mask = offs_m < M
     n_mask = offs_n < N
@@ -71,5 +122,6 @@ def _matmul_AT_BT_kernel(
         a_ptrs += BLOCK_K * stride_a_k
         b_ptrs += BLOCK_K * stride_b_k
 
-    c_ptrs = C_ptr + (offs_m[:, None] * stride_c_m + offs_n[None, :] * stride_c_n)
+    c_ptrs = C_ptr + (offs_m[:, None] * stride_c_m +
+                      offs_n[None, :] * stride_c_n)
     tl.store(c_ptrs, acc, mask=m_mask[:, None] & n_mask[None, :])

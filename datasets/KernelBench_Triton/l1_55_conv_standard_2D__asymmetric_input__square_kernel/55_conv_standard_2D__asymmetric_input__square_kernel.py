@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def gemm_row_major_kernel(
     a_ptr,
@@ -34,8 +35,10 @@ def gemm_row_major_kernel(
     k_start = 0
     while k_start < K:
         k_idx = k_start + offs_k
-        a_ptrs = a_ptr + offs_m[:, None] * stride_am + k_idx[None, :] * stride_ak
-        b_ptrs = b_ptr + k_idx[:, None] * stride_bk + offs_n[None, :] * stride_bn
+        a_ptrs = a_ptr + offs_m[:,
+                                None] * stride_am + k_idx[None, :] * stride_ak
+        b_ptrs = b_ptr + k_idx[:,
+                               None] * stride_bk + offs_n[None, :] * stride_bn
 
         a_mask = (offs_m[:, None] < M) & (k_idx[None, :] < K)
         b_mask = (k_idx[:, None] < K) & (offs_n[None, :] < N)

@@ -30,7 +30,9 @@ def _rmsnorm_nchw_hw_kernel(
     while c < channels:
         c_ids = c + offs_c
         mask_c = c_ids < channels
-        x_ptrs = x_ptr + pid_b * stride_xb + c_ids[:, None] * stride_xc + offs_hw[None, :]
+        x_ptrs = x_ptr + pid_b * stride_xb + c_ids[:,
+                                                   None] * stride_xc + offs_hw[
+                                                       None, :]
         x = tl.load(x_ptrs, mask=mask_c[:, None] & mask_hw[None, :], other=0.0)
         x_f32 = x.to(tl.float32)
         sumsq += tl.sum(x_f32 * x_f32, axis=0)
@@ -42,8 +44,12 @@ def _rmsnorm_nchw_hw_kernel(
     while c < channels:
         c_ids = c + offs_c
         mask_c = c_ids < channels
-        x_ptrs = x_ptr + pid_b * stride_xb + c_ids[:, None] * stride_xc + offs_hw[None, :]
-        y_ptrs = y_ptr + pid_b * stride_yb + c_ids[:, None] * stride_yc + offs_hw[None, :]
+        x_ptrs = x_ptr + pid_b * stride_xb + c_ids[:,
+                                                   None] * stride_xc + offs_hw[
+                                                       None, :]
+        y_ptrs = y_ptr + pid_b * stride_yb + c_ids[:,
+                                                   None] * stride_yc + offs_hw[
+                                                       None, :]
         x = tl.load(x_ptrs, mask=mask_c[:, None] & mask_hw[None, :], other=0.0)
         y = x * inv_rms[None, :]
         tl.store(y_ptrs, y, mask=mask_c[:, None] & mask_hw[None, :])
@@ -54,7 +60,8 @@ def rms_norm(x: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
     if x.device.type != "npu":
         raise ValueError("rms_norm expects an Ascend NPU tensor")
     if x.dim() != 4:
-        raise ValueError(f"rms_norm expects a 4D NCHW tensor, got shape {tuple(x.shape)}")
+        raise ValueError(
+            f"rms_norm expects a 4D NCHW tensor, got shape {tuple(x.shape)}")
     if not x.is_contiguous():
         raise ValueError("rms_norm expects a contiguous tensor")
 

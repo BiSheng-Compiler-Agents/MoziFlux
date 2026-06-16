@@ -1,12 +1,19 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _mean_reduce_last_kernel(
-    x_ptr, y_ptr,
-    B, M, N,
-    stride_b, stride_m, stride_n,
-    y_stride_b, y_stride_m,
+    x_ptr,
+    y_ptr,
+    B,
+    M,
+    N,
+    stride_b,
+    stride_m,
+    stride_n,
+    y_stride_b,
+    y_stride_m,
     invN,  # float32
     BLOCK_N: tl.constexpr,
 ):
@@ -37,12 +44,19 @@ def _mean_reduce_last_kernel(
     out_ptr = y_ptr + b * y_stride_b + m * y_stride_m
     tl.store(out_ptr, mean)
 
+
 @triton.jit
 def _mean_reduce_mid_tiled_kernel(
-    x_ptr, y_ptr,
-    B, M, N,
-    stride_b, stride_m, stride_n,
-    y_stride_b, y_stride_n,
+    x_ptr,
+    y_ptr,
+    B,
+    M,
+    N,
+    stride_b,
+    stride_m,
+    stride_n,
+    y_stride_b,
+    y_stride_n,
     invM,  # float32
     BLOCK_N: tl.constexpr,
 ):
@@ -65,7 +79,8 @@ def _mean_reduce_mid_tiled_kernel(
             mi = m + u
             mi_valid = mi < M
             ptr = x_ptr + b * stride_b + mi * stride_m + offs_n * stride_n
-            vals = tl.load(ptr, mask=n_mask & mi_valid, other=0.0).to(tl.float32)
+            vals = tl.load(ptr, mask=n_mask & mi_valid,
+                           other=0.0).to(tl.float32)
             acc += vals
         m += UNROLL
 
@@ -73,12 +88,19 @@ def _mean_reduce_mid_tiled_kernel(
     out_ptr = y_ptr + b * y_stride_b + offs_n * y_stride_n
     tl.store(out_ptr, mean, mask=n_mask)
 
+
 @triton.jit
 def _mean_reduce_first_tiled_kernel(
-    x_ptr, y_ptr,
-    B, M, N,
-    stride_b, stride_m, stride_n,
-    y_stride_m, y_stride_n,
+    x_ptr,
+    y_ptr,
+    B,
+    M,
+    N,
+    stride_b,
+    stride_m,
+    stride_n,
+    y_stride_m,
+    y_stride_n,
     invB,  # float32
     BLOCK_N: tl.constexpr,
 ):
@@ -101,7 +123,8 @@ def _mean_reduce_first_tiled_kernel(
             bi = b + u
             bi_valid = bi < B
             ptr = x_ptr + bi * stride_b + m * stride_m + offs_n * stride_n
-            vals = tl.load(ptr, mask=n_mask & bi_valid, other=0.0).to(tl.float32)
+            vals = tl.load(ptr, mask=n_mask & bi_valid,
+                           other=0.0).to(tl.float32)
             acc += vals
         b += UNROLL
 

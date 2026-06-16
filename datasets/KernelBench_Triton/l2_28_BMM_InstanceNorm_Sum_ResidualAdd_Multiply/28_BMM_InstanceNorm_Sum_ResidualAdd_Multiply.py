@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config({}, num_warps=1, num_stages=1),
@@ -15,17 +16,17 @@ import triton.language as tl
 )
 @triton.jit
 def _rownorm_addmul_kernel(
-    x_ptr,      # pointer to [B, F] input (after linear)
-    y_ptr,      # pointer to [B, F] input y
-    out_ptr,    # pointer to [B, F] output
-    B,          # number of rows (batch size)
-    F,          # number of features (out_features)
-    stride_x,   # stride between consecutive rows of x in elements
-    stride_y,   # stride between consecutive rows of y in elements
-    stride_out, # stride between consecutive rows of out in elements
-    eps,        # epsilon for numerical stability
-    inv_F,      # 1.0 / F
-    BLOCK: tl.constexpr,  # block size (next power of 2 >= F)
+        x_ptr,  # pointer to [B, F] input (after linear)
+        y_ptr,  # pointer to [B, F] input y
+        out_ptr,  # pointer to [B, F] output
+        B,  # number of rows (batch size)
+        F,  # number of features (out_features)
+        stride_x,  # stride between consecutive rows of x in elements
+        stride_y,  # stride between consecutive rows of y in elements
+        stride_out,  # stride between consecutive rows of out in elements
+        eps,  # epsilon for numerical stability
+        inv_F,  # 1.0 / F
+        BLOCK: tl.constexpr,  # block size (next power of 2 >= F)
 ):
     pid = tl.program_id(0)  # row id
     offs = tl.arange(0, BLOCK)

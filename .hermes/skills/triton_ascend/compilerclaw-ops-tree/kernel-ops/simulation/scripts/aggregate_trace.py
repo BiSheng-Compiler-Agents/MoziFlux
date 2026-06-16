@@ -77,7 +77,9 @@ def fmt_table(headers, rows, aligns, annotations=None):
     annotations is a list (same length as rows) of trailing strings appended
     after each row (e.g. '  ← BOTTLENECK'), or None for none.
     """
-    cols = [list(map(str, col)) for col in zip(*([headers] + rows))] if rows else [[h] for h in headers]
+    cols = [list(map(str, col))
+            for col in zip(*([headers] +
+                             rows))] if rows else [[h] for h in headers]
     widths = [max(len(c) for c in col) for col in cols]
     annotations = annotations or [""] * len(rows)
 
@@ -93,7 +95,10 @@ def fmt_table(headers, rows, aligns, annotations=None):
     return "\n".join(lines)
 
 
-def aggregate(trace_path: Path, top_instr: int, top_events: int, label: str = "") -> str:
+def aggregate(trace_path: Path,
+              top_instr: int,
+              top_events: int,
+              label: str = "") -> str:
     with open(trace_path) as f:
         events = json.load(f)
 
@@ -138,14 +143,20 @@ def aggregate(trace_path: Path, top_instr: int, top_events: int, label: str = ""
     pipe_rows_full.sort(key=lambda r: -r["busy"])
     max_busy = pipe_rows_full[0]["busy"] if pipe_rows_full else 0
 
-    pipe_headers = ["pipeline", "ops", "busy_cyc", "lane_sum", "lanes", "window"]
+    pipe_headers = [
+        "pipeline", "ops", "busy_cyc", "lane_sum", "lanes", "window"
+    ]
     pipe_table_rows = [[
         r["name"],
-        r["ops"], r["busy"], r["lane_sum"], r["lanes"],
+        r["ops"],
+        r["busy"],
+        r["lane_sum"],
+        r["lanes"],
         f"[{r['window'][0]},{r['window'][1]}]",
     ] for r in pipe_rows_full]
     pipe_anns = [
-        "  ← BOTTLENECK" if r["busy"] == max_busy else "" for r in pipe_rows_full
+        "  ← BOTTLENECK" if r["busy"] == max_busy else ""
+        for r in pipe_rows_full
     ]
 
     # ---- instruction aggregation, per (name, pipeline) ----
@@ -155,11 +166,13 @@ def aggregate(trace_path: Path, top_instr: int, top_events: int, label: str = ""
         s = by_pair[key]
         s["count"] += 1
         s["total"] += e.get("dur", 0)
-    instr_full = [
-        {"name": n, "pipe": p, "cnt": s["count"], "total": s["total"],
-         "avg": s["total"] / s["count"]}
-        for (n, p), s in by_pair.items()
-    ]
+    instr_full = [{
+        "name": n,
+        "pipe": p,
+        "cnt": s["count"],
+        "total": s["total"],
+        "avg": s["total"] / s["count"]
+    } for (n, p), s in by_pair.items()]
     instr_full.sort(key=lambda r: -r["total"])
 
     instr_top = instr_full[:top_instr]
@@ -167,7 +180,11 @@ def aggregate(trace_path: Path, top_instr: int, top_events: int, label: str = ""
     critical_avg = CRITICAL_AVG_FRAC * wall_cycles
     instr_headers = ["instruction", "pipe", "cnt", "total_cyc", "avg_cyc"]
     instr_rows = [[
-        r["name"], strip_prefix(r["pipe"]), r["cnt"], r["total"], f"{r['avg']:.0f}",
+        r["name"],
+        strip_prefix(r["pipe"]),
+        r["cnt"],
+        r["total"],
+        f"{r['avg']:.0f}",
     ] for r in instr_top]
     instr_anns = []
     for r in instr_top:
@@ -177,7 +194,8 @@ def aggregate(trace_path: Path, top_instr: int, top_events: int, label: str = ""
     # ---- worst single events, deduplicated by (name, pipeline) ----
     events_by_group = defaultdict(list)
     for e in x_events:
-        events_by_group[(e["name"], pid_name.get(e["pid"], str(e["pid"])))].append(e)
+        events_by_group[(e["name"], pid_name.get(e["pid"],
+                                                 str(e["pid"])))].append(e)
     # rank groups by their max-duration event
     ranked_groups = sorted(
         events_by_group.items(),
@@ -200,16 +218,22 @@ def aggregate(trace_path: Path, top_instr: int, top_events: int, label: str = ""
     # ---- assemble ----
     out = []
     out.append(f"=== {label} Profile ===")
-    out.append(f"wall_cycles: {wall_cycles}  |  x_events: {len(x_events)}  |  i_events: {len(i_events)}")
+    out.append(
+        f"wall_cycles: {wall_cycles}  |  x_events: {len(x_events)}  |  i_events: {len(i_events)}"
+    )
     out.append(f"time_window: [{t_start},{t_end}]")
     out.append("")
     out.append("--- Pipeline Utilization ---")
     out.append(fmt_table(pipe_headers, pipe_table_rows, "<>>>>>", pipe_anns))
     out.append("")
-    out.append(f"--- Top Instructions by Cycle Cost (top {len(instr_top)} of {len(instr_full)}) ---")
+    out.append(
+        f"--- Top Instructions by Cycle Cost (top {len(instr_top)} of {len(instr_full)}) ---"
+    )
     out.append(fmt_table(instr_headers, instr_rows, "<<>>>", instr_anns))
     out.append("")
-    out.append(f"--- Worst Single Events (top {len(ranked_groups)} distinct, deduped) ---")
+    out.append(
+        f"--- Worst Single Events (top {len(ranked_groups)} distinct, deduped) ---"
+    )
     out.extend(worst_lines)
     out.append("")
     out.append("--- Control Flow / Instant Events ---")
@@ -220,19 +244,32 @@ def aggregate(trace_path: Path, top_instr: int, top_events: int, label: str = ""
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("trace", type=Path, help="trace_core0.json from CANNSIM")
-    ap.add_argument("--out", type=Path, default=None,
-                    help="output path (default: <trace_dir>/trace_summary.txt)")
-    ap.add_argument("--top-instr", type=int, default=DEFAULT_TOP_INSTR,
-                    help=f"rows in instructions table (default {DEFAULT_TOP_INSTR})")
-    ap.add_argument("--top-events", type=int, default=DEFAULT_TOP_EVENTS,
-                    help=f"distinct groups in worst-events list (default {DEFAULT_TOP_EVENTS})")
+    ap.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="output path (default: <trace_dir>/trace_summary.txt)")
+    ap.add_argument(
+        "--top-instr",
+        type=int,
+        default=DEFAULT_TOP_INSTR,
+        help=f"rows in instructions table (default {DEFAULT_TOP_INSTR})")
+    ap.add_argument(
+        "--top-events",
+        type=int,
+        default=DEFAULT_TOP_EVENTS,
+        help=
+        f"distinct groups in worst-events list (default {DEFAULT_TOP_EVENTS})")
     args = ap.parse_args()
 
     if not args.trace.exists():
         print(f"trace not found: {args.trace}", file=sys.stderr)
         sys.exit(1)
 
-    report = aggregate(args.trace, args.top_instr, args.top_events, label=str(args.trace))
+    report = aggregate(args.trace,
+                       args.top_instr,
+                       args.top_events,
+                       label=str(args.trace))
     out = args.out or args.trace.with_name("trace_summary.txt")
     with open(out, "w") as f:
         f.write(report)

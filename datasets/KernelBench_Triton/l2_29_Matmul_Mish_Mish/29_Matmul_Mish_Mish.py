@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def linear_mish2_rowwise(
     x_ptr,
@@ -23,7 +24,7 @@ def linear_mish2_rowwise(
     pid_n = tl.program_id(axis=1)
 
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    acc = tl.zeros((BLOCK_N,), dtype=tl.float32)
+    acc = tl.zeros((BLOCK_N, ), dtype=tl.float32)
 
     x_row_ptr = x_ptr + pid_m * stride_xm
 
@@ -38,9 +39,8 @@ def linear_mish2_rowwise(
             other=0.0,
         ).to(tl.float32)
 
-        w_ptrs = w_ptr + (
-            offs_n[:, None] * stride_wn + offs_k[None, :] * stride_wk
-        )
+        w_ptrs = w_ptr + (offs_n[:, None] * stride_wn +
+                          offs_k[None, :] * stride_wk)
         w_mask = (offs_n[:, None] < N) & k_mask[None, :]
         w_vals = tl.load(w_ptrs, mask=w_mask, other=0.0).to(tl.float32)
         acc += tl.sum(w_vals * x_vals[None, :], axis=1)

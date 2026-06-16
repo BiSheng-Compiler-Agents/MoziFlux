@@ -1,13 +1,19 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _bn_row_reduce_nhw_store(
     x_ptr,
     partial_sum_ptr,
     partial_sumsq_ptr,
-    N, H, W,
-    stride_n, stride_c, stride_h, stride_w,
+    N,
+    H,
+    W,
+    stride_n,
+    stride_c,
+    stride_h,
+    stride_w,
     NH,  # number of (n,h) rows per channel
     BLOCK_W: tl.constexpr,
     NUM_W_CHUNKS: tl.constexpr,
@@ -25,8 +31,8 @@ def _bn_row_reduce_nhw_store(
     # accumulate along W with vector accumulation to reduce number of tl.sum ops
     offs_w = tl.arange(0, BLOCK_W)
     tl.multiple_of(offs_w, BLOCK_W)
-    acc_vec_sum = tl.zeros((BLOCK_W,), dtype=tl.float32)
-    acc_vec_sumsq = tl.zeros((BLOCK_W,), dtype=tl.float32)
+    acc_vec_sum = tl.zeros((BLOCK_W, ), dtype=tl.float32)
+    acc_vec_sumsq = tl.zeros((BLOCK_W, ), dtype=tl.float32)
 
     for cw in tl.static_range(0, NUM_W_CHUNKS):
         w_idx = cw * BLOCK_W + offs_w
@@ -44,6 +50,7 @@ def _bn_row_reduce_nhw_store(
     tl.store(partial_sum_ptr + base_idx, acc_sum)
     tl.store(partial_sumsq_ptr + base_idx, acc_sumsq)
 
+
 @triton.jit
 def _bn_finalize_params(
     partial_sum_ptr,
@@ -54,13 +61,13 @@ def _bn_finalize_params(
     running_var_ptr,
     weight_ptr,
     bias_ptr,
-    NH,      # number of (n,h) rows per channel
-    M,       # total elements per-channel = N*H*W
-    eps,     # epsilon
+    NH,  # number of (n,h) rows per channel
+    M,  # total elements per-channel = N*H*W
+    eps,  # epsilon
     exp_avg_factor,  # exponential_average_factor
     use_batch_stats,  # 1 if using batch stats, 0 if using running stats
-    do_update,        # 1 to update running stats (training & tracking), else 0
-    affine_flag,      # 1 if affine, else 0
+    do_update,  # 1 to update running stats (training & tracking), else 0
+    affine_flag,  # 1 if affine, else 0
     BLOCK_NH: tl.constexpr,
     NUM_NH_CHUNKS: tl.constexpr,
 ):
@@ -118,15 +125,24 @@ def _bn_finalize_params(
     tl.store(scale_ptr + c, scale)
     tl.store(shift_ptr + c, shift)
 
+
 @triton.jit
 def _bn_apply_nhw(
     x_ptr,
     y_ptr,
     scale_ptr,
     shift_ptr,
-    N, H, W,
-    stride_nx, stride_cx, stride_hx, stride_wx,
-    stride_ny, stride_cy, stride_hy, stride_wy,
+    N,
+    H,
+    W,
+    stride_nx,
+    stride_cx,
+    stride_hx,
+    stride_wx,
+    stride_ny,
+    stride_cy,
+    stride_hy,
+    stride_wy,
     BLOCK_W: tl.constexpr,
     NUM_W_CHUNKS: tl.constexpr,
 ):

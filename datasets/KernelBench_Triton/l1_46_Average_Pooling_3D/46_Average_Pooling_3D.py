@@ -1,15 +1,29 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def avgpool3d_kernel(
-    x_ptr, y_ptr,
-    N, C, D, H, W,
-    OD, OH, OW,
-    SD, SH, SW,
-    PD, PH, PW,
+    x_ptr,
+    y_ptr,
+    N,
+    C,
+    D,
+    H,
+    W,
+    OD,
+    OH,
+    OW,
+    SD,
+    SH,
+    SW,
+    PD,
+    PH,
+    PW,
     n_elements,
-    KSIZE_D: tl.constexpr, KSIZE_H: tl.constexpr, KSIZE_W: tl.constexpr,
+    KSIZE_D: tl.constexpr,
+    KSIZE_H: tl.constexpr,
+    KSIZE_W: tl.constexpr,
     BLOCK: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)

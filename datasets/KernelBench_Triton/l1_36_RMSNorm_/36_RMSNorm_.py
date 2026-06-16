@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _rmsnorm_nchw_kernel(
     x_ptr,
@@ -29,7 +30,9 @@ def _rmsnorm_nchw_kernel(
     while c < cols:
         col_ids = c + offsets
         mask = col_ids < cols
-        x = tl.load(row_x_ptr + c * stride_xn + col_offs_x, mask=mask, other=0.0)
+        x = tl.load(row_x_ptr + c * stride_xn + col_offs_x,
+                    mask=mask,
+                    other=0.0)
         x_f32 = x.to(tl.float32)
         sumsq += tl.sum(x_f32 * x_f32, axis=0)
         c += BLOCK_C
@@ -40,7 +43,9 @@ def _rmsnorm_nchw_kernel(
     while c < cols:
         col_ids = c + offsets
         mask = col_ids < cols
-        x = tl.load(row_x_ptr + c * stride_xn + col_offs_x, mask=mask, other=0.0)
+        x = tl.load(row_x_ptr + c * stride_xn + col_offs_x,
+                    mask=mask,
+                    other=0.0)
         y = x * inv_rms
         tl.store(row_y_ptr + c * stride_yn + col_offs_y, y, mask=mask)
         c += BLOCK_C

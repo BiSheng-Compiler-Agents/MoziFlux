@@ -1,24 +1,53 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 256}, num_warps=8, num_stages=2),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128}, num_warps=4, num_stages=2),
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 256}, num_warps=4, num_stages=2),
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 128}, num_warps=8, num_stages=2),
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 128}, num_warps=4, num_stages=1),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 256
+        },
+                      num_warps=8,
+                      num_stages=2),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128
+        },
+                      num_warps=4,
+                      num_stages=2),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 256
+        },
+                      num_warps=4,
+                      num_stages=2),
+        triton.Config({
+            "BLOCK_M": 256,
+            "BLOCK_N": 128
+        },
+                      num_warps=8,
+                      num_stages=2),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128
+        },
+                      num_warps=4,
+                      num_stages=1),
     ],
     key=["M", "N"],
 )
 @triton.jit
 def _affine_per_col_kernel(
-    y_ptr,          # [M, N] input/output (row-major)
-    alpha_ptr,      # [N] per-column scale
-    beta_ptr,       # [N] per-column bias
-    M, N,
-    stride_ym, stride_yn,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
+    y_ptr,  # [M, N] input/output (row-major)
+    alpha_ptr,  # [N] per-column scale
+    beta_ptr,  # [N] per-column bias
+    M,
+    N,
+    stride_ym,
+    stride_yn,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
 ):
     pid_m = tl.program_id(0)
     pid_n = tl.program_id(1)

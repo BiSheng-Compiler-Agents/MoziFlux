@@ -16,7 +16,8 @@ import triton.language as tl
     key=['n_elements'],
 )
 @triton.jit
-def _relu_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr, IS_FP: tl.constexpr):
+def _relu_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr,
+                 IS_FP: tl.constexpr):
     pid = tl.program_id(axis=0)
     offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     # Vectorization / coalescing hints
@@ -41,6 +42,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs a ReLU activation.
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -69,9 +71,11 @@ class ModelNew(nn.Module):
         x_contig = x.contiguous()
         y = torch.empty_like(x_contig)
 
-        is_fp = x_contig.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        is_fp = x_contig.dtype in (torch.float16, torch.bfloat16,
+                                   torch.float32)
 
-        grid = lambda meta: ((n_elements + meta["BLOCK_SIZE"] - 1) // meta["BLOCK_SIZE"],)
+        grid = lambda meta: (
+            (n_elements + meta["BLOCK_SIZE"] - 1) // meta["BLOCK_SIZE"], )
         _relu_kernel[grid](
             x_contig.view(-1),
             y.view(-1),
@@ -79,11 +83,16 @@ class ModelNew(nn.Module):
             IS_FP=is_fp,
         )
         return y.view_as(x)
+
+
 batch_size = 4096
 dim = 393216
+
 
 def get_inputs():
     x = torch.rand(batch_size, dim)
     return [x]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

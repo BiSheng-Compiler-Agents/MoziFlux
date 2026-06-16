@@ -1,19 +1,28 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def dwconv2d_fwd_kernel(
-    x_ptr,         # *fptr: [N, C, H, W] contiguous
-    w_ptr,         # *fptr: [C, K_H*K_W] flattened contiguous
-    b_ptr,         # *fptr: [C] or dummy (unused if BIAS=0)
-    y_ptr,         # *fptr: [N, C, H_OUT, W_OUT] contiguous
-    N, C, H, W,    # int32
-    H_OUT, W_OUT,  # int32
-    BIAS: tl.constexpr,     # 0/1
-    K_H: tl.constexpr, K_W: tl.constexpr,
-    STRIDE_H: tl.constexpr, STRIDE_W: tl.constexpr,
-    PAD_H: tl.constexpr, PAD_W: tl.constexpr,
-    DIL_H: tl.constexpr, DIL_W: tl.constexpr,
+    x_ptr,  # *fptr: [N, C, H, W] contiguous
+    w_ptr,  # *fptr: [C, K_H*K_W] flattened contiguous
+    b_ptr,  # *fptr: [C] or dummy (unused if BIAS=0)
+    y_ptr,  # *fptr: [N, C, H_OUT, W_OUT] contiguous
+    N,
+    C,
+    H,
+    W,  # int32
+    H_OUT,
+    W_OUT,  # int32
+    BIAS: tl.constexpr,  # 0/1
+    K_H: tl.constexpr,
+    K_W: tl.constexpr,
+    STRIDE_H: tl.constexpr,
+    STRIDE_W: tl.constexpr,
+    PAD_H: tl.constexpr,
+    PAD_W: tl.constexpr,
+    DIL_H: tl.constexpr,
+    DIL_W: tl.constexpr,
     BLOCK_HW: tl.constexpr,
 ):
     # program ids (over N*C and tiles of H_OUT*W_OUT) - do not change
@@ -53,7 +62,9 @@ def dwconv2d_fwd_kernel(
                         row_ptrs = x_ptr + base_x + ih * W + ow_base
                         w_row_base = w_ptr + w_ch_base + kh * K_W
                         for kw in tl.static_range(K_W):
-                            x_vals = tl.load(row_ptrs + kw, mask=mask_o, other=0.0)
+                            x_vals = tl.load(row_ptrs + kw,
+                                             mask=mask_o,
+                                             other=0.0)
                             w_val = tl.load(w_row_base + kw)
                             acc += x_vals.to(tl.float32) * w_val.to(tl.float32)
                 else:
@@ -66,7 +77,9 @@ def dwconv2d_fwd_kernel(
                             iw = ow_base + kw * DIL_W
                             w_ok = (iw >= 0) & (iw < W)
                             m = mask_o & h_ok & w_ok
-                            x_vals = tl.load(row_ptrs + kw * DIL_W, mask=m, other=0.0)
+                            x_vals = tl.load(row_ptrs + kw * DIL_W,
+                                             mask=m,
+                                             other=0.0)
                             w_val = tl.load(w_row_base + kw)
                             acc += x_vals.to(tl.float32) * w_val.to(tl.float32)
             else:
@@ -79,7 +92,9 @@ def dwconv2d_fwd_kernel(
                         iw = ow_base + kw * DIL_W
                         w_ok = (iw >= 0) & (iw < W)
                         m = mask_o & h_ok & w_ok
-                        x_vals = tl.load(row_ptrs + kw * DIL_W, mask=m, other=0.0)
+                        x_vals = tl.load(row_ptrs + kw * DIL_W,
+                                         mask=m,
+                                         other=0.0)
                         w_val = tl.load(w_row_base + kw)
                         acc += x_vals.to(tl.float32) * w_val.to(tl.float32)
         else:

@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config({"BLOCK_SIZE": 1024}, num_warps=4, num_stages=4),
@@ -18,8 +19,14 @@ import triton.language as tl
 def _instance_norm2d_kernel(
     x_ptr,
     y_ptr,
-    N, C, H, W,
-    stride_n, stride_c, stride_h, stride_w,
+    N,
+    C,
+    H,
+    W,
+    stride_n,
+    stride_c,
+    stride_h,
+    stride_w,
     eps,
     HW: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,

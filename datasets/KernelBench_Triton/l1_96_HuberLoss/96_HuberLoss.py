@@ -1,9 +1,12 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _smooth_l1_mean_atomic_kernel(
-    pred_ptr, tgt_ptr, out_mean_ptr,
+    pred_ptr,
+    tgt_ptr,
+    out_mean_ptr,
     n_elements,
     inv_n,
     beta: tl.constexpr,

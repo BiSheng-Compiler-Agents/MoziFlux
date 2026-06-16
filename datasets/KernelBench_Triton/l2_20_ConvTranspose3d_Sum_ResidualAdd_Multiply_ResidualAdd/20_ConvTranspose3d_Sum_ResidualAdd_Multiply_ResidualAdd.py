@@ -1,18 +1,19 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_bias_residual_mul_add_3d(
-    x_ptr,         # pointer to conv_transpose output, shape [N, C, D, H, W] flattened
-    bias_ptr,      # pointer to bias per channel, shape [C]
-    out_ptr,       # pointer to output tensor, same shape as x_ptr
-    DHW,           # int: D*H*W
-    C,             # int: number of channels
+    x_ptr,  # pointer to conv_transpose output, shape [N, C, D, H, W] flattened
+    bias_ptr,  # pointer to bias per channel, shape [C]
+    out_ptr,  # pointer to output tensor, same shape as x_ptr
+    DHW,  # int: D*H*W
+    C,  # int: number of channels
     BLOCK_K: tl.constexpr,
 ):
     # Program IDs
     pid_nc = tl.program_id(axis=0)  # over N*C groups
-    pid_k = tl.program_id(axis=1)   # tiles along DHW
+    pid_k = tl.program_id(axis=1)  # tiles along DHW
 
     # Offsets within DHW
     offs_k = pid_k * BLOCK_K + tl.arange(0, BLOCK_K)

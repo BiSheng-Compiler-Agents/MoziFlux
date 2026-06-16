@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _symmetric_matmul_kernel(
     a_ptr,

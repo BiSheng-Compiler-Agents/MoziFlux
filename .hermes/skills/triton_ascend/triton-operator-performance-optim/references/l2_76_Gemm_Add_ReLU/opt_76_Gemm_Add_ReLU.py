@@ -4,7 +4,6 @@ import triton
 import triton.language as tl
 import torch_npu  # noqa: F401
 
-
 FP16_FAST_PATH = True
 FP16_FAST_USE_MAX_CONTIGUOUS = True
 FP16_FAST_BLOCK_M = 64
@@ -59,8 +58,10 @@ def _matmul_bias_relu_kernel(
 
     for k in range(0, K, BLOCK_K):
         k_offs = k + offs_k
-        a_ptrs = a_ptr + (offs_m[:, None] * stride_am + k_offs[None, :] * stride_ak)
-        b_ptrs = b_ptr + (k_offs[:, None] * stride_bk + offs_n[None, :] * stride_bn)
+        a_ptrs = a_ptr + (offs_m[:, None] * stride_am +
+                          k_offs[None, :] * stride_ak)
+        b_ptrs = b_ptr + (k_offs[:, None] * stride_bk +
+                          offs_n[None, :] * stride_bn)
         a_mask = a_mask_m[:, None] & (k_offs[None, :] < K)
         b_mask = (k_offs[:, None] < K) & b_mask_n[None, :]
         a = tl.load(a_ptrs, mask=a_mask, other=0.0)
@@ -72,21 +73,24 @@ def _matmul_bias_relu_kernel(
         acc += tl.dot(dot_a, dot_b)
 
     if ADD_BIAS:
-        bias = tl.load(bias_ptr + offs_n, mask=b_mask_n, other=0.0).to(tl.float32)
+        bias = tl.load(bias_ptr + offs_n, mask=b_mask_n,
+                       other=0.0).to(tl.float32)
         acc = acc + bias[None, :]
 
     if APPLY_RELU:
         acc = tl.maximum(acc, 0.0)
 
-    c_ptrs = c_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+    c_ptrs = c_ptr + (offs_m[:, None] * stride_cm +
+                      offs_n[None, :] * stride_cn)
     tl.store(c_ptrs, acc, mask=a_mask_m[:, None] & b_mask_n[None, :])
 
 
 def _validate_inputs(
-    x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        x: torch.Tensor, weight: torch.Tensor,
+        bias: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if x.ndim != 2 or weight.ndim != 2 or bias.ndim != 1:
-        raise ValueError("expected x to be 2D, weight to be 2D, and bias to be 1D")
+        raise ValueError(
+            "expected x to be 2D, weight to be 2D, and bias to be 1D")
     if x.device.type != "npu" or weight.device.type != "npu" or bias.device.type != "npu":
         raise ValueError("fused_gemm_add_relu requires NPU tensors")
     if x.device != weight.device or x.device != bias.device:
@@ -94,9 +98,11 @@ def _validate_inputs(
     if x.dtype != weight.dtype or x.dtype != bias.dtype:
         raise ValueError("x, weight, and bias must share the same dtype")
     if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-        raise TypeError(f"unsupported dtype for fused_gemm_add_relu: {x.dtype}")
+        raise TypeError(
+            f"unsupported dtype for fused_gemm_add_relu: {x.dtype}")
     if x.requires_grad or weight.requires_grad or bias.requires_grad:
-        raise ValueError("fused_gemm_add_relu does not support autograd-tracked tensors")
+        raise ValueError(
+            "fused_gemm_add_relu does not support autograd-tracked tensors")
 
     m, k = x.shape
     n = weight.shape[0]
@@ -107,7 +113,8 @@ def _validate_inputs(
     return x.contiguous(), weight.contiguous(), bias.contiguous()
 
 
-def fused_gemm_add_relu(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
+def fused_gemm_add_relu(x: torch.Tensor, weight: torch.Tensor,
+                        bias: torch.Tensor) -> torch.Tensor:
     a, b, bias_c = _validate_inputs(x, weight, bias)
     m, k = a.shape
     n = b.shape[0]
@@ -164,6 +171,7 @@ def fused_gemm_add_relu(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tenso
 
 
 class ModelNew(nn.Module):
+
     def __init__(self, in_features, out_features, bias_shape):
         super().__init__()
         self.gemm = nn.Linear(in_features, out_features, bias=False)
@@ -178,7 +186,7 @@ class ModelNew(nn.Module):
 batch_size = 1024
 in_features = 8192
 out_features = 8192
-bias_shape = (out_features,)
+bias_shape = (out_features, )
 
 
 def get_inputs():

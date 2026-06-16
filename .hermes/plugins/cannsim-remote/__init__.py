@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 # SFTP helpers
 # ---------------------------------------------------------------------------
 
+
 def _sftp_upload_dir(sftp, local_dir: str, remote_dir: str) -> None:
     """Recursively upload local_dir to remote_dir via sftp."""
     for item in os.listdir(local_dir):
@@ -162,8 +163,8 @@ def _apply_remote_patches(ssh, conda_env: str) -> tuple[bool, str]:
     find_conda = (
         "CONDA=$(command -v conda 2>/dev/null || "
         "ls ~/miniconda3/bin/conda ~/anaconda3/bin/conda /opt/conda/bin/conda 2>/dev/null | head -1) && "
-        "$CONDA run -n {env} python3 {script}"
-    ).format(env=conda_env, script=script_path)
+        "$CONDA run -n {env} python3 {script}").format(env=conda_env,
+                                                       script=script_path)
 
     rc, out, err = _ssh_exec(ssh, find_conda, timeout=30)
     log = (out + "\n" + err).strip()
@@ -173,6 +174,7 @@ def _apply_remote_patches(ssh, conda_env: str) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 # Core tool logic
 # ---------------------------------------------------------------------------
+
 
 def _cannsim_remote_run(
     local_dir: str,
@@ -210,35 +212,47 @@ def _cannsim_remote_run(
     try:
         import paramiko
     except ImportError:
-        return {"success": False, "error": "paramiko is not installed. Run: pip install paramiko"}
+        return {
+            "success": False,
+            "error": "paramiko is not installed. Run: pip install paramiko"
+        }
 
-    host       = os.environ.get("CANNSIM_REMOTE_HOST", "")
-    user       = os.environ.get("CANNSIM_REMOTE_USER", "")
-    password   = os.environ.get("CANNSIM_REMOTE_PASS", "")
-    port       = int(os.environ.get("CANNSIM_REMOTE_PORT", "22"))
-    base_dir   = os.environ.get("CANNSIM_REMOTE_BASE_DIR", "~/cannsim_jobs")
-    conda_env  = os.environ.get("CANNSIM_REMOTE_CONDA_ENV", "compilerclaw")
-    soc        = soc_version or os.environ.get("CANNSIM_SOC_VERSION", "Ascend950")
-    setenv     = os.environ.get(
+    host = os.environ.get("CANNSIM_REMOTE_HOST", "")
+    user = os.environ.get("CANNSIM_REMOTE_USER", "")
+    password = os.environ.get("CANNSIM_REMOTE_PASS", "")
+    port = int(os.environ.get("CANNSIM_REMOTE_PORT", "22"))
+    base_dir = os.environ.get("CANNSIM_REMOTE_BASE_DIR", "~/cannsim_jobs")
+    conda_env = os.environ.get("CANNSIM_REMOTE_CONDA_ENV", "compilerclaw")
+    soc = soc_version or os.environ.get("CANNSIM_SOC_VERSION", "Ascend950")
+    setenv = os.environ.get(
         "CANNSIM_SETENV_PATH",
         "~/miniconda3/Ascend/cann/bin/setenv.bash",
     )
 
     if not host or not user or not password:
         return {
-            "success": False,
-            "error": "Missing required env vars: CANNSIM_REMOTE_HOST, CANNSIM_REMOTE_USER, CANNSIM_REMOTE_PASS",
+            "success":
+            False,
+            "error":
+            "Missing required env vars: CANNSIM_REMOTE_HOST, CANNSIM_REMOTE_USER, CANNSIM_REMOTE_PASS",
         }
 
     local_dir = os.path.expanduser(local_dir)
     if not os.path.isdir(local_dir):
-        return {"success": False, "error": f"local_dir does not exist: {local_dir}"}
+        return {
+            "success": False,
+            "error": f"local_dir does not exist: {local_dir}"
+        }
 
     run_script_path = os.path.join(local_dir, run_script)
     if not os.path.isfile(run_script_path):
-        return {"success": False, "error": f"run_script not found in local_dir: {run_script_path}"}
+        return {
+            "success": False,
+            "error": f"run_script not found in local_dir: {run_script_path}"
+        }
 
-    job_name = job_name or (os.path.basename(local_dir.rstrip("/")) + "_" + str(int(time.time())))
+    job_name = job_name or (os.path.basename(local_dir.rstrip("/")) + "_" +
+                            str(int(time.time())))
 
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -257,10 +271,14 @@ def _cannsim_remote_run(
         _ssh_exec(ssh, f"rm -rf {remote_job_dir}", timeout=30)
         rc, out, err = _ssh_exec(ssh, f"mkdir -p {remote_job_dir}", timeout=30)
         if rc != 0:
-            return {"success": False, "error": f"Failed to create remote dir: {err}"}
+            return {
+                "success": False,
+                "error": f"Failed to create remote dir: {err}"
+            }
 
         # 3. Upload local_dir contents via SFTP
-        logger.info(f"cannsim-remote: uploading {local_dir} → {remote_job_dir}")
+        logger.info(
+            f"cannsim-remote: uploading {local_dir} → {remote_job_dir}")
         sftp = ssh.open_sftp()
         try:
             sftp.chdir(remote_job_dir)
@@ -277,7 +295,10 @@ def _cannsim_remote_run(
         patch_ok, patch_log = _apply_remote_patches(ssh, conda_env)
         logger.info(f"cannsim-remote: patch result:\n{patch_log}")
         if not patch_ok:
-            return {"success": False, "error": f"Failed to apply remote patches:\n{patch_log}"}
+            return {
+                "success": False,
+                "error": f"Failed to apply remote patches:\n{patch_log}"
+            }
 
         # 6. BUILD the test binary on remote (separate from cannsim scope)
         #    Default: bash <run_script> build
@@ -318,17 +339,19 @@ def _cannsim_remote_run(
         cannsim_record_cmd = (
             f"source {setenv} && "
             f"cd {remote_job_dir} && "
-            f"cannsim record -s {soc} -- {remote_binary}"
-        ).strip()
+            f"cannsim record -s {soc} -- {remote_binary}").strip()
 
         logger.info(f"cannsim-remote: running: {cannsim_record_cmd}")
-        rc, record_out, record_err = _ssh_exec(ssh, cannsim_record_cmd, timeout=timeout)
+        rc, record_out, record_err = _ssh_exec(ssh,
+                                               cannsim_record_cmd,
+                                               timeout=timeout)
         record_log = (record_out + "\n" + record_err).strip()
 
         if rc != 0:
             return {
                 "success": False,
-                "error": f"cannsim record failed (exit {rc}):\n{record_log[-3000:]}",
+                "error":
+                f"cannsim record failed (exit {rc}):\n{record_log[-3000:]}",
                 "job_name": job_name,
                 "remote_job_dir": remote_job_dir,
                 "patch_log": patch_log,
@@ -354,7 +377,9 @@ def _cannsim_remote_run(
             exp_dir = exp_out.strip()
 
             if not exp_dir:
-                logger.warning("cannsim-remote: experiment dir not found; skipping report")
+                logger.warning(
+                    "cannsim-remote: experiment dir not found; skipping report"
+                )
                 report_log = "experiment dir not found"
             else:
                 report_out_dir = exp_dir + "/report"
@@ -363,14 +388,18 @@ def _cannsim_remote_run(
                 cannsim_report_cmd = (
                     f"source {setenv} && "
                     f"cd {exp_dir} && "
-                    f"cannsim report -e {exp_dir} -o {report_out_dir} -n 0"
-                )
-                logger.info(f"cannsim-remote: running report: {cannsim_report_cmd}")
-                rc_rep, rep_out, rep_err = _ssh_exec(ssh, cannsim_report_cmd, timeout=report_timeout)
+                    f"cannsim report -e {exp_dir} -o {report_out_dir} -n 0")
+                logger.info(
+                    f"cannsim-remote: running report: {cannsim_report_cmd}")
+                rc_rep, rep_out, rep_err = _ssh_exec(ssh,
+                                                     cannsim_report_cmd,
+                                                     timeout=report_timeout)
                 report_log = (rep_out + "\n" + rep_err).strip()
 
                 if rc_rep != 0:
-                    logger.warning(f"cannsim report returned non-zero: {rc_rep}\n{report_log[-1000:]}")
+                    logger.warning(
+                        f"cannsim report returned non-zero: {rc_rep}\n{report_log[-1000:]}"
+                    )
                 else:
                     # Find and download trace_core0.json
                     find_cmd = f"find {report_out_dir} {exp_dir} -name 'trace_core0.json' 2>/dev/null | head -1"
@@ -395,9 +424,13 @@ def _cannsim_remote_run(
                         with open(trace_local_path) as f:
                             raw = f.read()
                         trace_json_content = raw[:200_000]
-                        logger.info(f"cannsim-remote: trace downloaded to {trace_local_path} ({len(raw)} bytes)")
+                        logger.info(
+                            f"cannsim-remote: trace downloaded to {trace_local_path} ({len(raw)} bytes)"
+                        )
                     else:
-                        logger.warning("cannsim-remote: trace_core0.json not found after report")
+                        logger.warning(
+                            "cannsim-remote: trace_core0.json not found after report"
+                        )
 
         return {
             "success": True,
@@ -424,94 +457,117 @@ def _cannsim_remote_run(
 # Plugin registration
 # ---------------------------------------------------------------------------
 
+
 def register(ctx) -> None:
     ctx.register_tool(
         name="cannsim_remote_run",
         toolset="triton_ascend",
         schema={
-            "name": "cannsim_remote_run",
-            "description": (
-                "Upload a local directory of C++ Triton kernel sources to a remote Ascend machine, "
-                "build the test binary there (keeping build noise out of the trace), run "
-                "'cannsim record -g' wrapping the compiled binary, then run 'cannsim report -n 0 --timeline' "
-                "to produce trace_core0.json, download it, and return its contents for optimization analysis. "
-                "Requires env vars: CANNSIM_REMOTE_HOST, CANNSIM_REMOTE_USER, CANNSIM_REMOTE_PASS."
-            ),
+            "name":
+            "cannsim_remote_run",
+            "description":
+            ("Upload a local directory of C++ Triton kernel sources to a remote Ascend machine, "
+             "build the test binary there (keeping build noise out of the trace), run "
+             "'cannsim record -g' wrapping the compiled binary, then run 'cannsim report -n 0 --timeline' "
+             "to produce trace_core0.json, download it, and return its contents for optimization analysis. "
+             "Requires env vars: CANNSIM_REMOTE_HOST, CANNSIM_REMOTE_USER, CANNSIM_REMOTE_PASS."
+             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "local_dir": {
-                        "type": "string",
-                        "description": "Local directory containing C++ sources, CMakeLists.txt, and run_script.",
+                        "type":
+                        "string",
+                        "description":
+                        "Local directory containing C++ sources, CMakeLists.txt, and run_script.",
                     },
                     "run_script": {
-                        "type": "string",
-                        "description": "Filename of the build/run shell script inside local_dir (e.g. 'run_kernel.sh').",
+                        "type":
+                        "string",
+                        "description":
+                        "Filename of the build/run shell script inside local_dir (e.g. 'run_kernel.sh').",
                     },
                     "binary_name": {
-                        "type": "string",
-                        "description": (
-                            "Name of the compiled test binary inside local_dir that cannsim record will wrap. "
-                            "Default: 'test_kernel'. cannsim wraps THIS binary — not the run script."
-                        ),
+                        "type":
+                        "string",
+                        "description":
+                        ("Name of the compiled test binary inside local_dir that cannsim record will wrap. "
+                         "Default: 'test_kernel'. cannsim wraps THIS binary — not the run script."
+                         ),
                     },
                     "build_cmd": {
-                        "type": "string",
-                        "description": (
-                            "Shell command to build the binary on the remote, executed inside the job dir. "
-                            "Default: 'bash <run_script> build'. "
-                            "The build runs BEFORE cannsim record so compiler noise stays out of the trace."
-                        ),
+                        "type":
+                        "string",
+                        "description":
+                        ("Shell command to build the binary on the remote, executed inside the job dir. "
+                         "Default: 'bash <run_script> build'. "
+                         "The build runs BEFORE cannsim record so compiler noise stays out of the trace."
+                         ),
                     },
                     "job_name": {
-                        "type": "string",
-                        "description": "Name of the job subdirectory on the remote (default: basename + timestamp).",
+                        "type":
+                        "string",
+                        "description":
+                        "Name of the job subdirectory on the remote (default: basename + timestamp).",
                     },
                     "soc_version": {
-                        "type": "string",
-                        "description": "cannsim -s value (default: CANNSIM_SOC_VERSION env or 'Ascend950').",
+                        "type":
+                        "string",
+                        "description":
+                        "cannsim -s value (default: CANNSIM_SOC_VERSION env or 'Ascend950').",
                     },
                     "cannsim_output_subdir": {
-                        "type": "string",
-                        "description": "Subdirectory inside the remote job dir for cannsim output (default: 'output').",
+                        "type":
+                        "string",
+                        "description":
+                        "Subdirectory inside the remote job dir for cannsim output (default: 'output').",
                     },
                     "gen_report": {
-                        "type": "boolean",
-                        "description": (
-                            "If true (default), pass -g to cannsim record and run 'cannsim report -n 0 --timeline' "
-                            "to produce trace_core0.json. The trace JSON is returned in the 'trace_json' field. "
-                            "Always use true for optimization work — cycle counts from cannsim.log are not actionable."
-                        ),
+                        "type":
+                        "boolean",
+                        "description":
+                        ("If true (default), pass -g to cannsim record and run 'cannsim report -n 0 --timeline' "
+                         "to produce trace_core0.json. The trace JSON is returned in the 'trace_json' field. "
+                         "Always use true for optimization work — cycle counts from cannsim.log are not actionable."
+                         ),
                     },
                     "timeout": {
-                        "type": "integer",
-                        "description": "SSH timeout for the cannsim record step in seconds (default: 600).",
+                        "type":
+                        "integer",
+                        "description":
+                        "SSH timeout for the cannsim record step in seconds (default: 600).",
                     },
                     "report_timeout": {
-                        "type": "integer",
-                        "description": "SSH timeout for the cannsim report step in seconds (default: 300).",
+                        "type":
+                        "integer",
+                        "description":
+                        "SSH timeout for the cannsim report step in seconds (default: 300).",
                     },
                 },
                 "required": ["local_dir", "run_script"],
             },
         },
-        handler=lambda args, **kw: json.dumps(_cannsim_remote_run(
-            local_dir=args["local_dir"],
-            run_script=args["run_script"],
-            binary_name=args.get("binary_name", "test_kernel"),
-            build_cmd=args.get("build_cmd"),
-            job_name=args.get("job_name"),
-            soc_version=args.get("soc_version"),
-            cannsim_output_subdir=args.get("cannsim_output_subdir", "output"),
-            gen_report=args.get("gen_report", True),
-            timeout=args.get("timeout", 600),
-            report_timeout=args.get("report_timeout", 300),
-        )),
+        handler=lambda args, **kw: json.dumps(
+            _cannsim_remote_run(
+                local_dir=args["local_dir"],
+                run_script=args["run_script"],
+                binary_name=args.get("binary_name", "test_kernel"),
+                build_cmd=args.get("build_cmd"),
+                job_name=args.get("job_name"),
+                soc_version=args.get("soc_version"),
+                cannsim_output_subdir=args.get("cannsim_output_subdir",
+                                               "output"),
+                gen_report=args.get("gen_report", True),
+                timeout=args.get("timeout", 600),
+                report_timeout=args.get("report_timeout", 300),
+            )),
         check_fn=lambda: bool(
-            os.environ.get("CANNSIM_REMOTE_HOST")
-            and os.environ.get("CANNSIM_REMOTE_USER")
-            and os.environ.get("CANNSIM_REMOTE_PASS")
-            and os.environ.get("CANNSIM_REMOTE_PORT")
-        ),
-        requires_env=["CANNSIM_REMOTE_HOST", "CANNSIM_REMOTE_USER", "CANNSIM_REMOTE_PASS", "CANNSIM_REMOTE_PORT"],
+            os.environ.get("CANNSIM_REMOTE_HOST") and os.environ
+            .get("CANNSIM_REMOTE_USER") and os.environ.get(
+                "CANNSIM_REMOTE_PASS") and os.environ.get("CANNSIM_REMOTE_PORT"
+                                                          )),
+        requires_env=[
+            "CANNSIM_REMOTE_HOST", "CANNSIM_REMOTE_USER",
+            "CANNSIM_REMOTE_PASS", "CANNSIM_REMOTE_PORT"
+        ],
     )

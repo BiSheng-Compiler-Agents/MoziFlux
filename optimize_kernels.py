@@ -59,12 +59,12 @@ logging.basicConfig(
 log = logging.getLogger("optimize_kernels")
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-ROOT        = Path(__file__).parent
+ROOT = Path(__file__).parent
 DATASET_DIR = ROOT / "datasets" / "KernelBench_Triton"
-STATE_FILE  = ROOT / "optimize_state.json"
+STATE_FILE = ROOT / "optimize_state.json"
 
 # ── Agent config ───────────────────────────────────────────────────────────────
-MODEL    = "owl-alpha"
+MODEL = "owl-alpha"
 PROVIDER = "openrouter"
 
 # ── Per-kernel task prompt ─────────────────────────────────────────────────────
@@ -116,6 +116,7 @@ Do not modify the baseline file. Write only opt_* and profile_kernels.py.
 
 # ── State management ───────────────────────────────────────────────────────────
 
+
 def load_state() -> dict:
     """Load optimization state from JSON, or return empty state."""
     if STATE_FILE.exists():
@@ -132,8 +133,11 @@ def save_state(state: dict) -> None:
     tmp.replace(STATE_FILE)
 
 
-def mark_kernel(state: dict, kernel_name: str, status: str,
-                detail: str = "", files: list = None) -> None:
+def mark_kernel(state: dict,
+                kernel_name: str,
+                status: str,
+                detail: str = "",
+                files: list = None) -> None:
     """Update a kernel's status in the state dict and save."""
     state["kernels"][kernel_name] = {
         "status": status,
@@ -145,6 +149,7 @@ def mark_kernel(state: dict, kernel_name: str, status: str,
 
 
 # ── Kernel discovery ───────────────────────────────────────────────────────────
+
 
 def discover_kernels(level: int = None) -> list[Path]:
     """Return sorted list of kernel directories, optionally filtered by level."""
@@ -158,8 +163,7 @@ def get_baseline_file(kernel_dir: Path) -> Path | None:
     """Find the baseline .py file (not opt_*, not profile_*)."""
     candidates = [
         f for f in kernel_dir.glob("*.py")
-        if not f.name.startswith("opt_")
-        and "profile" not in f.name.lower()
+        if not f.name.startswith("opt_") and "profile" not in f.name.lower()
     ]
     return candidates[0] if len(candidates) == 1 else None
 
@@ -169,11 +173,11 @@ def kernel_is_complete(kernel_dir: Path) -> tuple[bool, list[str]]:
     Check whether a kernel directory has all three required files.
     Returns (is_complete, list_of_missing_files).
     """
-    files    = [f.name for f in kernel_dir.glob("*.py")]
+    files = [f.name for f in kernel_dir.glob("*.py")]
     baseline = get_baseline_file(kernel_dir)
-    missing  = []
+    missing = []
 
-    has_opt     = any(f.startswith("opt_") for f in files)
+    has_opt = any(f.startswith("opt_") for f in files)
     has_profile = any("profile" in f.lower() for f in files)
 
     if not has_opt:
@@ -185,6 +189,7 @@ def kernel_is_complete(kernel_dir: Path) -> tuple[bool, list[str]]:
 
 
 # ── Per-kernel optimization via Hermes agent ───────────────────────────────────
+
 
 def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
     """
@@ -204,18 +209,30 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
     complete, missing = kernel_is_complete(kernel_dir)
     if complete:
         log.info("  ✓ %s already complete (skipping)", name)
-        mark_kernel(state, name, "done", "already complete on disk",
+        mark_kernel(state,
+                    name,
+                    "done",
+                    "already complete on disk",
                     files=[f.name for f in kernel_dir.glob("*.py")])
-        return {"kernel": name, "status": "skipped",
-                "detail": "already complete", "files": [], "elapsed_s": 0.0}
+        return {
+            "kernel": name,
+            "status": "skipped",
+            "detail": "already complete",
+            "files": [],
+            "elapsed_s": 0.0
+        }
 
     baseline = get_baseline_file(kernel_dir)
     if baseline is None:
         log.warning("  ✗ %s — cannot find unique baseline file", name)
         mark_kernel(state, name, "failed", "no unique baseline file found")
-        return {"kernel": name, "status": "failed",
-                "detail": "no unique baseline file found", "files": [],
-                "elapsed_s": time.time() - t0}
+        return {
+            "kernel": name,
+            "status": "failed",
+            "detail": "no unique baseline file found",
+            "files": [],
+            "elapsed_s": time.time() - t0
+        }
 
     prompt = TASK_PROMPT.format(
         kernel_dir=str(kernel_dir),
@@ -230,12 +247,12 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
         # Each kernel gets its own isolated task_id so tool calls,
         # working directories and sessions don't bleed across kernels.
         session_id=f"kernelbench-{name}",
-        max_iterations=90, 
-        save_trajectories=True
-    )
+        max_iterations=90,
+        save_trajectories=True)
 
     try:
-        mark_kernel(state, name, "running", f"started {datetime.now(timezone.utc).isoformat()}")
+        mark_kernel(state, name, "running",
+                    f"started {datetime.now(timezone.utc).isoformat()}")
         result = agent.run_conversation(
             user_message=prompt,
             task_id=f"kernelbench-{name}",
@@ -246,7 +263,9 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
         # so the root hermes.session span would stay open forever without this.
         try:
             from hermes_cli.plugins import invoke_hook
-            invoke_hook("on_session_finalize", session_id=f"kernelbench-{name}", platform="python")
+            invoke_hook("on_session_finalize",
+                        session_id=f"kernelbench-{name}",
+                        platform="python")
         except Exception:
             pass
 
@@ -256,36 +275,54 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
 
         if complete_after:
             files = [f.name for f in kernel_dir.glob("*.py")]
-            log.info("  ✓ %s done (%.0fs, %d files)", name, elapsed, len(files))
-            mark_kernel(state, name, "done",
+            log.info("  ✓ %s done (%.0fs, %d files)", name, elapsed,
+                     len(files))
+            mark_kernel(state,
+                        name,
+                        "done",
                         detail=f"elapsed {elapsed:.0f}s",
                         files=files)
-            return {"kernel": name, "status": "done",
-                    "detail": f"elapsed {elapsed:.0f}s",
-                    "files": files, "elapsed_s": elapsed}
+            return {
+                "kernel": name,
+                "status": "done",
+                "detail": f"elapsed {elapsed:.0f}s",
+                "files": files,
+                "elapsed_s": elapsed
+            }
         else:
             detail = f"agent finished but missing: {missing_after}"
             log.warning("  ⚠ %s incomplete — %s", name, detail)
             mark_kernel(state, name, "incomplete", detail)
-            return {"kernel": name, "status": "incomplete",
-                    "detail": detail, "files": [], "elapsed_s": elapsed}
+            return {
+                "kernel": name,
+                "status": "incomplete",
+                "detail": detail,
+                "files": [],
+                "elapsed_s": elapsed
+            }
 
     except Exception as e:
         elapsed = time.time() - t0
         log.error("  ✗ %s failed after %.0fs: %s", name, elapsed, e)
         mark_kernel(state, name, "failed", str(e))
-        return {"kernel": name, "status": "failed",
-                "detail": str(e), "files": [], "elapsed_s": elapsed}
+        return {
+            "kernel": name,
+            "status": "failed",
+            "detail": str(e),
+            "files": [],
+            "elapsed_s": elapsed
+        }
 
 
 # ── Summary printing ───────────────────────────────────────────────────────────
 
+
 def print_summary(results: list[dict], state: dict) -> None:
     """Print a final run summary and overall state tallies."""
-    done       = [r for r in results if r["status"] == "done"]
-    skipped    = [r for r in results if r["status"] == "skipped"]
+    done = [r for r in results if r["status"] == "done"]
+    skipped = [r for r in results if r["status"] == "skipped"]
     incomplete = [r for r in results if r["status"] == "incomplete"]
-    failed     = [r for r in results if r["status"] == "failed"]
+    failed = [r for r in results if r["status"] == "failed"]
 
     print()
     print("=" * 60)
@@ -323,23 +360,36 @@ def print_summary(results: list[dict], state: dict) -> None:
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Automated Triton kernel optimization pipeline via Hermes agent"
-    )
-    parser.add_argument("--dry-run",       action="store_true",
+        description=
+        "Automated Triton kernel optimization pipeline via Hermes agent")
+    parser.add_argument("--dry-run",
+                        action="store_true",
                         help="Print which kernels would be processed and exit")
-    parser.add_argument("--level",         type=int, choices=[1, 2],
+    parser.add_argument("--level",
+                        type=int,
+                        choices=[1, 2],
                         help="Process only Level-1 or Level-2 kernels")
-    parser.add_argument("--kernel",        type=str,
+    parser.add_argument("--kernel",
+                        type=str,
                         help="Process a single kernel by directory name")
-    parser.add_argument("--retry-failed",  action="store_true",
-                        help="Re-run kernels marked failed or incomplete in state")
-    parser.add_argument("--force",         action="store_true",
+    parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Re-run kernels marked failed or incomplete in state")
+    parser.add_argument("--force",
+                        action="store_true",
                         help="Re-run all kernels, ignoring state")
-    parser.add_argument("--max",           type=int, default=None,
-                        help="Maximum number of kernels to process in this run")
-    parser.add_argument("--workers",       type=int, default=1,
+    parser.add_argument(
+        "--max",
+        type=int,
+        default=None,
+        help="Maximum number of kernels to process in this run")
+    parser.add_argument("--workers",
+                        type=int,
+                        default=1,
                         help="Number of parallel workers (default: 1)")
     args = parser.parse_args()
 
@@ -376,7 +426,7 @@ def main():
             to_process.append(d)
         elif existing_status in ("pending", "running", ""):
             to_process.append(d)
-        elif existing_status not in ("done",):
+        elif existing_status not in ("done", ):
             # running/unknown → include by default
             to_process.append(d)
 
@@ -420,12 +470,17 @@ def main():
                 except Exception as e:
                     d = futures[fut]
                     log.error("Unexpected error for %s: %s", d.name, e)
-                    results.append({"kernel": d.name, "status": "failed",
-                                    "detail": str(e), "files": [],
-                                    "elapsed_s": 0.0})
+                    results.append({
+                        "kernel": d.name,
+                        "status": "failed",
+                        "detail": str(e),
+                        "files": [],
+                        "elapsed_s": 0.0
+                    })
 
     total_elapsed = time.time() - t_start
-    log.info("Total elapsed: %.0fs (%.1f min)", total_elapsed, total_elapsed / 60)
+    log.info("Total elapsed: %.0fs (%.1f min)", total_elapsed,
+             total_elapsed / 60)
     print_summary(results, state)
 
 

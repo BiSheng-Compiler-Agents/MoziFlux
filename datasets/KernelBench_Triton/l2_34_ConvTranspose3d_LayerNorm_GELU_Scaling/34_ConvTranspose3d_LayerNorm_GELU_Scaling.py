@@ -1,30 +1,66 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         # Add lighter/wider mixes to improve occupancy on small N
-        triton.Config({'BLOCK_SIZE_N': 64, 'ROWS_PER_CTA': 8}, num_warps=1, num_stages=2),
-        triton.Config({'BLOCK_SIZE_N': 64, 'ROWS_PER_CTA': 16}, num_warps=2, num_stages=2),
-        triton.Config({'BLOCK_SIZE_N': 64, 'ROWS_PER_CTA': 32}, num_warps=2, num_stages=3),
-        triton.Config({'BLOCK_SIZE_N': 128, 'ROWS_PER_CTA': 8}, num_warps=4, num_stages=3),
-        triton.Config({'BLOCK_SIZE_N': 128, 'ROWS_PER_CTA': 16}, num_warps=4, num_stages=4),
-        triton.Config({'BLOCK_SIZE_N': 256, 'ROWS_PER_CTA': 8}, num_warps=8, num_stages=2),
-        triton.Config({'BLOCK_SIZE_N': 256, 'ROWS_PER_CTA': 16}, num_warps=8, num_stages=3),
+        triton.Config({
+            'BLOCK_SIZE_N': 64,
+            'ROWS_PER_CTA': 8
+        },
+                      num_warps=1,
+                      num_stages=2),
+        triton.Config({
+            'BLOCK_SIZE_N': 64,
+            'ROWS_PER_CTA': 16
+        },
+                      num_warps=2,
+                      num_stages=2),
+        triton.Config({
+            'BLOCK_SIZE_N': 64,
+            'ROWS_PER_CTA': 32
+        },
+                      num_warps=2,
+                      num_stages=3),
+        triton.Config({
+            'BLOCK_SIZE_N': 128,
+            'ROWS_PER_CTA': 8
+        },
+                      num_warps=4,
+                      num_stages=3),
+        triton.Config({
+            'BLOCK_SIZE_N': 128,
+            'ROWS_PER_CTA': 16
+        },
+                      num_warps=4,
+                      num_stages=4),
+        triton.Config({
+            'BLOCK_SIZE_N': 256,
+            'ROWS_PER_CTA': 8
+        },
+                      num_warps=8,
+                      num_stages=2),
+        triton.Config({
+            'BLOCK_SIZE_N': 256,
+            'ROWS_PER_CTA': 16
+        },
+                      num_warps=8,
+                      num_stages=3),
     ],
     key=['n_cols'],
 )
 @triton.jit
 def _layernorm_gelu_scale_kernel(
-    x_ptr,           # *[n_rows, n_cols]
-    y_ptr,           # *[n_rows, n_cols] (stores to dtype(y_ptr))
-    w_ptr,           # *[n_cols]
-    b_ptr,           # *[n_cols]
-    n_rows,          # total number of rows = prod(shape[:-1])
-    n_cols,          # size of last dim
-    inv_n_cols,      # 1.0 / n_cols
-    eps,             # eps for layernorm
-    scale,           # scaling factor after GELU
+    x_ptr,  # *[n_rows, n_cols]
+    y_ptr,  # *[n_rows, n_cols] (stores to dtype(y_ptr))
+    w_ptr,  # *[n_cols]
+    b_ptr,  # *[n_cols]
+    n_rows,  # total number of rows = prod(shape[:-1])
+    n_cols,  # size of last dim
+    inv_n_cols,  # 1.0 / n_cols
+    eps,  # eps for layernorm
+    scale,  # scaling factor after GELU
     ROWS_PER_CTA: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
 ):
@@ -56,7 +92,8 @@ def _layernorm_gelu_scale_kernel(
             next_row = row + 1
             offs_n = next_row * n_cols + cols
             mask_n = (next_row < n_rows) & col_mask
-            x_buf = tl.load(x_ptr + offs_n, mask=mask_n, other=0.0).to(tl.float32)
+            x_buf = tl.load(x_ptr + offs_n, mask=mask_n,
+                            other=0.0).to(tl.float32)
 
         # Compute statistics
         mu = tl.sum(x, axis=0) * inv_n_cols

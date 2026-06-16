@@ -1,17 +1,25 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_maxpool2x2_hardtanh_mean_tanh(
-    x_ptr,                # ptr to input [B, C, H, W]
-    out_ptr,              # ptr to output [B, C, 1, 1]
-    C, H, W,              # tensor sizes
-    x_stride_b, x_stride_c, x_stride_h, x_stride_w,   # input strides
-    o_stride_b, o_stride_c,                           # output strides
-    hard_min, hard_max,   # hardtanh bounds (float)
+    x_ptr,  # ptr to input [B, C, H, W]
+    out_ptr,  # ptr to output [B, C, 1, 1]
+    C,
+    H,
+    W,  # tensor sizes
+    x_stride_b,
+    x_stride_c,
+    x_stride_h,
+    x_stride_w,  # input strides
+    o_stride_b,
+    o_stride_c,  # output strides
+    hard_min,
+    hard_max,  # hardtanh bounds (float)
     H_OUT: tl.constexpr,  # pooled H = floor(H/2)
     W_OUT: tl.constexpr,  # pooled W = floor(W/2)
-    BLOCK_W: tl.constexpr # tile size covering H_OUT*W_OUT (power-of-two)
+    BLOCK_W: tl.constexpr  # tile size covering H_OUT*W_OUT (power-of-two)
 ):
     # One program per (b, c)
     pid = tl.program_id(axis=0)

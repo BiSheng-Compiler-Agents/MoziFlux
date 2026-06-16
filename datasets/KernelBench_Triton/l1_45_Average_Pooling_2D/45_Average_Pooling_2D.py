@@ -1,15 +1,31 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def avg_pool2d_fwd_kernel(
-    x_ptr, y_ptr,
-    N, C, H, W, OH, OW,
-    in_stride_n, in_stride_c, in_stride_h, in_stride_w,
-    out_stride_n, out_stride_c, out_stride_h, out_stride_w,
-    KH: tl.constexpr, KW: tl.constexpr,
-    SH: tl.constexpr, SW: tl.constexpr,
-    PH: tl.constexpr, PW: tl.constexpr,
+    x_ptr,
+    y_ptr,
+    N,
+    C,
+    H,
+    W,
+    OH,
+    OW,
+    in_stride_n,
+    in_stride_c,
+    in_stride_h,
+    in_stride_w,
+    out_stride_n,
+    out_stride_c,
+    out_stride_h,
+    out_stride_w,
+    KH: tl.constexpr,
+    KW: tl.constexpr,
+    SH: tl.constexpr,
+    SW: tl.constexpr,
+    PH: tl.constexpr,
+    PW: tl.constexpr,
 ):
     pid = tl.program_id(0)
 

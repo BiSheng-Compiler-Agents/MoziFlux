@@ -1,24 +1,25 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _maxpool1d_forward_kernel(
-    x_ptr,                # *T,  input [NC][L_in]
-    y_ptr,                # *T,  output [NC][L_out]
-    idx_ptr,              # *int64, indices [NC][L_out] (optional)
-    L_in,                 # int32
-    L_out,                # int32
-    STRIDE,               # int32
-    PADDING,              # int32
-    DILATION,             # int32
-    line_stride_x,        # int32 = L_in
-    line_stride_y,        # int32 = L_out
-    HAS_INDEX: tl.constexpr,  # bool, whether to write indices
-    K: tl.constexpr,          # kernel size (compile-time)
-    BLOCK: tl.constexpr,      # tile size along output length
+        x_ptr,  # *T,  input [NC][L_in]
+        y_ptr,  # *T,  output [NC][L_out]
+        idx_ptr,  # *int64, indices [NC][L_out] (optional)
+        L_in,  # int32
+        L_out,  # int32
+        STRIDE,  # int32
+        PADDING,  # int32
+        DILATION,  # int32
+        line_stride_x,  # int32 = L_in
+        line_stride_y,  # int32 = L_out
+        HAS_INDEX: tl.constexpr,  # bool, whether to write indices
+        K: tl.constexpr,  # kernel size (compile-time)
+        BLOCK: tl.constexpr,  # tile size along output length
 ):
-    pid_nc = tl.program_id(axis=0)          # which (N,C) line
-    pid_o_blk = tl.program_id(axis=1)       # which output tile
+    pid_nc = tl.program_id(axis=0)  # which (N,C) line
+    pid_o_blk = tl.program_id(axis=1)  # which output tile
 
     o_offsets = pid_o_blk * BLOCK + tl.arange(0, BLOCK)
     mask_o = o_offsets < L_out

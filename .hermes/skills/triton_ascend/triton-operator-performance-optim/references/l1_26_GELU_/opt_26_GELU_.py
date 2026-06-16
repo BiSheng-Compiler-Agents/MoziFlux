@@ -88,6 +88,7 @@ def _gelu_fwd_kernel_even(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -98,7 +99,8 @@ class ModelNew(nn.Module):
         if x.dtype not in supported_dtypes:
             raise RuntimeError(f"Unsupported dtype for ModelNew: {x.dtype}")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked inputs")
 
         x_contig = x.contiguous()
         if x_contig.numel() == 0:
@@ -109,7 +111,7 @@ class ModelNew(nn.Module):
         y = torch.empty_like(x_contig)
         block_rows = 4
         block_cols = 2048
-        grid = lambda meta: (triton.cdiv(rows, block_rows),)
+        grid = lambda meta: (triton.cdiv(rows, block_rows), )
         kernel = _gelu_fwd_kernel_even if rows % block_rows == 0 and cols % block_cols == 0 else _gelu_fwd_kernel
         kernel[grid](
             x_contig.view(-1),

@@ -1,13 +1,18 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_mean_bias_lse(
-    x_ptr,           # float32[N, C, H, W] - contiguous NCHW
-    bias_ptr,        # float32[C, 1, 1]
-    out_ptr,         # float32[N]
-    N, C, H, W,
-    stride_n, stride_c,
+    x_ptr,  # float32[N, C, H, W] - contiguous NCHW
+    bias_ptr,  # float32[C, 1, 1]
+    out_ptr,  # float32[N]
+    N,
+    C,
+    H,
+    W,
+    stride_n,
+    stride_c,
     bias_stride_c,
     BLOCK_C: tl.constexpr,
     BLOCK_HW: tl.constexpr,
@@ -31,7 +36,7 @@ def _fused_mean_bias_lse(
         c_idx = c_start + c_arange
         c_mask = c_idx < C
 
-        sum_c = tl.zeros((BLOCK_C,), dtype=tl.float32)
+        sum_c = tl.zeros((BLOCK_C, ), dtype=tl.float32)
 
         base_c = n_base + c_idx * stride_c
         ptrs_base = base_c[:, None]
@@ -41,7 +46,10 @@ def _fused_mean_bias_lse(
         hw_mask = offs_hw < HW
         ptrs = ptrs_base + offs_hw[None, :]
         load_mask = c_mask[:, None] & hw_mask[None, :]
-        tile = tl.load(x_ptr + ptrs, mask=load_mask, other=0.0, cache_modifier=".cg")
+        tile = tl.load(x_ptr + ptrs,
+                       mask=load_mask,
+                       other=0.0,
+                       cache_modifier=".cg")
 
         for hw_start in range(BLOCK_HW, HW, BLOCK_HW):
             sum_c += tl.sum(tile, axis=1)
@@ -49,12 +57,18 @@ def _fused_mean_bias_lse(
             hw_mask = offs_hw < HW
             ptrs = ptrs_base + offs_hw[None, :]
             load_mask = c_mask[:, None] & hw_mask[None, :]
-            tile = tl.load(x_ptr + ptrs, mask=load_mask, other=0.0, cache_modifier=".cg")
+            tile = tl.load(x_ptr + ptrs,
+                           mask=load_mask,
+                           other=0.0,
+                           cache_modifier=".cg")
 
         sum_c += tl.sum(tile, axis=1)
 
         mean_c = sum_c * inv_hw
-        b = tl.load(bias_ptr + c_idx * bias_stride_c, mask=c_mask, other=0.0, cache_modifier=".ca")
+        b = tl.load(bias_ptr + c_idx * bias_stride_c,
+                    mask=c_mask,
+                    other=0.0,
+                    cache_modifier=".ca")
         v = mean_c + b
         v = tl.where(c_mask, v, NEG_INF)
 

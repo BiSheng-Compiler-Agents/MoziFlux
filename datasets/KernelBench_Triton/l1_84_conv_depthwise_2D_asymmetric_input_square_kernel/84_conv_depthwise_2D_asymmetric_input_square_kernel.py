@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         # Match grid's BLOCK_W=128 to ensure full coverage without changing grid logic
@@ -10,23 +11,23 @@ import triton.language as tl
 )
 @triton.jit
 def _dwconv2d_kernel(
-    x_ptr,           # *const T, [N, C_in, H_in, W_in]
-    w_ptr,           # *const T, [C_out, 1, K, K]
-    b_ptr,           # *const T or nullptr if no bias, [C_out]
-    y_ptr,           # *mut T,   [N, C_out, H_out, W_out]
-    N: tl.constexpr,
-    C_IN,
-    C_OUT,
-    H_IN,
-    W_IN,
-    H_OUT,
-    W_OUT,
-    STRIDE,
-    PADDING,
-    OCPG,           # out_channels per group (= out_channels // in_channels)
-    K: tl.constexpr,               # kernel size (square)
-    HAS_BIAS: tl.constexpr,        # compile-time flag
-    BLOCK_W: tl.constexpr,         # tile size along W_out
+        x_ptr,  # *const T, [N, C_in, H_in, W_in]
+        w_ptr,  # *const T, [C_out, 1, K, K]
+        b_ptr,  # *const T or nullptr if no bias, [C_out]
+        y_ptr,  # *mut T,   [N, C_out, H_out, W_out]
+        N: tl.constexpr,
+        C_IN,
+        C_OUT,
+        H_IN,
+        W_IN,
+        H_OUT,
+        W_OUT,
+        STRIDE,
+        PADDING,
+        OCPG,  # out_channels per group (= out_channels // in_channels)
+        K: tl.constexpr,  # kernel size (square)
+        HAS_BIAS: tl.constexpr,  # compile-time flag
+        BLOCK_W: tl.constexpr,  # tile size along W_out
 ):
     pid_w = tl.program_id(0)
     pid_h = tl.program_id(1)
@@ -82,7 +83,8 @@ def _dwconv2d_kernel(
             # Load input values
             wi_i64 = wi.to(tl.int64)
             x_offsets = base_ncih + wi_i64
-            x_vals = tl.load(x_ptr + x_offsets, mask=mask, other=0).to(tl.float32)
+            x_vals = tl.load(x_ptr + x_offsets, mask=mask,
+                             other=0).to(tl.float32)
 
             # Load weight scalar for (oc, r, s)
             w_offset = w_oc_base + (r * K + s)

@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fill_const_kernel(out_ptr, value, n_elements, BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)

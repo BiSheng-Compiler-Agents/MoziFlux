@@ -1,12 +1,17 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _l2norm_rowwise_kernel(
-    x_ptr, y_ptr,
-    M, N,
-    stride_xm, stride_xn,
-    stride_ym, stride_yn,
+    x_ptr,
+    y_ptr,
+    M,
+    N,
+    stride_xm,
+    stride_xn,
+    stride_ym,
+    stride_yn,
     BLOCK_N: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -27,7 +32,9 @@ def _l2norm_rowwise_kernel(
     while n < N:
         offs = n + cols
         mask = offs < N
-        x = tl.load(row_x_ptr + (n * stride_xn) + col_offs_x, mask=mask, other=0.0)
+        x = tl.load(row_x_ptr + (n * stride_xn) + col_offs_x,
+                    mask=mask,
+                    other=0.0)
         xf = x.to(tl.float32)
         sumsq += tl.sum(xf * xf, axis=0)
         n += BLOCK_N
@@ -40,7 +47,9 @@ def _l2norm_rowwise_kernel(
     while n < N:
         offs = n + cols
         mask = offs < N
-        x = tl.load(row_x_ptr + (n * stride_xn) + col_offs_x, mask=mask, other=0.0)
+        x = tl.load(row_x_ptr + (n * stride_xn) + col_offs_x,
+                    mask=mask,
+                    other=0.0)
         y = x * inv_norm
         tl.store(row_y_ptr + (n * stride_yn) + col_offs_y, y, mask=mask)
         n += BLOCK_N

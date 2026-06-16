@@ -1,8 +1,10 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
-def _sub_hswish_kernel(x_ptr, out_ptr, N, subtract_value, BLOCK_SIZE: tl.constexpr):
+def _sub_hswish_kernel(x_ptr, out_ptr, N, subtract_value,
+                       BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     mask = offs < N
@@ -14,6 +16,7 @@ def _sub_hswish_kernel(x_ptr, out_ptr, N, subtract_value, BLOCK_SIZE: tl.constex
     vp3 = tl.minimum(tl.maximum(vp3, 0.0), 6.0)
     y = v * (vp3 * (1.0 / 6.0))
     tl.store(out_ptr + offs, y, mask=mask)
+
 
 @triton.jit
 def _mish_kernel(x_ptr, out_ptr, N, BLOCK_SIZE: tl.constexpr):
@@ -31,15 +34,20 @@ def _mish_kernel(x_ptr, out_ptr, N, BLOCK_SIZE: tl.constexpr):
     y = x * th
     tl.store(out_ptr + offs, y, mask=mask)
 
+
 @triton.jit
 def _fused_hswish_maxpool_mish_kernel(
-    x_ptr,                  # *flat* input pointer (N*C*H*W)
-    y_ptr,                  # *flat* output pointer (N*C*H_out*W_out)
-    N_OUT,                  # total number of output elements
-    N, C, H, W,             # input dims
-    H_OUT, W_OUT,           # output spatial dims
-    subtract_value,         # scalar
-    K: tl.constexpr,        # pooling kernel size (square), stride = K
+    x_ptr,  # *flat* input pointer (N*C*H*W)
+    y_ptr,  # *flat* output pointer (N*C*H_out*W_out)
+    N_OUT,  # total number of output elements
+    N,
+    C,
+    H,
+    W,  # input dims
+    H_OUT,
+    W_OUT,  # output spatial dims
+    subtract_value,  # scalar
+    K: tl.constexpr,  # pooling kernel size (square), stride = K
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(0)
@@ -67,7 +75,8 @@ def _fused_hswish_maxpool_mish_kernel(
     for kh in tl.static_range(K):
         row_base = base + kh * W
         for kw in tl.static_range(K):
-            v = tl.load(x_ptr + row_base + kw, mask=mask, other=0).to(tl.float32) - subtract_value
+            v = tl.load(x_ptr + row_base + kw, mask=mask, other=0).to(
+                tl.float32) - subtract_value
             vp3 = v + 3.0
             vp3 = tl.minimum(tl.maximum(vp3, 0.0), 6.0)
             hs = v * (vp3 * inv6)

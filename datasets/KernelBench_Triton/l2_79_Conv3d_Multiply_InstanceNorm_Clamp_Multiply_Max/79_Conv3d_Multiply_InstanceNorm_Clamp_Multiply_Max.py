@@ -1,16 +1,17 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _compute_mu_rstd_kernel(
-    x_ptr,         # *f32, input tensor after conv, shape [N*C*S]
-    m_ptr,         # *f32, multiplier, shape [C]
-    mu_ptr,        # *f32, output mean, shape [N*C]
-    rstd_ptr,      # *f32, output rstd, shape [N*C]
-    S,             # int32, number of spatial elements per (N, C)
-    C,             # int32, number of channels
-    eps,           # f32, epsilon for numerical stability
-    BLOCK_S: tl.constexpr,  # tile over spatial dimension
+        x_ptr,  # *f32, input tensor after conv, shape [N*C*S]
+        m_ptr,  # *f32, multiplier, shape [C]
+        mu_ptr,  # *f32, output mean, shape [N*C]
+        rstd_ptr,  # *f32, output rstd, shape [N*C]
+        S,  # int32, number of spatial elements per (N, C)
+        C,  # int32, number of channels
+        eps,  # f32, epsilon for numerical stability
+        BLOCK_S: tl.constexpr,  # tile over spatial dimension
 ):
     pid = tl.program_id(axis=0)  # range: [0, N*C)
     n = pid // C
@@ -47,19 +48,20 @@ def _compute_mu_rstd_kernel(
     tl.store(mu_ptr + base_nc, mean)
     tl.store(rstd_ptr + base_nc, rstd)
 
+
 @triton.jit
 def _postprocess_and_reduce_max_kernel(
-    x_ptr,         # *f32, input after conv, shape [N*C*S]
-    m_ptr,         # *f32, multiplier, shape [C]
-    mu_ptr,        # *f32, mean per (N,C), shape [N*C]
-    rstd_ptr,      # *f32, rstd per (N,C), shape [N*C]
-    out_ptr,       # *f32, output max over C, shape [N*S]
-    S,             # int32
-    C,             # int32
-    clamp_min,     # f32
-    clamp_max,     # f32
-    BLOCK_S: tl.constexpr,  # tile over spatial
-    BLOCK_C: tl.constexpr,  # tile over channels
+        x_ptr,  # *f32, input after conv, shape [N*C*S]
+        m_ptr,  # *f32, multiplier, shape [C]
+        mu_ptr,  # *f32, mean per (N,C), shape [N*C]
+        rstd_ptr,  # *f32, rstd per (N,C), shape [N*C]
+        out_ptr,  # *f32, output max over C, shape [N*S]
+        S,  # int32
+        C,  # int32
+        clamp_min,  # f32
+        clamp_max,  # f32
+        BLOCK_S: tl.constexpr,  # tile over spatial
+        BLOCK_C: tl.constexpr,  # tile over channels
 ):
     pid_n = tl.program_id(axis=0)  # [0, N)
     pid_sb = tl.program_id(axis=1)  # [0, ceil_div(S, BLOCK_S))
@@ -81,8 +83,10 @@ def _postprocess_and_reduce_max_kernel(
 
         # Load per-channel stats and multiplier
         m_vec = tl.load(m_ptr + c_offs, mask=c_mask, other=0.0).to(tl.float32)
-        mu_vec = tl.load(mu_ptr + base_nC + c_offs, mask=c_mask, other=0.0).to(tl.float32)
-        rstd_vec = tl.load(rstd_ptr + base_nC + c_offs, mask=c_mask, other=0.0).to(tl.float32)
+        mu_vec = tl.load(mu_ptr + base_nC + c_offs, mask=c_mask,
+                         other=0.0).to(tl.float32)
+        rstd_vec = tl.load(rstd_ptr + base_nC + c_offs, mask=c_mask,
+                           other=0.0).to(tl.float32)
 
         # Build 2D pointers for [Ctile, Stile]
         nc_idx = (base_nC + c_offs)[:, None]  # [Ctile, 1]

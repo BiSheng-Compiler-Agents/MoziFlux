@@ -1,15 +1,16 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_pointwise_ncdhw_kernel(
-    x_ptr,           # *f32
-    sf_ptr,          # *f32, shape [C]
-    bias_ptr,        # *f32, shape [C]
-    out_ptr,         # *f32
-    n_elements,      # int
-    C,               # int
-    DHW,             # int = D*H*W
+    x_ptr,  # *f32
+    sf_ptr,  # *f32, shape [C]
+    bias_ptr,  # *f32, shape [C]
+    out_ptr,  # *f32
+    n_elements,  # int
+    C,  # int
+    DHW,  # int = D*H*W
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)

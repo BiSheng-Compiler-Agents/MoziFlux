@@ -1,14 +1,18 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _row_scale_kernel(
-    a_ptr,        # *A: shape [N]
-    b_ptr,        # *B: shape [N, M]
-    c_ptr,        # *C: shape [N, M]
-    N, M,
-    stride_bm, stride_bn,
-    stride_cm, stride_cn,
+    a_ptr,  # *A: shape [N]
+    b_ptr,  # *B: shape [N, M]
+    c_ptr,  # *C: shape [N, M]
+    N,
+    M,
+    stride_bm,
+    stride_bn,
+    stride_cm,
+    stride_cn,
     BLOCK_N: tl.constexpr,
 ):
     pid_m = tl.program_id(0)  # row id
@@ -45,6 +49,9 @@ def _row_scale_kernel(
     else:
         # Boundary-safe masked path
         mask = row_in_bounds & cols_in_bounds
-        a_val = tl.load(a_ptr + row, mask=row_in_bounds, other=0, cache_modifier=".ca")
+        a_val = tl.load(a_ptr + row,
+                        mask=row_in_bounds,
+                        other=0,
+                        cache_modifier=".ca")
         b = tl.load(b_ptrs, mask=mask, other=0, cache_modifier=".cg")
         tl.store(c_ptrs, b * a_val, mask=mask)

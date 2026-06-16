@@ -1,16 +1,17 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _rowwise_lse_leaky_gelu2(
-    x_ptr,           # pointer to [B, N] input
-    y_ptr,           # pointer to [B, 1] output
-    stride_xm,       # stride between rows for x
-    stride_xn,       # stride between cols for x
-    stride_ym,       # stride between rows for y
-    NEG_SLOPE: tl.constexpr,  # leaky ReLU negative slope
-    N: tl.constexpr,          # number of columns (out_features)
-    BLOCK_N: tl.constexpr,    # tile size along N
+        x_ptr,  # pointer to [B, N] input
+        y_ptr,  # pointer to [B, 1] output
+        stride_xm,  # stride between rows for x
+        stride_xn,  # stride between cols for x
+        stride_ym,  # stride between rows for y
+        NEG_SLOPE: tl.constexpr,  # leaky ReLU negative slope
+        N: tl.constexpr,  # number of columns (out_features)
+        BLOCK_N: tl.constexpr,  # tile size along N
 ):
     pid = tl.program_id(0)  # row id
 
@@ -19,13 +20,15 @@ def _rowwise_lse_leaky_gelu2(
     row_ptr = x_ptr + pid * stride_xm
 
     # Streaming LogSumExp in a single pass for numeric stability and fewer global loads
-    m = tl.full((1,), -float("inf"), dtype=tl.float32)  # running max
-    s = tl.zeros((1,), dtype=tl.float32)                # running sum of exp shifted by m
+    m = tl.full((1, ), -float("inf"), dtype=tl.float32)  # running max
+    s = tl.zeros((1, ), dtype=tl.float32)  # running sum of exp shifted by m
     for n0 in range(0, N, BLOCK_N):
         offs = n0 + r
         mask = offs < N
         # Load masked lanes as -inf so we can drop further masking/where ops
-        vals = tl.load(row_ptr + offs * stride_xn, mask=mask, other=-float("inf")).to(tl.float32)
+        vals = tl.load(row_ptr + offs * stride_xn,
+                       mask=mask,
+                       other=-float("inf")).to(tl.float32)
         # tile max
         tile_max = tl.max(vals, axis=0)
         m_new = tl.maximum(m, tile_max)

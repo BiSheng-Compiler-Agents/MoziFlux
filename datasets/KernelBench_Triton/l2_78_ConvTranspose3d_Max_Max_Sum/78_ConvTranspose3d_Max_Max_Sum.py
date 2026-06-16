@@ -1,24 +1,58 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_H': 4, 'BLOCK_W': 32}, num_warps=4, num_stages=2),
-        triton.Config({'BLOCK_H': 8, 'BLOCK_W': 32}, num_warps=4, num_stages=2),
-        triton.Config({'BLOCK_H': 4, 'BLOCK_W': 64}, num_warps=8, num_stages=2),
-        triton.Config({'BLOCK_H': 8, 'BLOCK_W': 64}, num_warps=8, num_stages=2),
-        triton.Config({'BLOCK_H': 2, 'BLOCK_W': 128}, num_warps=8, num_stages=2),
+        triton.Config({
+            'BLOCK_H': 4,
+            'BLOCK_W': 32
+        }, num_warps=4, num_stages=2),
+        triton.Config({
+            'BLOCK_H': 8,
+            'BLOCK_W': 32
+        }, num_warps=4, num_stages=2),
+        triton.Config({
+            'BLOCK_H': 4,
+            'BLOCK_W': 64
+        }, num_warps=8, num_stages=2),
+        triton.Config({
+            'BLOCK_H': 8,
+            'BLOCK_W': 64
+        }, num_warps=8, num_stages=2),
+        triton.Config({
+            'BLOCK_H': 2,
+            'BLOCK_W': 128
+        },
+                      num_warps=8,
+                      num_stages=2),
     ],
     key=['H2', 'W2'],
 )
 @triton.jit
 def _maxpool_6x_3d_kernel(
-    x_ptr, out_ptr,
-    N, C, D, H, W,
-    stride_n, stride_c, stride_d, stride_h, stride_w,
-    out_stride_n, out_stride_c, out_stride_d, out_stride_h, out_stride_w,
-    D2, H2, W2,
-    BLOCK_H: tl.constexpr, BLOCK_W: tl.constexpr,
+    x_ptr,
+    out_ptr,
+    N,
+    C,
+    D,
+    H,
+    W,
+    stride_n,
+    stride_c,
+    stride_d,
+    stride_h,
+    stride_w,
+    out_stride_n,
+    out_stride_c,
+    out_stride_d,
+    out_stride_h,
+    out_stride_w,
+    D2,
+    H2,
+    W2,
+    BLOCK_H: tl.constexpr,
+    BLOCK_W: tl.constexpr,
 ):
     pid_w = tl.program_id(0)
     pid_h = tl.program_id(1)
@@ -64,5 +98,6 @@ def _maxpool_6x_3d_kernel(
 
     # Store results
     out_base = out_ptr + n * out_stride_n + c * out_stride_c + d_out * out_stride_d
-    out_ptrs = out_base + h_out[:, None] * out_stride_h + w_out[None, :] * out_stride_w
+    out_ptrs = out_base + h_out[:, None] * out_stride_h + w_out[
+        None, :] * out_stride_w
     tl.store(out_ptrs, m, mask=m_hw)

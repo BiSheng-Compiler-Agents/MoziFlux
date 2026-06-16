@@ -1,43 +1,135 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_warps=4, num_stages=2),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_warps=8, num_stages=2),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_warps=8, num_stages=2),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_warps=8, num_stages=3),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 64}, num_warps=8, num_stages=3),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32
+        },
+                      num_warps=4,
+                      num_stages=2),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=2),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=2),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=3),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=3),
         # Tuned configs for Hopper-class GPUs (H200)
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_warps=8, num_stages=3),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 64}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 16}, num_warps=4, num_stages=3),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=3),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 16
+        },
+                      num_warps=4,
+                      num_stages=3),
         # Extra high-occupancy configs for larger tiles on H200
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 128}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 32}, num_warps=8, num_stages=3),
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 64}, num_warps=8, num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 128
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 256,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=3),
+        triton.Config({
+            "BLOCK_M": 256,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=4),
     ],
     key=["M", "Cout", "K"],
 )
 @triton.jit
 def _conv3d_implicit_gemm_kernel(
-    x_ptr,       # *: [N, Cin, Din, Hin, Win] contiguous
-    w2d_ptr,     # *: [K, Cout] contiguous, where K = Cin*Kd*Kh*Kw
-    y_ptr,       # float32* [N, Cout, Dout, Hout, Wout] contiguous
-    N, Cin, Din, Hin, Win,
-    Cout, Kd, Kh, Kw,
-    Dout, Hout, Wout,
-    stride_d, stride_h, stride_w,
-    pad_d, pad_h, pad_w,
-    dil_d, dil_h, dil_w,
-    M, K,  # M = N*Dout*Hout*Wout, K = Cin*Kd*Kh*Kw
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
+    x_ptr,  # *: [N, Cin, Din, Hin, Win] contiguous
+    w2d_ptr,  # *: [K, Cout] contiguous, where K = Cin*Kd*Kh*Kw
+    y_ptr,  # float32* [N, Cout, Dout, Hout, Wout] contiguous
+    N,
+    Cin,
+    Din,
+    Hin,
+    Win,
+    Cout,
+    Kd,
+    Kh,
+    Kw,
+    Dout,
+    Hout,
+    Wout,
+    stride_d,
+    stride_h,
+    stride_w,
+    pad_d,
+    pad_h,
+    pad_w,
+    dil_d,
+    dil_h,
+    dil_w,
+    M,
+    K,  # M = N*Dout*Hout*Wout, K = Cin*Kd*Kh*Kw
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
 ):
     pid_m = tl.program_id(axis=0)
     pid_n = tl.program_id(axis=1)
 
-    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)  # rows: flattened (n, d, h, w)
+    offs_m = pid_m * BLOCK_M + tl.arange(
+        0, BLOCK_M)  # rows: flattened (n, d, h, w)
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)  # cols: output channels
 
     m_mask = offs_m < M
@@ -92,25 +184,18 @@ def _conv3d_implicit_gemm_kernel(
         in_w = in_w_base[:, None] + kw_idx[None, :] * dil_w
 
         # bounds check on input coordinates
-        valid_in = (
-            m_mask[:, None]
-            & k_mask[None, :]
-            & (in_d >= 0)
-            & (in_d < Din)
-            & (in_h >= 0)
-            & (in_h < Hin)
-            & (in_w >= 0)
-            & (in_w < Win)
-        )
+        valid_in = (m_mask[:, None]
+                    & k_mask[None, :]
+                    & (in_d >= 0)
+                    & (in_d < Din)
+                    & (in_h >= 0)
+                    & (in_h < Hin)
+                    & (in_w >= 0)
+                    & (in_w < Win))
 
         # compute input addresses (NCDHW contiguous) using stride arithmetic
-        addr_x = (
-            n_idx[:, None] * sN_x
-            + ci_idx[None, :] * sC_x
-            + in_d * sD_x
-            + in_h * sH_x
-            + in_w
-        )
+        addr_x = (n_idx[:, None] * sN_x + ci_idx[None, :] * sC_x +
+                  in_d * sD_x + in_h * sH_x + in_w)
         x_tile = tl.load(x_ptr + addr_x.to(tl.int64), mask=valid_in, other=0)
 
         # load weight tile w2d: [K, Cout]
@@ -123,12 +208,7 @@ def _conv3d_implicit_gemm_kernel(
         acc += tl.dot(x_tile, w_tile)
 
     # store to y (NCDHW contiguous) via precomputed strides
-    y_addr = (
-        n_idx[:, None] * sN_y
-        + offs_n[None, :] * sC_y
-        + d_idx[:, None] * sD_y
-        + h_idx[:, None] * sH_y
-        + w_idx[:, None]
-    )
+    y_addr = (n_idx[:, None] * sN_y + offs_n[None, :] * sC_y +
+              d_idx[:, None] * sD_y + h_idx[:, None] * sH_y + w_idx[:, None])
     y_mask = m_mask[:, None] & n_mask[None, :]
     tl.store(y_ptr + y_addr.to(tl.int64), acc, mask=y_mask)

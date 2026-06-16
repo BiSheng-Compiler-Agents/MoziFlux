@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.autotune(
     configs=[
         triton.Config({}, num_warps=4, num_stages=2),
@@ -13,13 +14,15 @@ import triton.language as tl
 )
 @triton.jit
 def _fused_hswish_relu_softmax_mean_kernel(
-    x_ptr,             # *float or *half, shape [N, C, S] (S = D*H*W), contiguous N,C,S layout
-    out_ptr,           # *float or *half, shape [N, C]
-    N, C, S,           # int32
-    stride_n,          # int32, elements between successive n
-    stride_c,          # int32, elements between successive c
-    stride_out_n,      # int32, elements between successive n in out
-    inv_S,             # float32, 1.0 / S
+    x_ptr,  # *float or *half, shape [N, C, S] (S = D*H*W), contiguous N,C,S layout
+    out_ptr,  # *float or *half, shape [N, C]
+    N,
+    C,
+    S,  # int32
+    stride_n,  # int32, elements between successive n
+    stride_c,  # int32, elements between successive c
+    stride_out_n,  # int32, elements between successive n in out
+    inv_S,  # float32, 1.0 / S
     BLOCK_C: tl.constexpr,
     BLOCK_S: tl.constexpr,
 ):
@@ -32,7 +35,7 @@ def _fused_hswish_relu_softmax_mean_kernel(
     valid_c = c_idx < C
 
     # Accumulator over spatial positions for each channel
-    acc = tl.zeros((BLOCK_C,), dtype=tl.float32)
+    acc = tl.zeros((BLOCK_C, ), dtype=tl.float32)
 
     inv6 = 1.0 / 6.0
     s_start = 0
@@ -55,10 +58,10 @@ def _fused_hswish_relu_softmax_mean_kernel(
         y_masked = tl.where(mask_s, y, -float("inf"))
 
         # Softmax across channels (axis=0) per spatial column
-        m = tl.max(y_masked, axis=0)                           # [BLOCK_S]
-        expv = tl.exp(y_masked - m[None, :])                   # [BLOCK_C, BLOCK_S]
-        sumexp = tl.sum(expv, axis=0)                          # [BLOCK_S]
-        p = expv / sumexp[None, :]                             # [BLOCK_C, BLOCK_S]
+        m = tl.max(y_masked, axis=0)  # [BLOCK_S]
+        expv = tl.exp(y_masked - m[None, :])  # [BLOCK_C, BLOCK_S]
+        sumexp = tl.sum(expv, axis=0)  # [BLOCK_S]
+        p = expv / sumexp[None, :]  # [BLOCK_C, BLOCK_S]
         p = tl.where(mask_s, p, 0.0)
 
         # Accumulate probabilities across spatial positions for each channel

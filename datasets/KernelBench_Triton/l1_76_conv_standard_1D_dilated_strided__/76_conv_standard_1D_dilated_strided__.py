@@ -1,31 +1,32 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _conv1d_fwd_kernel(
-    x_ptr,           # float*        [N, IC, L_IN]
-    w_ptr,           # float*        [OC, IC, K]
-    b_ptr,           # float* or dummy (unused when HAS_BIAS=False) [OC]
-    y_ptr,           # float*        [N, OC, L_OUT]
-    N,               # int
-    L_IN,            # int
-    OC,              # int
-    L_OUT,           # int
-    x_stride_n,      # int
-    x_stride_c,      # int
-    x_stride_l,      # int
-    w_stride_o,      # int
-    w_stride_c,      # int
-    w_stride_k,      # int
-    y_stride_n,      # int
-    y_stride_o,      # int
-    y_stride_l,      # int
-    STRIDE: tl.constexpr,     # int (constexpr)
-    DILATION: tl.constexpr,   # int (constexpr)
-    IC: tl.constexpr,         # int (constexpr)
-    K: tl.constexpr,          # int (constexpr)
-    HAS_BIAS: tl.constexpr,   # bool (constexpr)
-    BLOCK_OC: tl.constexpr,   # tile size for OC
+        x_ptr,  # float*        [N, IC, L_IN]
+        w_ptr,  # float*        [OC, IC, K]
+        b_ptr,  # float* or dummy (unused when HAS_BIAS=False) [OC]
+        y_ptr,  # float*        [N, OC, L_OUT]
+        N,  # int
+        L_IN,  # int
+        OC,  # int
+        L_OUT,  # int
+        x_stride_n,  # int
+        x_stride_c,  # int
+        x_stride_l,  # int
+        w_stride_o,  # int
+        w_stride_c,  # int
+        w_stride_k,  # int
+        y_stride_n,  # int
+        y_stride_o,  # int
+        y_stride_l,  # int
+        STRIDE: tl.constexpr,  # int (constexpr)
+        DILATION: tl.constexpr,  # int (constexpr)
+        IC: tl.constexpr,  # int (constexpr)
+        K: tl.constexpr,  # int (constexpr)
+        HAS_BIAS: tl.constexpr,  # bool (constexpr)
+        BLOCK_OC: tl.constexpr,  # tile size for OC
 ):
     # Program IDs over (N * L_OUT) and OC tiles (unchanged PID logic)
     pid_nl = tl.program_id(0)
@@ -56,7 +57,9 @@ def _conv1d_fwd_kernel(
             t = pos0 + k * DILATION
             in_bounds = t < L_IN  # keep boundary check as required
             # Load single input value
-            x_val = tl.load(x_nc_base + t * x_stride_l, mask=in_bounds, other=0.0)
+            x_val = tl.load(x_nc_base + t * x_stride_l,
+                            mask=in_bounds,
+                            other=0.0)
             # Load vector of weights for this (ic, k) across BLOCK_OC output channels
             w_vec = tl.load(w_c_base + k * w_stride_k, mask=oc_mask, other=0.0)
             # FMA accumulate

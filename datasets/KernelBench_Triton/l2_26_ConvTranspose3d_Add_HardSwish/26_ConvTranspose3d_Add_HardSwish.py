@@ -1,8 +1,10 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
-def _fused_add_hswish_mul_kernel(x_ptr, add_ptr, out_ptr, N, BLOCK: tl.constexpr):
+def _fused_add_hswish_mul_kernel(x_ptr, add_ptr, out_ptr, N,
+                                 BLOCK: tl.constexpr):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK + tl.arange(0, BLOCK)
     mask = offs < N

@@ -30,6 +30,7 @@ def _relu_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -51,7 +52,7 @@ class ModelNew(nn.Module):
         block_size = 4096
         max_programs = 65535
         n_programs = min(triton.cdiv(n_elements, block_size), max_programs)
-        grid = (n_programs,)
+        grid = (n_programs, )
         _relu_kernel[grid](
             x_flat,
             y_flat,

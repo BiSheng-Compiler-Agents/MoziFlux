@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_linear_sub_mul_relu_kernel(
     A_ptr,  # [M, K]
@@ -9,10 +10,15 @@ def _fused_linear_sub_mul_relu_kernel(
     C_ptr,  # [M, N]
     SUB_VAL: tl.constexpr,  # scalar subtraction value
     MUL_VAL: tl.constexpr,  # scalar multiplication value
-    M, N, K,
-    stride_am, stride_ak,
-    stride_wk, stride_wn,  # treat weight as [K, N] with these strides
-    stride_cm, stride_cn,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_wk,
+    stride_wn,  # treat weight as [K, N] with these strides
+    stride_cm,
+    stride_cn,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -30,8 +36,10 @@ def _fused_linear_sub_mul_relu_kernel(
     for k0 in range(0, K, BLOCK_K):
         offs_k = k0 + tl.arange(0, BLOCK_K)
 
-        a_ptrs = A_ptr + (offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak)
-        w_ptrs = W_ptr + (offs_k[:, None] * stride_wk + offs_n[None, :] * stride_wn)
+        a_ptrs = A_ptr + (offs_m[:, None] * stride_am +
+                          offs_k[None, :] * stride_ak)
+        w_ptrs = W_ptr + (offs_k[:, None] * stride_wk +
+                          offs_n[None, :] * stride_wn)
 
         a_mask = (mask_m[:, None]) & (offs_k[None, :] < K)
         w_mask = (offs_k[:, None] < K) & (mask_n[None, :])
@@ -49,5 +57,6 @@ def _fused_linear_sub_mul_relu_kernel(
     acc = (acc - SUB_VAL) * MUL_VAL
     acc = tl.maximum(acc, 0.0)
 
-    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm +
+                      offs_n[None, :] * stride_cn)
     tl.store(c_ptrs, acc, mask=(mask_m[:, None] & mask_n[None, :]))

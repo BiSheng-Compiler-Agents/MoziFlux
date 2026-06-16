@@ -1,16 +1,19 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def fused_bias_act_gn_kernel(
-    x_ptr,            # [N, C]
-    extra_bias_ptr,   # [C]
-    gamma_ptr,        # [C] groupnorm weight
-    beta_ptr,         # [C] groupnorm bias
-    out_ptr,          # [N, C]
-    N, C, G,          # ints
-    GROUP_SIZE,       # int = C // G
-    eps,              # float
+    x_ptr,  # [N, C]
+    extra_bias_ptr,  # [C]
+    gamma_ptr,  # [C] groupnorm weight
+    beta_ptr,  # [C] groupnorm bias
+    out_ptr,  # [N, C]
+    N,
+    C,
+    G,  # ints
+    GROUP_SIZE,  # int = C // G
+    eps,  # float
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -37,7 +40,8 @@ def fused_bias_act_gn_kernel(
     twenty = zero + 20.0
     neg_twenty = zero - 20.0
     softplus_mid = tl.where(vf > zero, vf, zero) + tl.log(one + tl.exp(-abs_v))
-    softplus = tl.where(vf > twenty, vf, tl.where(vf < neg_twenty, tl.exp(vf), softplus_mid))
+    softplus = tl.where(vf > twenty, vf,
+                        tl.where(vf < neg_twenty, tl.exp(vf), softplus_mid))
     mish = vf * tl.tanh(softplus)
 
     mish_masked = tl.where(mask, mish, 0.0)

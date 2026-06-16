@@ -1,15 +1,16 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_post_ops_bias_kernel(
-    x_ptr,             # *f32
-    bias_ptr,          # *f32
-    y_ptr,             # *f32
-    n_elements,        # i32
-    C,                 # i32
-    stride_c,          # i32 (elements)
-    bias_stride_c,     # i32 (elements)
+    x_ptr,  # *f32
+    bias_ptr,  # *f32
+    y_ptr,  # *f32
+    n_elements,  # i32
+    C,  # i32
+    stride_c,  # i32 (elements)
+    bias_stride_c,  # i32 (elements)
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)

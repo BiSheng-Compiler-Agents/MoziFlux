@@ -1,18 +1,19 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _add_layernorm_lastdim_kernel(
-    x_ptr,         # *flattened* input pointer (contiguous)
-    y_ptr,         # *flattened* output pointer (contiguous)
-    gamma_ptr,     # weight (normalized_shape)
-    beta_ptr,      # bias   (normalized_shape)
-    sum_w,         # scalar to add before LN (invariance: LN(x + c) == LN(x))
-    M,             # number of columns (normalized dimension)
-    N_ROWS,        # number of rows (total elements // M)
-    eps,           # epsilon
-    BLOCK_SIZE: tl.constexpr,   # >= M
-    ROWS_PER_CTA: tl.constexpr  # rows processed per CTA
+        x_ptr,  # *flattened* input pointer (contiguous)
+        y_ptr,  # *flattened* output pointer (contiguous)
+        gamma_ptr,  # weight (normalized_shape)
+        beta_ptr,  # bias   (normalized_shape)
+        sum_w,  # scalar to add before LN (invariance: LN(x + c) == LN(x))
+        M,  # number of columns (normalized dimension)
+        N_ROWS,  # number of rows (total elements // M)
+        eps,  # epsilon
+        BLOCK_SIZE: tl.constexpr,  # >= M
+        ROWS_PER_CTA: tl.constexpr  # rows processed per CTA
 ):
     pid = tl.program_id(axis=0)
     cols = tl.arange(0, BLOCK_SIZE)
@@ -51,7 +52,9 @@ def _add_layernorm_lastdim_kernel(
             next_active = next_idx < N_ROWS
             next_start = next_idx * M
             next_mask = col_mask & next_active
-            x_raw1 = tl.load(x_ptr + next_start + cols, mask=next_mask, other=0.0)
+            x_raw1 = tl.load(x_ptr + next_start + cols,
+                             mask=next_mask,
+                             other=0.0)
 
         # Mean/Var in fp32
         mean = tl.sum(x_fp, axis=0) * inv_M
@@ -66,16 +69,12 @@ def _add_layernorm_lastdim_kernel(
         if r < ROWS_PER_CTA - 1:
             x_raw0 = x_raw1
 
+
 @triton.jit
-def _avgpool3d_gelu_kernel(
-    x_ptr, y_ptr,
-    N, C, D, H, W,
-    Do, Ho, Wo,
-    TOT_ROWS,
-    BLOCK_W: tl.constexpr,
-    ROWS_PER_CTA: tl.constexpr,
-    KD: tl.constexpr, KH: tl.constexpr, KW: tl.constexpr
-):
+def _avgpool3d_gelu_kernel(x_ptr, y_ptr, N, C, D, H, W, Do, Ho, Wo, TOT_ROWS,
+                           BLOCK_W: tl.constexpr, ROWS_PER_CTA: tl.constexpr,
+                           KD: tl.constexpr, KH: tl.constexpr,
+                           KW: tl.constexpr):
     pid = tl.program_id(axis=0)
     w = tl.arange(0, BLOCK_W)
 

@@ -1,16 +1,17 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _fused_scale_lrelu_gelu(
-    x_ptr,          # *float32, input tensor (NCHW) contiguous
-    m_ptr,          # *float32, multiplier tensor flattened with shape (C,)
-    y_ptr,          # *float32, output tensor (same shape as x)
-    n_elements,     # int32, total elements B*C*H*W
-    C,              # int32, number of channels
-    HW,             # int32, product H*W
-    negative_slope: tl.constexpr,  # float constant
-    BLOCK_SIZE: tl.constexpr,      # tile size
+        x_ptr,  # *float32, input tensor (NCHW) contiguous
+        m_ptr,  # *float32, multiplier tensor flattened with shape (C,)
+        y_ptr,  # *float32, output tensor (same shape as x)
+        n_elements,  # int32, total elements B*C*H*W
+        C,  # int32, number of channels
+        HW,  # int32, product H*W
+        negative_slope: tl.constexpr,  # float constant
+        BLOCK_SIZE: tl.constexpr,  # tile size
 ):
     pid = tl.program_id(axis=0)
     arange = tl.arange(0, BLOCK_SIZE)

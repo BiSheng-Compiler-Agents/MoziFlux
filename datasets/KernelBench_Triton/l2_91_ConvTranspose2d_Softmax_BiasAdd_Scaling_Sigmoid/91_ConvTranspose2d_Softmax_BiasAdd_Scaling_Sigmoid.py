@@ -1,15 +1,22 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _softmax_bias_scale_sigmoid_1d(
-    x_ptr,        # *f32, [N, C, H, W]
-    bias_ptr,     # *f32, [C, 1, 1]
-    y_ptr,        # *f32, [N, C, H, W]
-    stride_n, stride_c, stride_h, stride_w,  # strides for NCHW
-    b_stride_c,                              # bias stride along C
-    N, C, H, W,                              # sizes
-    scaling,                                  # float
+    x_ptr,  # *f32, [N, C, H, W]
+    bias_ptr,  # *f32, [C, 1, 1]
+    y_ptr,  # *f32, [N, C, H, W]
+    stride_n,
+    stride_c,
+    stride_h,
+    stride_w,  # strides for NCHW
+    b_stride_c,  # bias stride along C
+    N,
+    C,
+    H,
+    W,  # sizes
+    scaling,  # float
     BLOCK_SIZE: tl.constexpr,
 ):
     # One program per (n, h, w)
@@ -27,7 +34,10 @@ def _softmax_bias_scale_sigmoid_1d(
     x_offsets = base + c_idx * stride_c
 
     # Load inputs; use L2-prefetch (cg) as this is streaming
-    x = tl.load(x_ptr + x_offsets, mask=mask, other=-float("inf"), cache_modifier=".cg").to(tl.float32)
+    x = tl.load(x_ptr + x_offsets,
+                mask=mask,
+                other=-float("inf"),
+                cache_modifier=".cg").to(tl.float32)
 
     # Stable softmax across channel dimension
     x_max = tl.max(x, axis=0)
@@ -38,23 +48,33 @@ def _softmax_bias_scale_sigmoid_1d(
 
     # Bias add, scale, sigmoid (pre-scale bias and use FMA)
     s = tl.full((), scaling, tl.float32)
-    b = tl.load(bias_ptr + c_idx * b_stride_c, mask=mask, other=0.0, cache_modifier=".ca").to(tl.float32)
+    b = tl.load(bias_ptr + c_idx * b_stride_c,
+                mask=mask,
+                other=0.0,
+                cache_modifier=".ca").to(tl.float32)
     b_scaled = b * s
     z = tl.fma(sm, s, b_scaled)
     out = 1.0 / (1.0 + tl.exp(-z))
     tl.store(y_ptr + x_offsets, out, mask=mask)
 
+
 @triton.jit
 def _softmax_bias_scale_sigmoid_tiled_cw(
-    x_ptr,        # *f32, [N, C, H, W]
-    bias_ptr,     # *f32, [C, 1, 1]
-    y_ptr,        # *f32, [N, C, H, W]
-    stride_n, stride_c, stride_h, stride_w,  # strides for NCHW
-    b_stride_c,                              # bias stride along C
-    N, C, H, W,                              # sizes
-    scaling,                                  # float
-    BLOCK_C: tl.constexpr,                    # tile in C (channels)
-    BLOCK_W: tl.constexpr,                    # tile in W (contiguous)
+        x_ptr,  # *f32, [N, C, H, W]
+        bias_ptr,  # *f32, [C, 1, 1]
+        y_ptr,  # *f32, [N, C, H, W]
+        stride_n,
+        stride_c,
+        stride_h,
+        stride_w,  # strides for NCHW
+        b_stride_c,  # bias stride along C
+        N,
+        C,
+        H,
+        W,  # sizes
+        scaling,  # float
+        BLOCK_C: tl.constexpr,  # tile in C (channels)
+        BLOCK_W: tl.constexpr,  # tile in W (contiguous)
 ):
     # 2D grid:
     #  - axis 0: over (n, h) pairs
@@ -80,18 +100,24 @@ def _softmax_bias_scale_sigmoid_tiled_cw(
     # Pointers for a [BLOCK_C, BLOCK_W] tile
     ptrs = base + c_idx[:, None] * stride_c + w_idx[None, :] * stride_w
     # Load a full [C, Wtile] slab once into registers
-    x_tile = tl.load(x_ptr + ptrs, mask=c_mask[:, None] & w_mask[None, :], other=-float("inf"), cache_modifier=".cg").to(tl.float32)
+    x_tile = tl.load(x_ptr + ptrs,
+                     mask=c_mask[:, None] & w_mask[None, :],
+                     other=-float("inf"),
+                     cache_modifier=".cg").to(tl.float32)
 
     # Softmax along channel dimension for each column independently
-    m = tl.max(x_tile, axis=0)                                 # [BLOCK_W]
-    x_exp = tl.exp(x_tile - m[None, :])                        # [BLOCK_C, BLOCK_W]
-    denom = tl.sum(x_exp, axis=0)                              # [BLOCK_W]
+    m = tl.max(x_tile, axis=0)  # [BLOCK_W]
+    x_exp = tl.exp(x_tile - m[None, :])  # [BLOCK_C, BLOCK_W]
+    denom = tl.sum(x_exp, axis=0)  # [BLOCK_W]
     inv_denom = 1.0 / denom
-    sm = x_exp * inv_denom[None, :]                            # [BLOCK_C, BLOCK_W]
+    sm = x_exp * inv_denom[None, :]  # [BLOCK_C, BLOCK_W]
 
     # Load bias once per channel and broadcast along W tile
     s = tl.full((), scaling, tl.float32)
-    b = tl.load(bias_ptr + c_idx * b_stride_c, mask=c_mask, other=0.0, cache_modifier=".ca").to(tl.float32)  # [BLOCK_C]
+    b = tl.load(bias_ptr + c_idx * b_stride_c,
+                mask=c_mask,
+                other=0.0,
+                cache_modifier=".ca").to(tl.float32)  # [BLOCK_C]
     b_scaled = b * s
     z = tl.fma(sm, s, b_scaled[:, None])
     out = 1.0 / (1.0 + tl.exp(-z))
@@ -99,15 +125,22 @@ def _softmax_bias_scale_sigmoid_tiled_cw(
     # Store results using the same pointers
     tl.store(y_ptr + ptrs, out, mask=c_mask[:, None] & w_mask[None, :])
 
+
 @triton.jit
 def _softmax_bias_scale_sigmoid_nchw(
-    x_ptr,        # *f32, [N, C, H, W]
-    bias_ptr,     # *f32, [C, 1, 1]
-    y_ptr,        # *f32, [N, C, H, W]
-    stride_n, stride_c, stride_h, stride_w,  # strides for NCHW
-    b_stride_c,                              # bias stride along C
-    N, C: tl.constexpr, H, W,                # sizes (C constexpr to enable compile-time specialization)
-    scaling,                                  # float
+    x_ptr,  # *f32, [N, C, H, W]
+    bias_ptr,  # *f32, [C, 1, 1]
+    y_ptr,  # *f32, [N, C, H, W]
+    stride_n,
+    stride_c,
+    stride_h,
+    stride_w,  # strides for NCHW
+    b_stride_c,  # bias stride along C
+    N,
+    C: tl.constexpr,
+    H,
+    W,  # sizes (C constexpr to enable compile-time specialization)
+    scaling,  # float
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)  # one program per (n, h, w)
@@ -127,7 +160,10 @@ def _softmax_bias_scale_sigmoid_nchw(
     # Offsets for input/output along C
     x_offsets = base + c_idx * stride_c
     # Load input once; masked lanes get -inf so they don't affect reductions
-    x = tl.load(x_ptr + x_offsets, mask=mask, other=-float("inf"), cache_modifier=".cg").to(tl.float32)
+    x = tl.load(x_ptr + x_offsets,
+                mask=mask,
+                other=-float("inf"),
+                cache_modifier=".cg").to(tl.float32)
 
     # Stable softmax along C
     x_max = tl.max(x, axis=0)
@@ -138,7 +174,10 @@ def _softmax_bias_scale_sigmoid_nchw(
 
     # Load bias per channel
     b_offsets = c_idx * b_stride_c
-    b = tl.load(bias_ptr + b_offsets, mask=mask, other=0.0, cache_modifier=".ca").to(tl.float32)
+    b = tl.load(bias_ptr + b_offsets,
+                mask=mask,
+                other=0.0,
+                cache_modifier=".ca").to(tl.float32)
 
     # Scale and sigmoid (FMA)
     s = tl.full((), scaling, tl.float32)

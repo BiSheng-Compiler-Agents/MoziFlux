@@ -1,8 +1,10 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
-def _sigmoid_scale_residual_kernel(x_ptr, out_ptr, n_elements, scale, BLOCK_SIZE: tl.constexpr):
+def _sigmoid_scale_residual_kernel(x_ptr, out_ptr, n_elements, scale,
+                                   BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     mask = offsets < n_elements
@@ -18,4 +20,7 @@ def _sigmoid_scale_residual_kernel(x_ptr, out_ptr, n_elements, scale, BLOCK_SIZE
 
     # Cast back to original dtype before store; streaming write
     y_cast = y.to(x.dtype)
-    tl.store(out_ptr + offsets, y_cast, mask=mask, eviction_policy="evict_first")
+    tl.store(out_ptr + offsets,
+             y_cast,
+             mask=mask,
+             eviction_policy="evict_first")

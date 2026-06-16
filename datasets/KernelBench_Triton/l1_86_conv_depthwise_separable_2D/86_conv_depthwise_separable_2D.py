@@ -1,14 +1,19 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _depthwise_conv2d_fwd(
-    x_ptr,        # *f32, [N, C, H, W]
-    w_ptr,        # *f32, [C, 1, K, K] -> flattened as [C*K*K]
-    b_ptr,        # *f32, [C] or dummy
-    y_ptr,        # *f32, [N, C, H_OUT, W_OUT]
-    N, C, H, W,   # int32
-    H_OUT, W_OUT, # int32
+    x_ptr,  # *f32, [N, C, H, W]
+    w_ptr,  # *f32, [C, 1, K, K] -> flattened as [C*K*K]
+    b_ptr,  # *f32, [C] or dummy
+    y_ptr,  # *f32, [N, C, H_OUT, W_OUT]
+    N,
+    C,
+    H,
+    W,  # int32
+    H_OUT,
+    W_OUT,  # int32
     STRIDE: tl.constexpr,
     PADDING: tl.constexpr,
     DILATION: tl.constexpr,
@@ -54,13 +59,18 @@ def _depthwise_conv2d_fwd(
     y_offs = (((n * C + c) * H_OUT) + oh) * W_OUT + ow
     tl.store(y_ptr + y_offs, acc, mask=mask_hw)
 
+
 @triton.jit
 def _pointwise_1x1_conv_fwd(
-    x_ptr,        # *f32, input from depthwise, [N, C_IN, H_OUT, W_OUT]
-    w_ptr,        # *f32, weight, [C_OUT, C_IN] row-major
-    b_ptr,        # *f32, bias, [C_OUT] or dummy
-    y_ptr,        # *f32, output, [N, C_OUT, H_OUT, W_OUT]
-    N, C_IN, C_OUT, H_OUT, W_OUT,  # int32
+    x_ptr,  # *f32, input from depthwise, [N, C_IN, H_OUT, W_OUT]
+    w_ptr,  # *f32, weight, [C_OUT, C_IN] row-major
+    b_ptr,  # *f32, bias, [C_OUT] or dummy
+    y_ptr,  # *f32, output, [N, C_OUT, H_OUT, W_OUT]
+    N,
+    C_IN,
+    C_OUT,
+    H_OUT,
+    W_OUT,  # int32
     BM: tl.constexpr,
     BN: tl.constexpr,
     HAS_BIAS: tl.constexpr,
@@ -93,7 +103,8 @@ def _pointwise_1x1_conv_fwd(
         # Load A: [BM] elements at channel k (stride HW across channel)
         a = tl.load(x_ptr + in_base + k * HW, mask=m_mask, other=0.0)  # [BM]
         # Load B: [BN] weights at channel k across output channels
-        b = tl.load(w_ptr + n_offsets * C_IN + k, mask=n_mask, other=0.0)  # [BN]
+        b = tl.load(w_ptr + n_offsets * C_IN + k, mask=n_mask,
+                    other=0.0)  # [BN]
         acc += a[:, None] * b[None, :]
 
     if HAS_BIAS:
@@ -104,15 +115,21 @@ def _pointwise_1x1_conv_fwd(
     store_offs = out_base[:, None] + n_offsets[None, :] * HW
     tl.store(y_ptr + store_offs, acc, mask=(m_mask[:, None] & n_mask[None, :]))
 
+
 @triton.jit
 def _dw_pw_fused_fwd(
-    x_ptr,          # *f32, [N, C_IN, H, W]
-    wdw_ptr,        # *f32, [C_IN*K*K] flattened
-    bdw_ptr,        # *f32, [C_IN] or dummy
-    wpw_ptr,        # *f32, [C_OUT, C_IN] row-major
-    bpw_ptr,        # *f32, [C_OUT] or dummy
-    y_ptr,          # *f32, [N, C_OUT, H_OUT, W_OUT]
-    N, C_OUT, H, W, H_OUT, W_OUT,   # int32
+    x_ptr,  # *f32, [N, C_IN, H, W]
+    wdw_ptr,  # *f32, [C_IN*K*K] flattened
+    bdw_ptr,  # *f32, [C_IN] or dummy
+    wpw_ptr,  # *f32, [C_OUT, C_IN] row-major
+    bpw_ptr,  # *f32, [C_OUT] or dummy
+    y_ptr,  # *f32, [N, C_OUT, H_OUT, W_OUT]
+    N,
+    C_OUT,
+    H,
+    W,
+    H_OUT,
+    W_OUT,  # int32
     STRIDE: tl.constexpr,
     PADDING: tl.constexpr,
     DILATION: tl.constexpr,

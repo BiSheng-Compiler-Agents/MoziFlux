@@ -1,14 +1,19 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _post_ops_row_lse_mish(
-    y_ptr,            # [B, N] input from linear
-    out_ptr,          # [B, 1] output stores final x * mish(x)
-    B, N,             # sizes
-    stride_y_m, stride_y_n,
+    y_ptr,  # [B, N] input from linear
+    out_ptr,  # [B, 1] output stores final x * mish(x)
+    B,
+    N,  # sizes
+    stride_y_m,
+    stride_y_n,
     stride_out_m,
-    scale_factor, clamp_min, clamp_max,
+    scale_factor,
+    clamp_min,
+    clamp_max,
     BLOCK_N: tl.constexpr,
 ):
     pid_m = tl.program_id(axis=0)
@@ -21,7 +26,7 @@ def _post_ops_row_lse_mish(
     # Online streaming LogSumExp across columns with numerical stability
     neg_inf = -float("inf")
     m = tl.full((), neg_inf, dtype=tl.float32)  # running max
-    s = tl.zeros((), dtype=tl.float32)          # running sum of exp(x - m)
+    s = tl.zeros((), dtype=tl.float32)  # running sum of exp(x - m)
 
     scale2 = 2.0 * scale_factor
 
@@ -30,7 +35,10 @@ def _post_ops_row_lse_mish(
         n_idx = n + off_n
         mask = n_idx < N
 
-        vals = tl.load(base_ptr + n_idx * stride_y_n, mask=mask, other=0.0, cache_modifier=".cg").to(tl.float32)
+        vals = tl.load(base_ptr + n_idx * stride_y_n,
+                       mask=mask,
+                       other=0.0,
+                       cache_modifier=".cg").to(tl.float32)
         # Fused transform: scale+residual (x *= 2*scale_factor) and clamp
         vals = vals * scale2
         vals = tl.minimum(tl.maximum(vals, clamp_min), clamp_max)
