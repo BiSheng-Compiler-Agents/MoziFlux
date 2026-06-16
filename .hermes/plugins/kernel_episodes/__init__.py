@@ -1,5 +1,5 @@
 """
-kernel-episodes plugin
+kernel_episodes plugin
 ======================
 SQLite-backed episode memory for recording and retrieving Triton kernel
 optimization experiences on Ascend NPUs.

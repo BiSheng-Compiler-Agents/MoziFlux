@@ -80,7 +80,7 @@ Follow this exact workflow:
    - What the kernel computes
 
 2. PROFILE the baseline with cannsim (-g flag) to get trace_core0.json.
-   Use the cannsim-remote plugin. Test at least:
+   Use the cannsim_remote plugin. Test at least:
    - One small spatial shape
    - One large spatial shape
    - One non-power-of-2 dimension if applicable
@@ -256,7 +256,7 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
             task_id=f"kernelbench-{name}",
         )
 
-        # Fire phoenix-tracer on_session_finalize to close root span and flush.
+        # Fire phoenix_tracer on_session_finalize to close root span and flush.
         # conversation_loop.py fires on_session_end but never on_session_finalize,
         # so the root hermes.session span would stay open forever without this.
         try:

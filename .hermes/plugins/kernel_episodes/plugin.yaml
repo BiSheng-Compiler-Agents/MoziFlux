@@ -1,4 +1,4 @@
-name: kernel-episodes
+name: kernel_episodes
 version: 1.0.0
 description: >
   SQLite-backed episode memory for recording and retrieving Triton kernel

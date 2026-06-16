@@ -82,13 +82,13 @@ try:
                                  insecure=True)
     _provider.add_span_processor(BatchSpanProcessor(_exporter))
     trace.set_tracer_provider(_provider)
-    _tracer = trace.get_tracer("hermes.phoenix-tracer")
+    _tracer = trace.get_tracer("hermes.phoenix_tracer")
     _OTEL_AVAILABLE = True
     logger.info(
-        "phoenix-tracer: OTel provider initialised → http://localhost:4317")
+        "phoenix_tracer: OTel provider initialised → http://localhost:4317")
 except Exception as _e:
     _OTEL_AVAILABLE = False
-    logger.warning("phoenix-tracer: OTel unavailable — %s", _e)
+    logger.warning("phoenix_tracer: OTel unavailable — %s", _e)
 
 # ── Session state ──────────────────────────────────────────────────────────────
 # session_id → {
@@ -139,7 +139,7 @@ def _ensure_session(session_id: str,
             "turn_ctx": None,
         }
         logger.debug(
-            "phoenix-tracer: created root span for session %s trace_id=%s",
+            "phoenix_tracer: created root span for session %s trace_id=%s",
             session_id, format(root_span.get_span_context().trace_id, "032x"))
     return _sessions[session_id]
 
@@ -173,7 +173,7 @@ def _end_session(session_id: str,
     except Exception:
         pass
 
-    logger.debug("phoenix-tracer: session %s flushed", session_id)
+    logger.debug("phoenix_tracer: session %s flushed", session_id)
 
 
 # ── Hook handlers ──────────────────────────────────────────────────────────────
@@ -188,7 +188,7 @@ def _on_session_start(session_id: str = "",
     try:
         _ensure_session(session_id, model=model, platform=platform)
     except Exception as exc:
-        logger.debug("phoenix-tracer on_session_start: %s", exc)
+        logger.debug("phoenix_tracer on_session_start: %s", exc)
 
 
 def _on_pre_llm_call(
@@ -235,11 +235,11 @@ def _on_pre_llm_call(
         sess["turn_ctx"] = turn_ctx
 
         logger.debug(
-            "phoenix-tracer: turn span started session=%s trace_id=%s",
+            "phoenix_tracer: turn span started session=%s trace_id=%s",
             session_id, format(turn_span.get_span_context().trace_id, "032x"))
 
     except Exception as exc:
-        logger.debug("phoenix-tracer pre_llm_call: %s", exc)
+        logger.debug("phoenix_tracer pre_llm_call: %s", exc)
 
 
 def _on_post_llm_call(
@@ -265,7 +265,7 @@ def _on_post_llm_call(
         sess["turn_ctx"] = None
 
     except Exception as exc:
-        logger.debug("phoenix-tracer post_llm_call: %s", exc)
+        logger.debug("phoenix_tracer post_llm_call: %s", exc)
 
 
 def _on_pre_tool_call(
@@ -298,7 +298,7 @@ def _on_pre_tool_call(
         key = tool_call_id or f"{session_id}:{tool_name}:{id(span)}"
         _tool_spans[key] = span
     except Exception as exc:
-        logger.debug("phoenix-tracer pre_tool_call: %s", exc)
+        logger.debug("phoenix_tracer pre_tool_call: %s", exc)
 
 
 def _on_post_tool_call(
@@ -325,7 +325,7 @@ def _on_post_tool_call(
             span.set_attribute("tool.output", str(result or "")[:4096])
             span.end()
     except Exception as exc:
-        logger.debug("phoenix-tracer post_tool_call: %s", exc)
+        logger.debug("phoenix_tracer post_tool_call: %s", exc)
 
 
 def _on_session_end(
@@ -357,7 +357,7 @@ def _on_session_end(
             sess["turn_span"] = None
             sess["turn_ctx"] = None
     except Exception as exc:
-        logger.debug("phoenix-tracer on_session_end: %s", exc)
+        logger.debug("phoenix_tracer on_session_end: %s", exc)
 
 
 def _on_session_finalize(session_id: str = "",
@@ -373,7 +373,7 @@ def _on_session_finalize(session_id: str = "",
     try:
         _end_session(session_id, completed=True, interrupted=False)
     except Exception as exc:
-        logger.debug("phoenix-tracer on_session_finalize: %s", exc)
+        logger.debug("phoenix_tracer on_session_finalize: %s", exc)
 
 
 # ── Plugin entry point ─────────────────────────────────────────────────────────
@@ -387,4 +387,4 @@ def register(ctx) -> None:
     ctx.register_hook("post_tool_call", _on_post_tool_call)
     ctx.register_hook("on_session_end", _on_session_end)
     ctx.register_hook("on_session_finalize", _on_session_finalize)
-    logger.info("phoenix-tracer: 7 hooks registered")
+    logger.info("phoenix_tracer: 7 hooks registered")

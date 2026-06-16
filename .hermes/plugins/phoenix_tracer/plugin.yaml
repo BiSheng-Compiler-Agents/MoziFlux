@@ -1,4 +1,4 @@
-name: phoenix-tracer
+name: phoenix_tracer
 version: 1.0.0
 description: "Traces every Hermes LLM call and tool call to Arize Phoenix via OpenTelemetry"
 author: "Shayan"
