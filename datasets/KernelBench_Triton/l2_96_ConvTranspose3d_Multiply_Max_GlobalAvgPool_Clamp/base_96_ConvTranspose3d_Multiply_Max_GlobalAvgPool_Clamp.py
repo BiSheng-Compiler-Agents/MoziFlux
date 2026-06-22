@@ -95,14 +95,24 @@ def _fused_scale_maxpool3d_gap_clamp(
             base_ptrs = base + base_offsets
             base_ptrs_h = base_ptrs + sH
             base_ptrs_d = base_ptrs + sD
-            v000 = tl.load(base_ptrs, mask=mask, other=-float("inf")).to(tl.float32)
-            v001 = tl.load(base_ptrs + 1, mask=mask, other=-float("inf")).to(tl.float32)
-            v010 = tl.load(base_ptrs_h, mask=mask, other=-float("inf")).to(tl.float32)
-            v011 = tl.load(base_ptrs_h + 1, mask=mask, other=-float("inf")).to(tl.float32)
-            v100 = tl.load(base_ptrs_d, mask=mask, other=-float("inf")).to(tl.float32)
-            v101 = tl.load(base_ptrs_d + 1, mask=mask, other=-float("inf")).to(tl.float32)
-            v110 = tl.load(base_ptrs + row_stride, mask=mask, other=-float("inf")).to(tl.float32)
-            v111 = tl.load(base_ptrs + row_stride_plus_one, mask=mask, other=-float("inf")).to(tl.float32)
+            v000 = tl.load(base_ptrs, mask=mask,
+                           other=-float("inf")).to(tl.float32)
+            v001 = tl.load(base_ptrs + 1, mask=mask,
+                           other=-float("inf")).to(tl.float32)
+            v010 = tl.load(base_ptrs_h, mask=mask,
+                           other=-float("inf")).to(tl.float32)
+            v011 = tl.load(base_ptrs_h + 1, mask=mask,
+                           other=-float("inf")).to(tl.float32)
+            v100 = tl.load(base_ptrs_d, mask=mask,
+                           other=-float("inf")).to(tl.float32)
+            v101 = tl.load(base_ptrs_d + 1, mask=mask,
+                           other=-float("inf")).to(tl.float32)
+            v110 = tl.load(base_ptrs + row_stride,
+                           mask=mask,
+                           other=-float("inf")).to(tl.float32)
+            v111 = tl.load(base_ptrs + row_stride_plus_one,
+                           mask=mask,
+                           other=-float("inf")).to(tl.float32)
             max01 = tl.maximum(v000, v001)
             max23 = tl.maximum(v010, v011)
             max45 = tl.maximum(v100, v101)
@@ -145,11 +155,15 @@ def _fused_scale_maxpool3d_gap_clamp(
 
 
 class ModelNew(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, scale, maxpool_kernel_size):
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding,
+                 scale, maxpool_kernel_size):
         super().__init__()
-        self.conv_transpose = nn.ConvTranspose3d(
-            in_channels, out_channels, kernel_size, stride=stride, padding=padding
-        )
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding)
         self.scale = scale
         self.maxpool = nn.MaxPool3d(kernel_size=maxpool_kernel_size)
         self.global_avg_pool = nn.AdaptiveAvgPool3d((1, 1, 1))
@@ -158,11 +172,15 @@ class ModelNew(nn.Module):
 
     def forward(self, x):
         if not _is_npu_tensor(x):
-            raise RuntimeError("ModelNew expects Ascend NPU tensors so the Triton kernel path is exercised.")
+            raise RuntimeError(
+                "ModelNew expects Ascend NPU tensors so the Triton kernel path is exercised."
+            )
 
         y = self.conv_transpose(x)
         if not _is_npu_tensor(y):
-            raise RuntimeError("ConvTranspose3d output must stay on Ascend NPU for the Triton kernel path.")
+            raise RuntimeError(
+                "ConvTranspose3d output must stay on Ascend NPU for the Triton kernel path."
+            )
 
         if not y.is_contiguous():
             y = y.contiguous()
@@ -175,30 +193,46 @@ class ModelNew(nn.Module):
 
         if isinstance(k, (tuple, list)):
             if not (k[0] == k[1] == k[2]):
-                raise RuntimeError("ModelNew requires a cubic MaxPool3d kernel for the fused Triton path.")
+                raise RuntimeError(
+                    "ModelNew requires a cubic MaxPool3d kernel for the fused Triton path."
+                )
             k = k[0]
         if s is None:
             s = k
         elif isinstance(s, (tuple, list)):
             if not (s[0] == s[1] == s[2] == k):
-                raise RuntimeError("ModelNew requires MaxPool3d stride to match the cubic kernel size.")
+                raise RuntimeError(
+                    "ModelNew requires MaxPool3d stride to match the cubic kernel size."
+                )
             s = s[0]
         if isinstance(p, (tuple, list)):
             if p != (0, 0, 0):
-                raise RuntimeError("ModelNew requires zero MaxPool3d padding for the fused Triton path.")
+                raise RuntimeError(
+                    "ModelNew requires zero MaxPool3d padding for the fused Triton path."
+                )
         elif p != 0:
-            raise RuntimeError("ModelNew requires zero MaxPool3d padding for the fused Triton path.")
+            raise RuntimeError(
+                "ModelNew requires zero MaxPool3d padding for the fused Triton path."
+            )
         if isinstance(dila, (tuple, list)):
             if dila != (1, 1, 1):
-                raise RuntimeError("ModelNew requires unit MaxPool3d dilation for the fused Triton path.")
+                raise RuntimeError(
+                    "ModelNew requires unit MaxPool3d dilation for the fused Triton path."
+                )
         elif dila != 1:
-            raise RuntimeError("ModelNew requires unit MaxPool3d dilation for the fused Triton path.")
+            raise RuntimeError(
+                "ModelNew requires unit MaxPool3d dilation for the fused Triton path."
+            )
         if s != k or ceil_m:
-            raise RuntimeError("ModelNew requires non-ceil MaxPool3d with stride equal to kernel size.")
+            raise RuntimeError(
+                "ModelNew requires non-ceil MaxPool3d with stride equal to kernel size."
+            )
 
         N, C, D, H, W = y.shape
         if D < k or H < k or W < k:
-            raise RuntimeError("ConvTranspose3d output must be at least one pooling window in every spatial dimension.")
+            raise RuntimeError(
+                "ConvTranspose3d output must be at least one pooling window in every spatial dimension."
+            )
 
         DP = (D - k) // k + 1
         HP = (H - k) // k + 1
@@ -206,7 +240,7 @@ class ModelNew(nn.Module):
         NWINS = DP * HP * WP
 
         out = torch.empty((N, C, 1, 1, 1), device=y.device, dtype=y.dtype)
-        _fused_scale_maxpool3d_gap_clamp[(N * C,)](
+        _fused_scale_maxpool3d_gap_clamp[(N * C, )](
             y,
             out.view(-1),
             N,
@@ -245,7 +279,10 @@ def get_inputs():
 
 
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, scale, maxpool_kernel_size]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding, scale,
+        maxpool_kernel_size
+    ]
 
 
 _MODEL_CACHE = None

@@ -27,7 +27,10 @@ def _selu_kernel(
 
     mask = offsets < n_elements
     # Streaming load hint: we don't reuse x, prefer evict-first
-    x = tl.load(x_ptr + offsets, mask=mask, other=0.0, eviction_policy='evict_first')
+    x = tl.load(x_ptr + offsets,
+                mask=mask,
+                other=0.0,
+                eviction_policy='evict_first')
     x32 = x.to(tl.float32)
 
     # Precompute constants
@@ -48,9 +51,10 @@ class ModelNew(nn.Module):
     """
     Simple model that performs a SELU activation using a Triton kernel on Ascend NPU tensors.
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Applies SELU activation to the input tensor.
@@ -67,7 +71,8 @@ class ModelNew(nn.Module):
         if x.dtype not in supported_dtypes:
             raise RuntimeError(f"Unsupported dtype for ModelNew: {x.dtype}")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked inputs")
 
         # Handle empty tensors
         if x.numel() == 0:
@@ -80,19 +85,31 @@ class ModelNew(nn.Module):
 
         # Use a single tuned configuration to minimize launch overhead
         BLOCK_SIZE = 4096
-        grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+        def grid(meta):
+            return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]), )
 
         _selu_kernel[grid](
-            x_contig, y, n_elements,
-            ALPHA=_SELU_ALPHA, SCALE=_SELU_SCALE, BLOCK_SIZE=BLOCK_SIZE,
-            num_warps=4, num_stages=2,
+            x_contig,
+            y,
+            n_elements,
+            ALPHA=_SELU_ALPHA,
+            SCALE=_SELU_SCALE,
+            BLOCK_SIZE=BLOCK_SIZE,
+            num_warps=4,
+            num_stages=2,
         )
         return y
+
+
 batch_size = 4096
 dim = 393216
+
 
 def get_inputs():
     x = torch.rand(batch_size, dim)
     return [x]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

@@ -4,7 +4,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_CHANNELS = 8
 DEFAULT_OUT_CHANNELS = 32
@@ -72,13 +71,19 @@ def _bias_scale_sigmoid_kernel_tail(
     tl.store(y_ptr + base, y, mask=mask)
 
 
-def fused_bias_scale_sigmoid(x: torch.Tensor, bias: torch.Tensor, scale: torch.Tensor):
+def fused_bias_scale_sigmoid(x: torch.Tensor, bias: torch.Tensor,
+                             scale: torch.Tensor):
     if not _is_npu_tensor(x):
-        raise RuntimeError("fused_bias_scale_sigmoid expects input tensors on Ascend NPU")
+        raise RuntimeError(
+            "fused_bias_scale_sigmoid expects input tensors on Ascend NPU")
     if x.requires_grad:
-        raise RuntimeError("fused_bias_scale_sigmoid does not support autograd-enabled inputs")
+        raise RuntimeError(
+            "fused_bias_scale_sigmoid does not support autograd-enabled inputs"
+        )
     if x.dtype not in (torch.float16, torch.float32):
-        raise RuntimeError("fused_bias_scale_sigmoid supports only float16 and float32 inputs")
+        raise RuntimeError(
+            "fused_bias_scale_sigmoid supports only float16 and float32 inputs"
+        )
 
     x_contig = x.contiguous()
     bias_contig = bias.contiguous().view(-1)
@@ -86,7 +91,7 @@ def fused_bias_scale_sigmoid(x: torch.Tensor, bias: torch.Tensor, scale: torch.T
 
     _, C, H, W = x_contig.shape
     nhw_elements = x_contig.shape[0] * H * W
-    
+
     block_size = 8192
     full_blocks = nhw_elements // block_size
     full_nhw_elements = full_blocks * block_size
@@ -94,12 +99,15 @@ def fused_bias_scale_sigmoid(x: torch.Tensor, bias: torch.Tensor, scale: torch.T
     y = torch.empty_like(x_contig)
 
     if full_blocks > 0:
-        grid = lambda META: (full_blocks, C)
-        _bias_scale_sigmoid_kernel_full[grid](
-            x_contig, bias_contig, scale_contig, y, full_nhw_elements
-        )
+
+        def grid(META):
+            return (full_blocks, C)
+
+        _bias_scale_sigmoid_kernel_full[grid](x_contig, bias_contig,
+                                              scale_contig, y,
+                                              full_nhw_elements)
     if full_nhw_elements < nhw_elements:
-        _bias_scale_sigmoid_kernel_tail[(C,)](
+        _bias_scale_sigmoid_kernel_tail[(C, )](
             x_contig,
             bias_contig,
             scale_contig,
@@ -112,6 +120,7 @@ def fused_bias_scale_sigmoid(x: torch.Tensor, bias: torch.Tensor, scale: torch.T
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -135,9 +144,11 @@ class ModelNew(nn.Module):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
         if x.dtype not in (torch.float16, torch.float32):
-            raise RuntimeError("ModelNew supports only float16 and float32 inputs")
+            raise RuntimeError(
+                "ModelNew supports only float16 and float32 inputs")
 
         x = self.conv(x)
         x = fused_bias_scale_sigmoid(x, self.bias, self.scale)
@@ -173,4 +184,7 @@ def get_inputs():
 
 
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, num_groups, bias_shape, scale_shape]
+    return [
+        in_channels, out_channels, kernel_size, num_groups, bias_shape,
+        scale_shape
+    ]

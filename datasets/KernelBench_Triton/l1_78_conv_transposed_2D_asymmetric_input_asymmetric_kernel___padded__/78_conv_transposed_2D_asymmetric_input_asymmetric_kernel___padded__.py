@@ -10,7 +10,6 @@ try:
 except ImportError:
     torch_npu = None
 
-
 DEFAULT_IN_CHANNELS = 32
 DEFAULT_OUT_CHANNELS = 32
 DEFAULT_KERNEL_SIZE = (3, 7)
@@ -38,7 +37,7 @@ def _touch_triton_path(x: torch.Tensor) -> None:
     x_contiguous = x.contiguous()
     n_elements = x_contiguous.numel()
     BLOCK = 4096
-    grid = (triton.cdiv(n_elements, BLOCK),)
+    grid = (triton.cdiv(n_elements, BLOCK), )
     _touch_tensor_kernel[grid](x_contiguous, n_elements, BLOCK=BLOCK)
 
 
@@ -63,15 +62,19 @@ def conv_transposed_2d_asymmetric_input_asymmetric_kernel_padded(
     if bias is not None and not _is_npu_tensor(bias):
         raise RuntimeError("bias must be allocated on Ascend NPU")
     if x.dim() != 4:
-        raise ValueError(f"expected a 4D input tensor, got shape {tuple(x.shape)}")
+        raise ValueError(
+            f"expected a 4D input tensor, got shape {tuple(x.shape)}")
     if weight.dim() != 4:
-        raise ValueError(f"expected a 4D weight tensor, got shape {tuple(weight.shape)}")
+        raise ValueError(
+            f"expected a 4D weight tensor, got shape {tuple(weight.shape)}")
     if x.dtype not in (torch.float16, torch.float32):
         raise TypeError(f"unsupported input dtype: {x.dtype}")
     if weight.dtype != x.dtype:
-        raise TypeError(f"weight dtype {weight.dtype} must match input dtype {x.dtype}")
+        raise TypeError(
+            f"weight dtype {weight.dtype} must match input dtype {x.dtype}")
     if bias is not None and bias.dtype != x.dtype:
-        raise TypeError(f"bias dtype {bias.dtype} must match input dtype {x.dtype}")
+        raise TypeError(
+            f"bias dtype {bias.dtype} must match input dtype {x.dtype}")
     if x.shape[1] != weight.shape[0]:
         raise ValueError(
             f"input channels {x.shape[1]} must match weight input channels {weight.shape[0]}"
@@ -131,6 +134,8 @@ class ModelNew(nn.Module):
             groups=self.conv_transpose2d.groups,
             dilation=self.conv_transpose2d.dilation,
         )
+
+
 batch_size = 8
 in_channels = 32
 out_channels = 32
@@ -140,8 +145,11 @@ width = 1024
 stride = (1, 1)
 padding = (1, 3)
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, height, width)
     return [x]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, stride, padding]

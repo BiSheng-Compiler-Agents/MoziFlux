@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 
@@ -89,13 +88,15 @@ def _softmax_pool2_fused_kernel(
     tl.store(out_ptrs, acc, mask=(mask_c[:, None] & mask_ow[None, :]))
 
 
-def _softmax_then_two_pools_fused_triton(x: torch.Tensor, pool_kernel_size: int) -> torch.Tensor:
+def _softmax_then_two_pools_fused_triton(
+        x: torch.Tensor, pool_kernel_size: int) -> torch.Tensor:
     # x: [N, C, D, H, W], compute softmax along C then two MaxPool3d(K) (stride=K)
     # fused into one with Kf = K*K (stride=K*K).
     if x.ndim != 5:
         raise RuntimeError("Expected a 5D NCDHW tensor.")
     if x.device.type not in {"cuda", "npu"}:
-        raise RuntimeError("Triton fused path requires CUDA or Ascend NPU tensors.")
+        raise RuntimeError(
+            "Triton fused path requires CUDA or Ascend NPU tensors.")
     x = x.contiguous()
     N, C, D, H, W = x.shape
     K1 = int(pool_kernel_size)
@@ -124,10 +125,26 @@ def _softmax_then_two_pools_fused_triton(x: torch.Tensor, pool_kernel_size: int)
 
     grid = (N * OD * OH, triton.cdiv(OW, BLOCK_OW))
     _softmax_pool2_fused_kernel[grid](
-        x, y,
-        xs[0], xs[1], xs[2], xs[3], xs[4],
-        ys[0], ys[1], ys[2], ys[3], ys[4],
-        N, C, D, H, W, OD, OH, OW,
+        x,
+        y,
+        xs[0],
+        xs[1],
+        xs[2],
+        xs[3],
+        xs[4],
+        ys[0],
+        ys[1],
+        ys[2],
+        ys[3],
+        ys[4],
+        N,
+        C,
+        D,
+        H,
+        W,
+        OD,
+        OH,
+        OW,
         K=Kf,
         BLOCK_C=BLOCK_C,
         BLOCK_OW=BLOCK_OW,
@@ -141,6 +158,7 @@ class ModelNew(nn.Module):
     """
     Model that performs a 3D convolution, applies Softmax, and performs two max pooling operations.
     """
+
     def __init__(
         self,
         in_channels: int = 3,
@@ -164,6 +182,8 @@ class ModelNew(nn.Module):
 
         x = self.conv(x)
         return _softmax_then_two_pools_fused_triton(x, self.pool_kernel_size)
+
+
 batch_size = 128
 in_channels = 3
 out_channels = 16
@@ -171,7 +191,10 @@ depth, height, width = 16, 32, 32
 kernel_size = 3
 pool_kernel_size = 2
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, depth, height, width)]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, pool_kernel_size]

@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 batch_size = 16
 in_channels = 3
 out_channels = in_channels
@@ -27,17 +26,25 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 @triton.jit
 def dwconv2d_fwd_kernel(
-    x_ptr,         # *fptr: [N, C, H, W] contiguous
-    w_ptr,         # *fptr: [C, K_H*K_W] flattened contiguous
-    b_ptr,         # *fptr: [C] or dummy (unused if BIAS=0)
-    y_ptr,         # *fptr: [N, C, H_OUT, W_OUT] contiguous
-    N, C, H, W,    # int32
-    H_OUT, W_OUT,  # int32
-    BIAS: tl.constexpr,     # 0/1
-    K_H: tl.constexpr, K_W: tl.constexpr,
-    STRIDE_H: tl.constexpr, STRIDE_W: tl.constexpr,
-    PAD_H: tl.constexpr, PAD_W: tl.constexpr,
-    DIL_H: tl.constexpr, DIL_W: tl.constexpr,
+    x_ptr,  # *fptr: [N, C, H, W] contiguous
+    w_ptr,  # *fptr: [C, K_H*K_W] flattened contiguous
+    b_ptr,  # *fptr: [C] or dummy (unused if BIAS=0)
+    y_ptr,  # *fptr: [N, C, H_OUT, W_OUT] contiguous
+    N,
+    C,
+    H,
+    W,  # int32
+    H_OUT,
+    W_OUT,  # int32
+    BIAS: tl.constexpr,  # 0/1
+    K_H: tl.constexpr,
+    K_W: tl.constexpr,
+    STRIDE_H: tl.constexpr,
+    STRIDE_W: tl.constexpr,
+    PAD_H: tl.constexpr,
+    PAD_W: tl.constexpr,
+    DIL_H: tl.constexpr,
+    DIL_W: tl.constexpr,
     BLOCK_HW: tl.constexpr,
 ):
     # program ids (over N*C and tiles of H_OUT*W_OUT) - do not change
@@ -77,7 +84,9 @@ def dwconv2d_fwd_kernel(
                         row_ptrs = x_ptr + base_x + ih * W + ow_base
                         w_row_base = w_ptr + w_ch_base + kh * K_W
                         for kw in tl.static_range(K_W):
-                            x_vals = tl.load(row_ptrs + kw, mask=mask_o, other=0.0)
+                            x_vals = tl.load(row_ptrs + kw,
+                                             mask=mask_o,
+                                             other=0.0)
                             w_val = tl.load(w_row_base + kw)
                             acc += x_vals.to(tl.float32) * w_val.to(tl.float32)
                 else:
@@ -90,7 +99,9 @@ def dwconv2d_fwd_kernel(
                             iw = ow_base + kw * DIL_W
                             w_ok = (iw >= 0) & (iw < W)
                             m = mask_o & h_ok & w_ok
-                            x_vals = tl.load(row_ptrs + kw * DIL_W, mask=m, other=0.0)
+                            x_vals = tl.load(row_ptrs + kw * DIL_W,
+                                             mask=m,
+                                             other=0.0)
                             w_val = tl.load(w_row_base + kw)
                             acc += x_vals.to(tl.float32) * w_val.to(tl.float32)
             else:
@@ -103,7 +114,9 @@ def dwconv2d_fwd_kernel(
                         iw = ow_base + kw * DIL_W
                         w_ok = (iw >= 0) & (iw < W)
                         m = mask_o & h_ok & w_ok
-                        x_vals = tl.load(row_ptrs + kw * DIL_W, mask=m, other=0.0)
+                        x_vals = tl.load(row_ptrs + kw * DIL_W,
+                                         mask=m,
+                                         other=0.0)
                         w_val = tl.load(w_row_base + kw)
                         acc += x_vals.to(tl.float32) * w_val.to(tl.float32)
         else:
@@ -155,14 +168,16 @@ def _depthwise_conv2d_triton(
     N, C, H, W = x.shape
     Cw, one, K_H, K_W = weight.shape
     assert Cw == C and one == 1, "Weight must be depthwise [C,1,K_H,K_W]"
-    (stride_h, stride_w), (pad_h, pad_w), (dil_h, dil_w) = stride, padding, dilation
+    (stride_h, stride_w), (pad_h, pad_w), (dil_h,
+                                           dil_w) = stride, padding, dilation
 
     # Output size (PyTorch conv2d formula)
     H_OUT = (H + 2 * pad_h - dil_h * (K_H - 1) - 1) // stride_h + 1
     W_OUT = (W + 2 * pad_w - dil_w * (K_W - 1) - 1) // stride_w + 1
 
     x_c = x.contiguous() if not x.is_contiguous() else x
-    w_c = (weight if weight.is_contiguous() else weight.contiguous()).view(C, -1)
+    w_c = (weight if weight.is_contiguous() else weight.contiguous()).view(
+        C, -1)
     b_c = bias.contiguous() if bias is not None else bias
 
     y = torch.empty((N, C, H_OUT, W_OUT), device=x.device, dtype=x.dtype)
@@ -175,15 +190,28 @@ def _depthwise_conv2d_triton(
     dummy_bptr = x_c.view(-1)
 
     dwconv2d_fwd_kernel[grid](
-        x_c, w_c.view(-1), (b_c if b_c is not None else dummy_bptr), y,
-        N, C, H, W, H_OUT, W_OUT,
+        x_c,
+        w_c.view(-1),
+        (b_c if b_c is not None else dummy_bptr),
+        y,
+        N,
+        C,
+        H,
+        W,
+        H_OUT,
+        W_OUT,
         BIAS=1 if b_c is not None else 0,
-        K_H=K_H, K_W=K_W,
-        STRIDE_H=stride_h, STRIDE_W=stride_w,
-        PAD_H=pad_h, PAD_W=pad_w,
-        DIL_H=dil_h, DIL_W=dil_w,
+        K_H=K_H,
+        K_W=K_W,
+        STRIDE_H=stride_h,
+        STRIDE_W=stride_w,
+        PAD_H=pad_h,
+        PAD_W=pad_w,
+        DIL_H=dil_h,
+        DIL_W=dil_w,
         BLOCK_HW=BLOCK_HW,
-        num_warps=4, num_stages=2,
+        num_warps=4,
+        num_stages=2,
     )
     return y
 
@@ -206,6 +234,7 @@ class ModelNew(nn.Module):
         groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
+
     def __init__(
         self,
         in_channels: int = in_channels,
@@ -223,18 +252,18 @@ class ModelNew(nn.Module):
     ):
         super(ModelNew, self).__init__()
         if out_channels != in_channels:
-            raise ValueError("Depthwise convolution requires out_channels == in_channels")
+            raise ValueError(
+                "Depthwise convolution requires out_channels == in_channels")
         if groups != in_channels:
-            raise ValueError("Depthwise convolution requires groups == in_channels")
-        self.conv2d = nn.Conv2d(
-            in_channels, in_channels,
-            (kernel_size_h, kernel_size_w),
-            stride=(stride_h, stride_w),
-            padding=(padding_h, padding_w),
-            dilation=(dilation_h, dilation_w),
-            groups=in_channels,
-            bias=bias
-        )
+            raise ValueError(
+                "Depthwise convolution requires groups == in_channels")
+        self.conv2d = nn.Conv2d(in_channels,
+                                in_channels, (kernel_size_h, kernel_size_w),
+                                stride=(stride_h, stride_w),
+                                padding=(padding_h, padding_w),
+                                dilation=(dilation_h, dilation_w),
+                                groups=in_channels,
+                                bias=bias)
         # Pre-compute weight views for faster forward
         w_t = self.conv2d.weight.contiguous()
         self.register_buffer("_w_flat", w_t.view(-1), persistent=False)
@@ -293,6 +322,8 @@ def run_operator(x: torch.Tensor) -> torch.Tensor:
         model.eval()
         _MODEL_CACHE[key] = model
     return model(x)
+
+
 batch_size = 32
 in_channels = 128
 out_channels = 128
@@ -308,8 +339,14 @@ dilation_h = 1
 dilation_w = 1
 groups = in_channels
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, height, width, device='npu')
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size_h, kernel_size_w, stride_h, stride_w, padding_h, padding_w, dilation_h, dilation_w, groups]
+    return [
+        in_channels, out_channels, kernel_size_h, kernel_size_w, stride_h,
+        stride_w, padding_h, padding_w, dilation_h, dilation_w, groups
+    ]

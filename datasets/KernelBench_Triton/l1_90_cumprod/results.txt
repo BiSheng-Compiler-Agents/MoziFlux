@@ -1,0 +1,22 @@
+TEST baseline1 small_2d PASS
+TEST baseline2 small_2d PASS
+TEST optimized small_2d PASS
+TEST baseline1 medium_2d PASS
+TEST baseline2 medium_2d PASS
+TEST optimized medium_2d PASS
+TEST baseline1 required_32768x32768 PASS
+TEST baseline2 required_32768x32768 PASS
+TEST optimized required_32768x32768 PASS
+TEST optimized persistent_rows PASS
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l1_90_cumprod_1782368477/90_cumprod.py:102: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out_flat = torch.empty_like(flat)
+cumprod-performance:
+                  label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0              small_2d       0.396398          0.119739          0.026973          0.027556
+1             medium_2d      10.432208          2.955858          0.314797          0.322383
+2  required_32768x32768   13791.446289       2917.264648        299.259674        306.718933
+
+/home/s00929845/kernel_verify/l1_90_cumprod_1782368477/90_cumprod.py:102: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out_flat = torch.empty_like(flat)

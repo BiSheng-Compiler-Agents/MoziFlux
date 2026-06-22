@@ -92,10 +92,12 @@ class ModelNew(nn.Module):
     """
     Model that performs matrix multiplication, max pooling, sum, and scaling.
     """
+
     def __init__(self, in_features, out_features, kernel_size, scale_factor):
         super(ModelNew, self).__init__()
         self.matmul = nn.Linear(in_features, out_features)
-        self.max_pool = nn.MaxPool1d(kernel_size)  # kept for state/compat; computation is fused
+        self.max_pool = nn.MaxPool1d(
+            kernel_size)  # kept for state/compat; computation is fused
         self.scale_factor = scale_factor
 
     def forward(self, x):
@@ -107,7 +109,8 @@ class ModelNew(nn.Module):
             torch.Tensor: Output tensor of shape (batch_size,).
         """
         if x.device.type != "npu":
-            raise RuntimeError(f"ModelNew expects an NPU tensor, got device={x.device!s}")
+            raise RuntimeError(
+                f"ModelNew expects an NPU tensor, got device={x.device!s}")
 
         # Ensure contiguous tensors
         x = x.contiguous()
@@ -121,20 +124,24 @@ class ModelNew(nn.Module):
         B = x.shape[0]
         IN_F = x.shape[1]
         OUT_F = W.shape[0]
-        KERNEL = self.max_pool.kernel_size if isinstance(self.max_pool.kernel_size, int) else self.max_pool.kernel_size[0]
+        KERNEL = self.max_pool.kernel_size if isinstance(
+            self.max_pool.kernel_size, int) else self.max_pool.kernel_size[0]
 
         # Output tensor
         out = torch.empty(B, device=x.device, dtype=torch.float32)
 
         # Launch kernel: one program per batch row
-        grid = (B,)
+        grid = (B, )
 
         # Choose tile sizes
         BLOCK_IN = 128
         BLOCK_KO = 32
 
         _linear_maxpool_sum_scale_kernel[grid](
-            x, W, b, out,
+            x,
+            W,
+            b,
+            out,
             B,
             IN_F,
             OUT_F,
@@ -153,17 +160,24 @@ class ModelNew(nn.Module):
 
 def run_model(x, weight, bias, kernel_size, scale_factor):
     if x.device.type != "npu":
-        raise RuntimeError(f"run_model expects x on NPU, got device={x.device!s}")
+        raise RuntimeError(
+            f"run_model expects x on NPU, got device={x.device!s}")
     if weight.device.type != "npu":
-        raise RuntimeError(f"run_model expects weight on NPU, got device={weight.device!s}")
+        raise RuntimeError(
+            f"run_model expects weight on NPU, got device={weight.device!s}")
     if bias.device.type != "npu":
-        raise RuntimeError(f"run_model expects bias on NPU, got device={bias.device!s}")
+        raise RuntimeError(
+            f"run_model expects bias on NPU, got device={bias.device!s}")
     if x.ndim != 2:
-        raise ValueError(f"run_model expects x to be 2D, got shape={tuple(x.shape)}")
+        raise ValueError(
+            f"run_model expects x to be 2D, got shape={tuple(x.shape)}")
     if weight.ndim != 2:
-        raise ValueError(f"run_model expects weight to be 2D, got shape={tuple(weight.shape)}")
+        raise ValueError(
+            f"run_model expects weight to be 2D, got shape={tuple(weight.shape)}"
+        )
     if bias.ndim != 1:
-        raise ValueError(f"run_model expects bias to be 1D, got shape={tuple(bias.shape)}")
+        raise ValueError(
+            f"run_model expects bias to be 1D, got shape={tuple(bias.shape)}")
     if x.shape[1] != weight.shape[1]:
         raise ValueError(
             f"Input feature mismatch: x.shape[1]={x.shape[1]} vs weight.shape[1]={weight.shape[1]}"
@@ -183,13 +197,18 @@ def run_model(x, weight, bias, kernel_size, scale_factor):
         model.matmul.weight.copy_(weight.contiguous())
         model.matmul.bias.copy_(bias.contiguous())
     return model(x)
+
+
 batch_size = 128
 in_features = 32768
 out_features = 32768
 kernel_size = 2
 scale_factor = 0.5
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features, kernel_size, scale_factor]

@@ -1,0 +1,20 @@
+TEST baseline1 small_dim1 SKIP provider_guard
+TEST baseline2 small_dim1 SKIP provider_guard
+TEST optimized small_dim1 PASS max_abs=0
+TEST baseline1 target_dim1 SKIP provider_guard
+TEST baseline2 target_dim1 SKIP provider_guard
+TEST optimized target_dim1 PASS max_abs=0
+TEST baseline1 dim0_path SKIP provider_guard
+TEST baseline2 dim0_path SKIP provider_guard
+TEST optimized dim0_path PASS max_abs=0
+TEST baseline1 dim2_path SKIP provider_guard
+TEST baseline2 dim2_path SKIP provider_guard
+TEST optimized dim2_path PASS max_abs=0
+UNIT_TEST PASS
+
+min_reduction_dim_benchmark:
+         label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   small_dim1       0.006880               inf               inf          0.014162
+1  target_dim1       5.445765               inf               inf          9.811450
+2    dim0_path       0.004157               inf               inf          0.009858
+3    dim2_path       0.005477               inf               inf          0.040802

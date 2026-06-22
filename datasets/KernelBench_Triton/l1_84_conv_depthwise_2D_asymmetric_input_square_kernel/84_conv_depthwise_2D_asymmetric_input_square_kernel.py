@@ -1,10 +1,8 @@
-import math
 import torch
 import torch.nn as nn
 
 import triton
 import triton.language as tl
-
 
 DEFAULT_IN_CHANNELS = 128
 DEFAULT_OUT_CHANNELS = 128
@@ -26,23 +24,23 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 )
 @triton.jit
 def _dwconv2d_kernel(
-    x_ptr,           # *const T, [N, C_in, H_in, W_in]
-    w_ptr,           # *const T, [C_out, 1, K, K]
-    b_ptr,           # *const T or nullptr if no bias, [C_out]
-    y_ptr,           # *mut T,   [N, C_out, H_out, W_out]
-    N: tl.constexpr,
-    C_IN,
-    C_OUT,
-    H_IN,
-    W_IN,
-    H_OUT,
-    W_OUT,
-    STRIDE,
-    PADDING,
-    OCPG,           # out_channels per group (= out_channels // in_channels)
-    K: tl.constexpr,               # kernel size (square)
-    HAS_BIAS: tl.constexpr,        # compile-time flag
-    BLOCK_W: tl.constexpr,         # tile size along W_out
+        x_ptr,  # *const T, [N, C_in, H_in, W_in]
+        w_ptr,  # *const T, [C_out, 1, K, K]
+        b_ptr,  # *const T or nullptr if no bias, [C_out]
+        y_ptr,  # *mut T,   [N, C_out, H_out, W_out]
+        N: tl.constexpr,
+        C_IN,
+        C_OUT,
+        H_IN,
+        W_IN,
+        H_OUT,
+        W_OUT,
+        STRIDE,
+        PADDING,
+        OCPG,  # out_channels per group (= out_channels // in_channels)
+        K: tl.constexpr,  # kernel size (square)
+        HAS_BIAS: tl.constexpr,  # compile-time flag
+        BLOCK_W: tl.constexpr,  # tile size along W_out
 ):
     pid_w = tl.program_id(0)
     pid_h = tl.program_id(1)
@@ -98,7 +96,8 @@ def _dwconv2d_kernel(
             # Load input values
             wi_i64 = wi.to(tl.int64)
             x_offsets = base_ncih + wi_i64
-            x_vals = tl.load(x_ptr + x_offsets, mask=mask, other=0).to(tl.float32)
+            x_vals = tl.load(x_ptr + x_offsets, mask=mask,
+                             other=0).to(tl.float32)
 
             # Load weight scalar for (oc, r, s)
             w_offset = w_oc_base + (r * K + s)
@@ -124,11 +123,15 @@ def _depthwise_conv2d_triton(
     padding: int | tuple[int, int],
 ) -> torch.Tensor:
     if not _is_npu_tensor(x):
-        raise RuntimeError("The Triton depthwise conv wrapper expects an Ascend NPU input tensor.")
+        raise RuntimeError(
+            "The Triton depthwise conv wrapper expects an Ascend NPU input tensor."
+        )
     if not _is_npu_tensor(weight):
-        raise RuntimeError("The Triton depthwise conv wrapper expects NPU weights.")
+        raise RuntimeError(
+            "The Triton depthwise conv wrapper expects NPU weights.")
     if bias is not None and not _is_npu_tensor(bias):
-        raise RuntimeError("The Triton depthwise conv wrapper expects NPU bias tensors.")
+        raise RuntimeError(
+            "The Triton depthwise conv wrapper expects NPU bias tensors.")
 
     if isinstance(stride, tuple):
         if len(stride) != 2 or stride[0] != stride[1]:
@@ -145,7 +148,9 @@ def _depthwise_conv2d_triton(
         raise ValueError("Only square kernels are supported.")
     C_in = x.shape[1]
     if C_per_group != 1 or (C_out % C_in) != 0:
-        raise ValueError("Weight must have shape [C_out, 1, K, K] with C_out divisible by C_in.")
+        raise ValueError(
+            "Weight must have shape [C_out, 1, K, K] with C_out divisible by C_in."
+        )
 
     N, _, H_in, W_in = x.shape
     ocpg = C_out // C_in
@@ -166,13 +171,20 @@ def _depthwise_conv2d_triton(
     has_bias = bias is not None
 
     _dwconv2d_kernel[grid](
-        x_c, w_c, (b_c if has_bias else x_c),  # dummy ptr if no bias, not used
+        x_c,
+        w_c,
+        (b_c if has_bias else x_c),  # dummy ptr if no bias, not used
         y,
         N,
-        C_in, C_out,
-        H_in, W_in,
-        H_out, W_out,
-        stride, padding, ocpg,
+        C_in,
+        C_out,
+        H_in,
+        W_in,
+        H_out,
+        W_out,
+        stride,
+        padding,
+        ocpg,
         K=K,
         HAS_BIAS=has_bias,
         # Do not pass W_OUT again as keyword to avoid duplicate binding
@@ -192,6 +204,7 @@ class ModelNew(nn.Module):
         padding (int, optional): Padding applied to the input. Defaults to 0.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -228,9 +241,13 @@ class ModelNew(nn.Module):
                 "ModelNew expects Ascend NPU inputs; the Triton kernel path is the only supported runtime."
             )
         if not _is_npu_tensor(self.conv2d.weight):
-            raise RuntimeError("ModelNew weights must be moved to Ascend NPU before execution.")
-        if self.conv2d.bias is not None and not _is_npu_tensor(self.conv2d.bias):
-            raise RuntimeError("ModelNew bias must be moved to Ascend NPU before execution.")
+            raise RuntimeError(
+                "ModelNew weights must be moved to Ascend NPU before execution."
+            )
+        if self.conv2d.bias is not None and not _is_npu_tensor(
+                self.conv2d.bias):
+            raise RuntimeError(
+                "ModelNew bias must be moved to Ascend NPU before execution.")
 
         return _depthwise_conv2d_triton(
             x,
@@ -239,6 +256,8 @@ class ModelNew(nn.Module):
             stride=self.conv2d.stride,
             padding=self.conv2d.padding,
         )
+
+
 batch_size = 64
 in_channels = 128
 out_channels = 128
@@ -248,8 +267,11 @@ height_in = 256
 stride = 1
 padding = 0
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, height_in, width_in)
     return [x]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, stride, padding]

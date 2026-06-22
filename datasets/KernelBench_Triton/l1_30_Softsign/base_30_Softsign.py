@@ -28,6 +28,7 @@ def _softsign_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -43,7 +44,7 @@ class ModelNew(nn.Module):
         block_size = 8192
         blocks_per_program = 9
         num_blocks = triton.cdiv(n_elements, block_size)
-        grid = (triton.cdiv(num_blocks, blocks_per_program),)
+        grid = (triton.cdiv(num_blocks, blocks_per_program), )
 
         _softsign_kernel[grid](
             x_contiguous.reshape(-1),

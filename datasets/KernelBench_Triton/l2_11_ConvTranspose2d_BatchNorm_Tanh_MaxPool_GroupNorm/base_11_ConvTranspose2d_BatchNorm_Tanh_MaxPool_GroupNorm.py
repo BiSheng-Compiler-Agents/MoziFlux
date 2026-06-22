@@ -8,7 +8,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 512
 DEFAULT_IN_CHANNELS = 64
 DEFAULT_OUT_CHANNELS = 128
@@ -139,17 +138,22 @@ class ModelNew(nn.Module):
         num_groups=DEFAULT_NUM_GROUPS,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose2d(
-            in_channels, out_channels, kernel_size, stride=stride, padding=padding
-        )
+        self.conv_transpose = nn.ConvTranspose2d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding)
         self.batch_norm = nn.BatchNorm2d(out_channels)
-        self.group_norm = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
+        self.group_norm = nn.GroupNorm(num_groups=num_groups,
+                                       num_channels=out_channels)
 
     def forward(self, x):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects inputs on Ascend NPU")
         if x.dtype not in {torch.float32, torch.bfloat16}:
-            raise RuntimeError(f"ModelNew supports only float32 and bfloat16 inputs, got {x.dtype}")
+            raise RuntimeError(
+                f"ModelNew supports only float32 and bfloat16 inputs, got {x.dtype}"
+            )
 
         x = self.conv_transpose(x)
         x = self.batch_norm(x)
@@ -177,7 +181,8 @@ class ModelNew(nn.Module):
             )
         else:
             block_ho = 32
-            grid = (n * c, triton.cdiv(h_out, block_ho), triton.cdiv(w_out, block_wo))
+            grid = (n * c, triton.cdiv(h_out,
+                                       block_ho), triton.cdiv(w_out, block_wo))
             _tanh_maxpool2x2_nchw_kernel[grid](
                 x,
                 y,
@@ -211,4 +216,7 @@ def get_inputs():
 
 
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, groups, num_groups]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding, groups,
+        num_groups
+    ]

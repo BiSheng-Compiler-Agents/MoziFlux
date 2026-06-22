@@ -54,6 +54,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs Frobenius norm normalization.
     """
+
     def __init__(self):
         """
         Initializes the Frobenius norm normalization layer.
@@ -86,27 +87,43 @@ class ModelNew(nn.Module):
 
         # Larger block to reduce grid size and atomics; tuned for Hopper (H200)
         BLOCK = 16384
-        grid = (triton.cdiv(n_elements, BLOCK),)
+        grid = (triton.cdiv(n_elements, BLOCK), )
 
         # Accumulate sum of squares in fp32 using atomics (no partials buffer, fewer kernel launches)
         sumsq = torch.zeros(1, device=x_contig.device, dtype=torch.float32)
-        _sumsq_kernel[grid](x_contig, n_elements, sumsq, BLOCK=BLOCK, num_warps=8, num_stages=4)
+        _sumsq_kernel[grid](x_contig,
+                            n_elements,
+                            sumsq,
+                            BLOCK=BLOCK,
+                            num_warps=8,
+                            num_stages=4)
 
         # Result dtype follows PyTorch's promotion for division by float32 scalar
         out_dtype = torch.promote_types(x_contig.dtype, torch.float32)
         y = torch.empty_like(x_contig, dtype=out_dtype)
 
         # Pass 2: scale by inverse Frobenius norm
-        _scale_kernel[grid](x_contig, y, n_elements, sumsq, BLOCK=BLOCK, num_warps=8, num_stages=4)
+        _scale_kernel[grid](x_contig,
+                            y,
+                            n_elements,
+                            sumsq,
+                            BLOCK=BLOCK,
+                            num_warps=8,
+                            num_stages=4)
 
         return y.view(original_shape)
+
+
 batch_size = 112
 features = 64
 dim1 = 512
 dim2 = 512
 
+
 def get_inputs():
     x = torch.rand(batch_size, features, dim1, dim2)
     return [x]
+
+
 def get_init_inputs():
     return []

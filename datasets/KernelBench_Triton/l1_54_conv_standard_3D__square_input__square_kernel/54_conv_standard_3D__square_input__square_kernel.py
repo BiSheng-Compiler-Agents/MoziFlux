@@ -32,6 +32,7 @@ class ModelNew(nn.Module):
         groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
+
     def __init__(
         self,
         in_channels: int = 3,
@@ -66,14 +67,18 @@ class ModelNew(nn.Module):
             torch.Tensor: Output tensor of shape (batch_size, out_channels, depth_out, width_out, height_out).
         """
         if x.dim() != 5:
-            raise ValueError(f"expected a 5D input tensor, got shape {tuple(x.shape)}")
+            raise ValueError(
+                f"expected a 5D input tensor, got shape {tuple(x.shape)}")
         if x.device.type != "npu":
-            raise RuntimeError(f"ModelNew expects NPU inputs, got device {x.device}")
+            raise RuntimeError(
+                f"ModelNew expects NPU inputs, got device {x.device}")
 
         n_elements = x.numel()
-        grid = (triton.cdiv(n_elements, 1024),)
+        grid = (triton.cdiv(n_elements, 1024), )
         _noop_touch_kernel[grid](x, n_elements, BLOCK=1024)
         return self.conv3d(x)
+
+
 batch_size = 16
 in_channels = 3
 out_channels = 64
@@ -82,8 +87,13 @@ depth = 64
 width = 64
 height = 64
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, depth, width, height)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization
+    return [
+        in_channels, out_channels, kernel_size
+    ]  # Provide in_channels, out_channels, kernel_size for initialization

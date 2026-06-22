@@ -17,6 +17,7 @@ class ModelNew(nn.Module):
     """
     Model that performs a GEMM, followed by a max operation, subtraction, and GELU activation.
     """
+
     def __init__(self, in_features=None, out_features=None, max_dim=None):
         super(ModelNew, self).__init__()
         if in_features is None:
@@ -47,20 +48,24 @@ class ModelNew(nn.Module):
                 BLOCK = 1024 if BLOCK > 1024 else BLOCK
             else:
                 BLOCK = 1
-            grid = (triton.cdiv(n_elements, BLOCK),)
+            grid = (triton.cdiv(n_elements, BLOCK), )
             _fill_zero_kernel[grid](out, n_elements, BLOCK=BLOCK)
             return out
 
         raise NotImplementedError(
             "ModelNew only supports max_dim == 1 so the Triton zero-fill fast path "
-            "remains the sole execution path."
-        )
+            "remains the sole execution path.")
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
 max_dim = 1
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features, max_dim]

@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 DEFAULT_IN_CHANNELS = 16
 DEFAULT_OUT_CHANNELS = 32
 DEFAULT_KERNEL_SIZE = 3
@@ -19,27 +18,40 @@ DEFAULT_NUM_STAGES = 3
 
 @triton.jit
 def _fused_leaky_mul_maxpool3d_2x2x2(
-    channel_idx_ptr,      # *i32 [C_WORK]
-    x_ptr,                # *f32 [N, C, D, H, W]
-    mult_ptr,             # *f32 [C, 1, 1, 1]
-    y_ptr,                # *f32 [N, C, D//2, H//2, W//2]
-    N, D, H, W,           # input sizes
-    C_WORK,               # number of channels handled by this launch
-    x_sN, x_sC, x_sD, x_sH, x_sW,  # x strides
-    m_sC,                 # multiplier stride along C dim
-    oD, oH, oW,           # output sizes
-    y_sN, y_sC, y_sD, y_sH, y_sW,  # y strides
-    h_tiles,              # number of H tiles
-    w_tiles,              # number of tiles along W for grid axis-2 decomposition
+    channel_idx_ptr,  # *i32 [C_WORK]
+    x_ptr,  # *f32 [N, C, D, H, W]
+    mult_ptr,  # *f32 [C, 1, 1, 1]
+    y_ptr,  # *f32 [N, C, D//2, H//2, W//2]
+    N,
+    D,
+    H,
+    W,  # input sizes
+    C_WORK,  # number of channels handled by this launch
+    x_sN,
+    x_sC,
+    x_sD,
+    x_sH,
+    x_sW,  # x strides
+    m_sC,  # multiplier stride along C dim
+    oD,
+    oH,
+    oW,  # output sizes
+    y_sN,
+    y_sC,
+    y_sD,
+    y_sH,
+    y_sW,  # y strides
+    h_tiles,  # number of H tiles
+    w_tiles,  # number of tiles along W for grid axis-2 decomposition
     NEG_SLOPE: tl.constexpr,
     USE_MIN: tl.constexpr,
     BLOCK_H: tl.constexpr,
     BLOCK_W: tl.constexpr,
 ):
     # Program ids
-    pid_nc = tl.program_id(0)      # ranges over N*C
-    pid_d = tl.program_id(1)       # ranges over outD
-    pid_hw = tl.program_id(2)      # ranges over h_tiles * w_tiles
+    pid_nc = tl.program_id(0)  # ranges over N*C
+    pid_d = tl.program_id(1)  # ranges over outD
+    pid_hw = tl.program_id(2)  # ranges over h_tiles * w_tiles
 
     # Decode (n, c)
     n = pid_nc // C_WORK
@@ -107,7 +119,8 @@ def _fused_leaky_mul_maxpool3d_2x2x2(
         pooled4 = tl.maximum(pooled0, pooled1)
         pooled5 = tl.maximum(pooled2, pooled3)
         pooled = tl.maximum(pooled4, pooled5)
-        vout = tl.where(pooled >= 0, pooled * m, pooled * (m * NEG_SLOPE * NEG_SLOPE))
+        vout = tl.where(pooled >= 0, pooled * m,
+                        pooled * (m * NEG_SLOPE * NEG_SLOPE))
 
     # Store result
     out_base = n * y_sN + c * y_sC + pid_d * y_sD
@@ -116,9 +129,10 @@ def _fused_leaky_mul_maxpool3d_2x2x2(
 
 class ModelNew(nn.Module):
     """
-    Model that performs a 3D transposed convolution, applies LeakyReLU, multiplies by a learnable parameter, 
+    Model that performs a 3D transposed convolution, applies LeakyReLU, multiplies by a learnable parameter,
     applies LeakyReLU again, and performs a max pooling operation.
     """
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -130,7 +144,12 @@ class ModelNew(nn.Module):
         multiplier_shape=DEFAULT_MULTIPLIER_SHAPE,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, output_padding=output_padding)
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding,
+                                                 output_padding=output_padding)
         self.multiplier = nn.Parameter(torch.randn(multiplier_shape))
         self.leaky_relu = nn.LeakyReLU(negative_slope=0.2)
         self.max_pool = nn.MaxPool3d(kernel_size=2)
@@ -138,7 +157,9 @@ class ModelNew(nn.Module):
     def forward(self, x):
         x = self.conv_transpose(x)
         if x.device.type != "npu" or self.multiplier.device.type != "npu":
-            raise RuntimeError("ModelNew expects NPU tensors so the Triton kernel path is exercised.")
+            raise RuntimeError(
+                "ModelNew expects NPU tensors so the Triton kernel path is exercised."
+            )
 
         N, C, D, H, W = x.shape
         oD, oH, oW = D // 2, H // 2, W // 2
@@ -150,20 +171,30 @@ class ModelNew(nn.Module):
         w_tiles = triton.cdiv(oW, BLOCK_W)
         num_warps = DEFAULT_NUM_WARPS
         multiplier = self.multiplier.view(-1)
-        pos_channels = torch.nonzero(multiplier >= 0, as_tuple=False).flatten().to(dtype=torch.int32)
-        neg_channels = torch.nonzero(multiplier < 0, as_tuple=False).flatten().to(dtype=torch.int32)
+        pos_channels = torch.nonzero(
+            multiplier >= 0, as_tuple=False).flatten().to(dtype=torch.int32)
+        neg_channels = torch.nonzero(
+            multiplier < 0, as_tuple=False).flatten().to(dtype=torch.int32)
 
         def launch(channel_idx, use_min):
             if channel_idx.numel() == 0:
                 return
             grid = (N * channel_idx.numel(), oD, h_tiles * w_tiles)
             _fused_leaky_mul_maxpool3d_2x2x2[grid](
-                channel_idx, x, self.multiplier, y,
-                N, D, H, W,
+                channel_idx,
+                x,
+                self.multiplier,
+                y,
+                N,
+                D,
+                H,
+                W,
                 channel_idx.numel(),
                 *x.stride(),
                 self.multiplier.stride()[0],
-                oD, oH, oW,
+                oD,
+                oH,
+                oW,
                 *y.stride(),
                 h_tiles=h_tiles,
                 w_tiles=w_tiles,
@@ -178,6 +209,8 @@ class ModelNew(nn.Module):
         launch(pos_channels, False)
         launch(neg_channels, True)
         return y
+
+
 batch_size = 16
 in_channels = 16
 out_channels = 32
@@ -188,7 +221,13 @@ padding = 1
 output_padding = 1
 multiplier_shape = (out_channels, 1, 1, 1)
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, depth, height, width)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, multiplier_shape]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding,
+        output_padding, multiplier_shape
+    ]

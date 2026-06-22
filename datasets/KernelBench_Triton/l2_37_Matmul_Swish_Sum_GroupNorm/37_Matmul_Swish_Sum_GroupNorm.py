@@ -11,16 +11,16 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 @triton.jit
 def _swish_bias_groupnorm_kernel(
-    X_ptr,          # [B, C] post-matmul tensor
-    EXTRA_BIAS_ptr, # [C] extra bias added before GroupNorm
-    GAMMA_ptr,      # [C] GroupNorm weight
-    BETA_ptr,       # [C] GroupNorm bias
-    Y_ptr,          # [B, C] output
-    B,              # int: batch size
-    C,              # int: num channels
-    G,              # int: num groups
-    EPS,            # float: epsilon
-    BLOCK_SIZE: tl.constexpr,  # tile size over channels per group
+        X_ptr,  # [B, C] post-matmul tensor
+        EXTRA_BIAS_ptr,  # [C] extra bias added before GroupNorm
+        GAMMA_ptr,  # [C] GroupNorm weight
+        BETA_ptr,  # [C] GroupNorm bias
+        Y_ptr,  # [B, C] output
+        B,  # int: batch size
+        C,  # int: num channels
+        G,  # int: num groups
+        EPS,  # float: epsilon
+        BLOCK_SIZE: tl.constexpr,  # tile size over channels per group
 ):
     pid = tl.program_id(axis=0)
     n = pid // G
@@ -43,7 +43,8 @@ def _swish_bias_groupnorm_kernel(
     # Load input, apply Swish, add extra bias
     x = tl.load(x_ptrs, mask=mask, other=0.0).to(tl.float32)
     x_swish = x * tl.sigmoid(x)
-    extra_b = tl.load(EXTRA_BIAS_ptr + ch_idx, mask=in_group, other=0.0).to(tl.float32)
+    extra_b = tl.load(EXTRA_BIAS_ptr + ch_idx, mask=in_group,
+                      other=0.0).to(tl.float32)
     y = x_swish + extra_b
 
     # Compute mean and variance using E[y^2] - E[y]^2 over the group
@@ -57,7 +58,8 @@ def _swish_bias_groupnorm_kernel(
     inv_std = tl.rsqrt(var + EPS)
 
     # Load affine parameters
-    gamma = tl.load(GAMMA_ptr + ch_idx, mask=in_group, other=1.0).to(tl.float32)
+    gamma = tl.load(GAMMA_ptr + ch_idx, mask=in_group,
+                    other=1.0).to(tl.float32)
     beta = tl.load(BETA_ptr + ch_idx, mask=in_group, other=0.0).to(tl.float32)
 
     # Fuse scale/shift to reduce ops: out = y * (gamma*inv_std) + (beta - mean*(gamma*inv_std))
@@ -72,6 +74,7 @@ class ModelNew(nn.Module):
     """
     A model that performs a matrix multiplication, applies Swish activation, sums with a bias term, and normalizes with GroupNorm.
     """
+
     def __init__(
         self,
         in_features=512,
@@ -81,7 +84,7 @@ class ModelNew(nn.Module):
     ):
         super(ModelNew, self).__init__()
         if bias_shape is None:
-            bias_shape = (out_features,)
+            bias_shape = (out_features, )
         self.matmul = nn.Linear(in_features, out_features)
         self.bias = nn.Parameter(torch.randn(bias_shape))
         self.group_norm = nn.GroupNorm(num_groups, out_features)
@@ -96,7 +99,9 @@ class ModelNew(nn.Module):
         z = self.matmul(x)
 
         if not _is_npu_tensor(z):
-            raise RuntimeError("ModelNew expects NPU tensors and does not support CPU/CUDA fallback")
+            raise RuntimeError(
+                "ModelNew expects NPU tensors and does not support CPU/CUDA fallback"
+            )
 
         B, C = z.shape
         G = self.group_norm.num_groups
@@ -107,24 +112,36 @@ class ModelNew(nn.Module):
         out = torch.empty_like(z)
 
         # Kernel launch: one program per (batch, group)
-        grid = (B * G,)
+        grid = (B * G, )
         # Use a BLOCK_SIZE that provides good occupancy; masked for safety
         BLOCK_SIZE = 128
 
         _swish_bias_groupnorm_kernel[grid](
-            z, self.bias, self.group_norm.weight, self.group_norm.bias, out,
-            B, C, G, self.group_norm.eps,
+            z,
+            self.bias,
+            self.group_norm.weight,
+            self.group_norm.bias,
+            out,
+            B,
+            C,
+            G,
+            self.group_norm.eps,
             BLOCK_SIZE=BLOCK_SIZE,
             num_warps=4,
         )
         return out
+
+
 batch_size = 32768
 in_features = 1024
 out_features = 4096
 num_groups = 64
-bias_shape = (out_features,)
+bias_shape = (out_features, )
+
 
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features, num_groups, bias_shape]

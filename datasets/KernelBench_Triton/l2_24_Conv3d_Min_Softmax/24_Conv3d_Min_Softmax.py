@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 import triton
@@ -11,11 +10,22 @@ def _next_pow2(x: int) -> int:
 
 @triton.jit
 def _min_reduce_dim2_kernel(
-    x_ptr,                # *f32 [B, C, D, H, W]
-    y_ptr,                # *f32 [B, C, H, W]
-    B, C, D, H, W,
-    stride_n, stride_c, stride_d, stride_h, stride_w,
-    out_stride_n, out_stride_c, out_stride_h, out_stride_w,
+    x_ptr,  # *f32 [B, C, D, H, W]
+    y_ptr,  # *f32 [B, C, H, W]
+    B,
+    C,
+    D,
+    H,
+    W,
+    stride_n,
+    stride_c,
+    stride_d,
+    stride_h,
+    stride_w,
+    out_stride_n,
+    out_stride_c,
+    out_stride_h,
+    out_stride_w,
     BLOCK_W: tl.constexpr,
     BLOCK_D: tl.constexpr,
 ):
@@ -50,11 +60,20 @@ def _min_reduce_dim2_kernel(
 
 @triton.jit
 def _softmax_dim1_kernel(
-    x_ptr,                # *f32 [B, C, H, W]
-    y_ptr,                # *f32 [B, C, H, W]
-    B, C, H, W,
-    stride_n, stride_c, stride_h, stride_w,
-    out_stride_n, out_stride_c, out_stride_h, out_stride_w,
+    x_ptr,  # *f32 [B, C, H, W]
+    y_ptr,  # *f32 [B, C, H, W]
+    B,
+    C,
+    H,
+    W,
+    stride_n,
+    stride_c,
+    stride_h,
+    stride_w,
+    out_stride_n,
+    out_stride_c,
+    out_stride_h,
+    out_stride_w,
     BLOCK_C: tl.constexpr,
 ):
     # Grid maps over (n, h, w)
@@ -84,11 +103,22 @@ def _softmax_dim1_kernel(
 
 @triton.jit
 def _fused_minD_softmaxC_wtile_singleCTile(
-    x_ptr,                # *f32 [B, C, D, H, W]
-    y_ptr,                # *f32 [B, C, H, W]
-    B, C, D, H, W,
-    stride_n, stride_c, stride_d, stride_h, stride_w,
-    out_stride_n, out_stride_c, out_stride_h, out_stride_w,
+    x_ptr,  # *f32 [B, C, D, H, W]
+    y_ptr,  # *f32 [B, C, H, W]
+    B,
+    C,
+    D,
+    H,
+    W,
+    stride_n,
+    stride_c,
+    stride_d,
+    stride_h,
+    stride_w,
+    out_stride_n,
+    out_stride_c,
+    out_stride_h,
+    out_stride_w,
     TOT_D_TILES: tl.constexpr,
     BLOCK_C: tl.constexpr,
     BLOCK_D: tl.constexpr,
@@ -122,14 +152,11 @@ def _fused_minD_softmaxC_wtile_singleCTile(
         d_offsets = dt * BLOCK_D + tl.arange(0, BLOCK_D)
         d_mask = d_offsets < D
 
-        ptrs = (
-            x_ptr
-            + in_base
-            + c_offsets[:, None, None] * stride_c
-            + d_offsets[None, :, None] * stride_d
-            + w_offsets[None, None, :] * stride_w
-        )
-        mask3d = c_mask[:, None, None] & d_mask[None, :, None] & w_mask[None, None, :]
+        ptrs = (x_ptr + in_base + c_offsets[:, None, None] * stride_c +
+                d_offsets[None, :, None] * stride_d +
+                w_offsets[None, None, :] * stride_w)
+        mask3d = c_mask[:, None, None] & d_mask[None, :,
+                                                None] & w_mask[None, None, :]
         vals = tl.load(ptrs, mask=mask3d, other=pos_inf)
         tile_min = tl.min(vals, axis=1)  # reduce along D
         run_min = tl.minimum(run_min, tile_min)
@@ -142,13 +169,9 @@ def _fused_minD_softmaxC_wtile_singleCTile(
     out_vals = exps / gsum[None, :]
 
     # Store results to [B, C, H, W]
-    out_ptrs = (
-        y_ptr
-        + n_idx * out_stride_n
-        + c_offsets[:, None] * out_stride_c
-        + h_idx * out_stride_h
-        + w_offsets[None, :] * out_stride_w
-    )
+    out_ptrs = (y_ptr + n_idx * out_stride_n +
+                c_offsets[:, None] * out_stride_c + h_idx * out_stride_h +
+                w_offsets[None, :] * out_stride_w)
     tl.store(out_ptrs, out_vals, mask=c_mask[:, None] & w_mask[None, :])
 
 
@@ -162,16 +185,28 @@ def _reduce_min_dim2_triton(x: torch.Tensor) -> torch.Tensor:
 
     BLOCK_W = 32 if W >= 32 else _next_pow2(W)
     BLOCK_D = _next_pow2(D)
-    grid = (triton.cdiv(W, BLOCK_W) * H * C * B,)
+    grid = (triton.cdiv(W, BLOCK_W) * H * C * B, )
 
-    _min_reduce_dim2_kernel[grid](
-        x, y,
-        B, C, D, H, W,
-        stride_n, stride_c, stride_d, stride_h, stride_w,
-        out_stride_n, out_stride_c, out_stride_h, out_stride_w,
-        BLOCK_W=BLOCK_W, BLOCK_D=BLOCK_D,
-        num_warps=4, num_stages=2
-    )
+    _min_reduce_dim2_kernel[grid](x,
+                                  y,
+                                  B,
+                                  C,
+                                  D,
+                                  H,
+                                  W,
+                                  stride_n,
+                                  stride_c,
+                                  stride_d,
+                                  stride_h,
+                                  stride_w,
+                                  out_stride_n,
+                                  out_stride_c,
+                                  out_stride_h,
+                                  out_stride_w,
+                                  BLOCK_W=BLOCK_W,
+                                  BLOCK_D=BLOCK_D,
+                                  num_warps=4,
+                                  num_stages=2)
     return y
 
 
@@ -184,16 +219,25 @@ def _softmax_dim1_triton(x: torch.Tensor) -> torch.Tensor:
     out_stride_n, out_stride_c, out_stride_h, out_stride_w = y.stride()
 
     BLOCK_C = _next_pow2(C)
-    grid = (B * H * W,)
+    grid = (B * H * W, )
 
-    _softmax_dim1_kernel[grid](
-        x, y,
-        B, C, H, W,
-        stride_n, stride_c, stride_h, stride_w,
-        out_stride_n, out_stride_c, out_stride_h, out_stride_w,
-        BLOCK_C=BLOCK_C,
-        num_warps=4, num_stages=2
-    )
+    _softmax_dim1_kernel[grid](x,
+                               y,
+                               B,
+                               C,
+                               H,
+                               W,
+                               stride_n,
+                               stride_c,
+                               stride_h,
+                               stride_w,
+                               out_stride_n,
+                               out_stride_c,
+                               out_stride_h,
+                               out_stride_w,
+                               BLOCK_C=BLOCK_C,
+                               num_warps=4,
+                               num_stages=2)
     return y
 
 
@@ -210,13 +254,25 @@ def _fused_single_ctile_triton(x: torch.Tensor) -> torch.Tensor:
     BLOCK_C = _next_pow2(C)
     tot_d_tiles = (D + BLOCK_D - 1) // BLOCK_D
 
-    grid = (triton.cdiv(W, BLOCK_W) * H * B,)
+    grid = (triton.cdiv(W, BLOCK_W) * H * B, )
 
     _fused_minD_softmaxC_wtile_singleCTile[grid](
-        x, y,
-        B, C, D, H, W,
-        sN, sC, sD, sH, sW,
-        oN, oC, oH, oW,
+        x,
+        y,
+        B,
+        C,
+        D,
+        H,
+        W,
+        sN,
+        sC,
+        sD,
+        sH,
+        sW,
+        oN,
+        oC,
+        oH,
+        oW,
         TOT_D_TILES=tot_d_tiles,
         BLOCK_C=BLOCK_C,
         BLOCK_D=BLOCK_D,
@@ -229,10 +285,15 @@ def _fused_single_ctile_triton(x: torch.Tensor) -> torch.Tensor:
 
 class ModelNew(nn.Module):
     """
-    Simple model that performs a 3D convolution, applies minimum operation along a specific dimension, 
+    Simple model that performs a 3D convolution, applies minimum operation along a specific dimension,
     and then applies softmax.
     """
-    def __init__(self, in_channels: int = 3, out_channels: int = 16, kernel_size: int = 3, dim: int = 2):
+
+    def __init__(self,
+                 in_channels: int = 3,
+                 out_channels: int = 16,
+                 kernel_size: int = 3,
+                 dim: int = 2):
         super(ModelNew, self).__init__()
         self.conv = nn.Conv3d(in_channels, out_channels, kernel_size)
         self.dim = dim
@@ -247,7 +308,8 @@ class ModelNew(nn.Module):
         if x.device.type != "npu":
             raise RuntimeError("ModelNew requires Ascend NPU input tensors.")
         if self.dim != 2:
-            raise NotImplementedError("ModelNew only supports reduction along dim=2.")
+            raise NotImplementedError(
+                "ModelNew only supports reduction along dim=2.")
 
         x = self.conv(x).contiguous()
         _, C, _, _, W = x.shape
@@ -258,6 +320,8 @@ class ModelNew(nn.Module):
 
         y_min = _reduce_min_dim2_triton(x)
         return _softmax_dim1_triton(y_min)
+
+
 batch_size = 128
 in_channels = 3
 out_channels = 24  # Increased output channels
@@ -265,7 +329,10 @@ D, H, W = 24, 32, 32  # Increased depth
 kernel_size = 3
 dim = 2  # Dimension along which to apply minimum operation (e.g., depth)
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, D, H, W)]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, dim]

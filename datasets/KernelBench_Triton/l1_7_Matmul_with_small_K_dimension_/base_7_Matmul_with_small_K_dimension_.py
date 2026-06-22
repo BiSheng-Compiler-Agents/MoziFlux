@@ -11,11 +11,18 @@ _BLOCK_K = 64
 
 @triton.jit
 def _matmul_smallk_kernel(
-    A_ptr, B_ptr, C_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_cm, stride_cn,
+    A_ptr,
+    B_ptr,
+    C_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_cm,
+    stride_cn,
     BLOCK_M: tl.constexpr = _BLOCK_M,
     BLOCK_N: tl.constexpr = _BLOCK_N,
     BLOCK_K: tl.constexpr = _BLOCK_K,
@@ -35,12 +42,14 @@ def _matmul_smallk_kernel(
         tl.max_contiguous(tl.arange(0, BLOCK_N), BLOCK_N)
 
         rn0 = n_start + tl.arange(0, BLOCK_N)
-        b0_ptrs = B_ptr + rn0[:, None] * stride_bk + (k0 + rk)[None, :] * stride_bn
+        b0_ptrs = B_ptr + rn0[:, None] * stride_bk + (k0 +
+                                                      rk)[None, :] * stride_bn
         b0_mask = (rn0[:, None] < N) & ((k0 + rk)[None, :] < K)
         b0 = tl.load(b0_ptrs, mask=b0_mask, other=0.0).to(tl.float32)
 
         rn1 = rn0 + BLOCK_N
-        b1_ptrs = B_ptr + rn1[:, None] * stride_bk + (k0 + rk)[None, :] * stride_bn
+        b1_ptrs = B_ptr + rn1[:, None] * stride_bk + (k0 +
+                                                      rk)[None, :] * stride_bn
         b1_mask = (rn1[:, None] < N) & ((k0 + rk)[None, :] < K)
         b1 = tl.load(b1_ptrs, mask=b1_mask, other=0.0).to(tl.float32)
 
@@ -56,6 +65,7 @@ def _matmul_smallk_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -79,14 +89,21 @@ class ModelNew(nn.Module):
         B_t = B.T.contiguous()
         C = torch.empty((M, N), device=A.device, dtype=torch.float32)
 
-        grid = (triton.cdiv(M, _BLOCK_M),)
+        grid = (triton.cdiv(M, _BLOCK_M), )
 
         _matmul_smallk_kernel[grid](
-            A_c, B_t, C,
-            M, N, K,
-            A_c.stride(0), A_c.stride(1),
-            B_t.stride(0), B_t.stride(1),
-            C.stride(0), C.stride(1),
+            A_c,
+            B_t,
+            C,
+            M,
+            N,
+            K,
+            A_c.stride(0),
+            A_c.stride(1),
+            B_t.stride(0),
+            B_t.stride(1),
+            C.stride(0),
+            C.stride(1),
         )
         return C
 

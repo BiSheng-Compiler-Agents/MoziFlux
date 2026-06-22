@@ -38,13 +38,13 @@ def _argmin_row_kernel(
 
         tile_min = tl.min(values, axis=0)
         equal_mask = (values == tile_min) & mask
-        invalid_index = tl.full((BLOCK_K,), cols, dtype=tl.int64)
-        tile_indices = tl.where(equal_mask, offsets.to(tl.int64), invalid_index)
+        invalid_index = tl.full((BLOCK_K, ), cols, dtype=tl.int64)
+        tile_indices = tl.where(equal_mask, offsets.to(tl.int64),
+                                invalid_index)
         tile_first_idx = tl.min(tile_indices, axis=0)
 
-        should_update = (tile_min < best_val) | (
-            (tile_min == best_val) & (tile_first_idx < best_idx)
-        )
+        should_update = (tile_min < best_val) | ((tile_min == best_val) &
+                                                 (tile_first_idx < best_idx))
         best_val = tl.where(should_update, tile_min, best_val)
         best_idx = tl.where(should_update, tile_first_idx, best_idx)
         k0 += BLOCK_K
@@ -56,9 +56,11 @@ def argmin_over_a_dimension(x: torch.Tensor, dim: int) -> torch.Tensor:
     if not isinstance(x, torch.Tensor):
         raise TypeError("argmin_over_a_dimension expects a torch.Tensor input")
     if not _is_npu_tensor(x):
-        raise RuntimeError("argmin_over_a_dimension expects an Ascend NPU tensor")
+        raise RuntimeError(
+            "argmin_over_a_dimension expects an Ascend NPU tensor")
     if x.dim() == 0:
-        raise ValueError("argmin_over_a_dimension expects a tensor with rank at least 1")
+        raise ValueError(
+            "argmin_over_a_dimension expects a tensor with rank at least 1")
     if x.dtype not in (torch.float16, torch.float32, torch.bfloat16):
         raise TypeError(
             "argmin_over_a_dimension supports only float16, float32, and bfloat16 inputs"
@@ -68,21 +70,23 @@ def argmin_over_a_dimension(x: torch.Tensor, dim: int) -> torch.Tensor:
     if dim < 0:
         dim += x.dim()
     if dim < 0 or dim >= x.dim():
-        raise ValueError(f"invalid reduction dim {dim} for input rank {x.dim()}")
+        raise ValueError(
+            f"invalid reduction dim {dim} for input rank {x.dim()}")
     if x.shape[dim] == 0:
-        raise ValueError("argmin_over_a_dimension does not support empty reduction axes")
+        raise ValueError(
+            "argmin_over_a_dimension does not support empty reduction axes")
 
     x_last = x.movedim(dim, -1).contiguous()
     rows = x_last.numel() // x_last.shape[-1]
     cols = x_last.shape[-1]
     x_2d = x_last.view(rows, cols)
 
-    out = torch.empty((rows,), device=x.device, dtype=torch.int64)
+    out = torch.empty((rows, ), device=x.device, dtype=torch.int64)
     block_k = 64
     while block_k < cols and block_k < 1024:
         block_k *= 2
 
-    grid = (rows,)
+    grid = (rows, )
     _argmin_row_kernel[grid](
         x_2d,
         out,
@@ -109,13 +113,18 @@ class ModelNew(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return argmin_over_a_dimension(x, self.dim)
+
+
 batch_size = 128
 dim1 = 4096
 dim2 = 4095
 dim = 1
 
+
 def get_inputs():
     x = torch.rand(batch_size, dim1, dim2)
     return [x]
+
+
 def get_init_inputs():
     return [dim]

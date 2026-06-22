@@ -16,16 +16,29 @@ def _dw_conv_kh1_kernel(
     w_ptr,
     b_ptr,
     y_ptr,
-    B, C,
-    H_in, W_in,
-    H_out, W_out,
+    B,
+    C,
+    H_in,
+    W_in,
+    H_out,
+    W_out,
     K,
-    S_h, S_w,
-    P_h, P_w,
-    D_h, D_w,
-    x_bs, x_cs, x_hs, x_ws,
-    w_cs, w_khs,
-    y_bs, y_cs, y_hs, y_ws,
+    S_h,
+    S_w,
+    P_h,
+    P_w,
+    D_h,
+    D_w,
+    x_bs,
+    x_cs,
+    x_hs,
+    x_ws,
+    w_cs,
+    w_khs,
+    y_bs,
+    y_cs,
+    y_hs,
+    y_ws,
     HAS_BIAS: tl.constexpr,
     BLOCK_H: tl.constexpr,
     BLOCK_W: tl.constexpr,
@@ -58,7 +71,10 @@ def _dw_conv_kh1_kernel(
             ih = oh_base + kh * D_h
             valid_h = (ih[:, None] >= 0) & (ih[:, None] < H_in)
             mask = out_mask & valid_h & valid_w
-            x_vals = tl.load(x_bc_ptr + iw0[None, :] * x_ws + ih[:, None] * x_hs, mask=mask, other=0.0).to(tl.float32)
+            x_vals = tl.load(x_bc_ptr + iw0[None, :] * x_ws +
+                             ih[:, None] * x_hs,
+                             mask=mask,
+                             other=0.0).to(tl.float32)
             w_val = tl.load(w_base_ptr + kh * w_khs).to(tl.float32)
             acc += x_vals * w_val
 
@@ -74,14 +90,20 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
     return bool(getattr(x, "is_npu", False) or x.device.type == "npu")
 
 
-def _depthwise_conv2d_kh1_triton(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None,
-                                 stride: int | tuple, padding: int | tuple, dilation: int | tuple):
+def _depthwise_conv2d_kh1_triton(x: torch.Tensor, weight: torch.Tensor,
+                                 bias: torch.Tensor | None,
+                                 stride: int | tuple, padding: int | tuple,
+                                 dilation: int | tuple):
     if not _is_npu_tensor(x):
-        raise RuntimeError("The Triton depthwise conv wrapper expects an Ascend NPU input tensor.")
+        raise RuntimeError(
+            "The Triton depthwise conv wrapper expects an Ascend NPU input tensor."
+        )
     if not _is_npu_tensor(weight):
-        raise RuntimeError("The Triton depthwise conv wrapper expects NPU weights.")
+        raise RuntimeError(
+            "The Triton depthwise conv wrapper expects NPU weights.")
     if bias is not None and not _is_npu_tensor(bias):
-        raise RuntimeError("The Triton depthwise conv wrapper expects NPU bias tensors.")
+        raise RuntimeError(
+            "The Triton depthwise conv wrapper expects NPU bias tensors.")
 
     if isinstance(stride, int):
         stride = (stride, stride)
@@ -120,20 +142,36 @@ def _depthwise_conv2d_kh1_triton(x: torch.Tensor, weight: torch.Tensor, bias: to
     has_bias = bias is not None
 
     _dw_conv_kh1_kernel[grid](
-        x_c, w_c, (b_c if has_bias else x_c),
+        x_c,
+        w_c,
+        (b_c if has_bias else x_c),
         y_c,
-        B, C,
-        H_in, W_in,
-        H_out, W_out,
+        B,
+        C,
+        H_in,
+        W_in,
+        H_out,
+        W_out,
         K,
-        S_h, S_w,
-        P_h, P_w,
-        D_h, D_w,
-        x_bs, x_cs, x_hs, x_ws,
-        w_cs, w_khs,
-        y_bs, y_cs, y_hs, y_ws,
+        S_h,
+        S_w,
+        P_h,
+        P_w,
+        D_h,
+        D_w,
+        x_bs,
+        x_cs,
+        x_hs,
+        x_ws,
+        w_cs,
+        w_khs,
+        y_bs,
+        y_cs,
+        y_hs,
+        y_ws,
         HAS_BIAS=has_bias,
-        BLOCK_H=BLOCK_H, BLOCK_W=BLOCK_W,
+        BLOCK_H=BLOCK_H,
+        BLOCK_W=BLOCK_W,
     )
     return y
 
@@ -150,6 +188,7 @@ class ModelNew(nn.Module):
         dilation (int, optional): Spacing between kernel elements. Defaults to 1.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -160,7 +199,14 @@ class ModelNew(nn.Module):
         bias: bool = False,
     ):
         super(ModelNew, self).__init__()
-        self.conv2d = nn.Conv2d(in_channels, in_channels, kernel_size=(kernel_size, 1), stride=stride, padding=padding, dilation=dilation, groups=in_channels, bias=bias)
+        self.conv2d = nn.Conv2d(in_channels,
+                                in_channels,
+                                kernel_size=(kernel_size, 1),
+                                stride=stride,
+                                padding=padding,
+                                dilation=dilation,
+                                groups=in_channels,
+                                bias=bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if not _is_npu_tensor(x):
@@ -168,9 +214,13 @@ class ModelNew(nn.Module):
                 "ModelNew expects Ascend NPU inputs; the Triton kernel path is the only supported runtime."
             )
         if not _is_npu_tensor(self.conv2d.weight):
-            raise RuntimeError("ModelNew weights must be moved to Ascend NPU before execution.")
-        if self.conv2d.bias is not None and not _is_npu_tensor(self.conv2d.bias):
-            raise RuntimeError("ModelNew bias must be moved to Ascend NPU before execution.")
+            raise RuntimeError(
+                "ModelNew weights must be moved to Ascend NPU before execution."
+            )
+        if self.conv2d.bias is not None and not _is_npu_tensor(
+                self.conv2d.bias):
+            raise RuntimeError(
+                "ModelNew bias must be moved to Ascend NPU before execution.")
 
         return _depthwise_conv2d_kh1_triton(
             x,
@@ -180,6 +230,8 @@ class ModelNew(nn.Module):
             self.conv2d.padding,
             self.conv2d.dilation,
         )
+
+
 batch_size = 64
 in_channels = 8
 kernel_size = 3
@@ -189,8 +241,11 @@ stride = 1
 padding = 0
 dilation = 1
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, height, width)
     return [x]
+
+
 def get_init_inputs():
     return [in_channels, kernel_size, stride, padding, dilation]

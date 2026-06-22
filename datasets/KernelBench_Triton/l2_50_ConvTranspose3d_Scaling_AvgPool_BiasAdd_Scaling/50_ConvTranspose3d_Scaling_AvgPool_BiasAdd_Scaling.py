@@ -8,7 +8,6 @@ try:
 except ImportError:
     torch_npu = None
 
-
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_CHANNELS = 3
 DEFAULT_OUT_CHANNELS = 16
@@ -20,7 +19,7 @@ DEFAULT_STRIDE = 2
 DEFAULT_PADDING = 1
 DEFAULT_SCALE1 = 0.5
 DEFAULT_SCALE2 = 1.0
-DEFAULT_BIAS_SHAPE = (out_channels, 1, 1, 1)
+DEFAULT_BIAS_SHAPE = (DEFAULT_OUT_CHANNELS, 1, 1, 1)
 
 
 def _is_npu_tensor(x: torch.Tensor) -> bool:
@@ -29,14 +28,20 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 @triton.jit
 def _avgpool3d_k2s2_bias_scale_fused(
-    x_ptr,                # *float32 [N, C, D, H, W] contiguous NCDHW
-    bias_ptr,             # *float32 [C]
-    y_ptr,                # *float32 [N, C, D2, H2, W2] contiguous NCDHW
-    N, C, D, H, W,        # input dims
-    D2, H2, W2,           # output dims = floor(D/2), floor(H/2), floor(W/2)
-    scale1,               # float
-    scale2,               # float
-    n_elements,           # total output elements = N*C*D2*H2*W2
+    x_ptr,  # *float32 [N, C, D, H, W] contiguous NCDHW
+    bias_ptr,  # *float32 [C]
+    y_ptr,  # *float32 [N, C, D2, H2, W2] contiguous NCDHW
+    N,
+    C,
+    D,
+    H,
+    W,  # input dims
+    D2,
+    H2,
+    W2,  # output dims = floor(D/2), floor(H/2), floor(W/2)
+    scale1,  # float
+    scale2,  # float
+    n_elements,  # total output elements = N*C*D2*H2*W2
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -46,13 +51,13 @@ def _avgpool3d_k2s2_bias_scale_fused(
 
     # Fewer integer divisions for index de-linearization
     out_spatial = D2 * H2 * W2
-    nc = offs // out_spatial                          # combined n*C + c
+    nc = offs // out_spatial  # combined n*C + c
     rem = offs - nc * out_spatial
     t0 = rem // W2
     w2 = rem - t0 * W2
     d2 = t0 // H2
     h2 = t0 - d2 * H2
-    c = nc % C                                        # for bias indexing
+    c = nc % C  # for bias indexing
 
     # Map to input coordinates (stride=2, kernel=2, padding=0)
     w = w2 * 2
@@ -111,6 +116,7 @@ class ModelNew(nn.Module):
     """
     Model that performs a 3D transposed convolution, scaling, average pooling, bias addition, and scaling.
     """
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -123,7 +129,11 @@ class ModelNew(nn.Module):
         bias_shape=DEFAULT_BIAS_SHAPE,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding)
         self.scale1 = nn.Parameter(torch.tensor(scale1))
         self.avg_pool = nn.AvgPool3d(kernel_size=2)
         self.bias = nn.Parameter(torch.randn(bias_shape))
@@ -144,7 +154,9 @@ class ModelNew(nn.Module):
         bias_1d = self.bias.view(C).contiguous()
         n_elements = N * C * D2 * H2 * W2
         BLOCK = 256
-        grid = lambda META: ((n_elements + BLOCK - 1) // BLOCK,)
+
+        def grid(META):
+            return ((n_elements + BLOCK - 1) // BLOCK, )
 
         _avgpool3d_k2s2_bias_scale_fused[grid](
             x,
@@ -179,6 +191,8 @@ def run_operator(x: torch.Tensor) -> torch.Tensor:
         model.eval()
         _MODEL_CACHE[key] = model
     return model(x)
+
+
 batch_size = 128
 in_channels = 3
 out_channels = 16
@@ -190,7 +204,15 @@ scale1 = 0.5
 scale2 = 1.0
 bias_shape = (out_channels, 1, 1, 1)
 
+
 def get_inputs():
-    return [torch.rand(batch_size, in_channels, depth, height, width, device='npu')]
+    return [
+        torch.rand(batch_size, in_channels, depth, height, width, device='npu')
+    ]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, scale1, scale2, bias_shape]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding, scale1,
+        scale2, bias_shape
+    ]

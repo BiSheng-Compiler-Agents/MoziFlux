@@ -1,0 +1,26 @@
+TEST torch small PASS
+TEST baseline1 small PASS max_err=0.000839531 max_rel=0.322301
+TEST baseline2 small PASS max_err=0.000839531 max_rel=0.322161
+TEST optimized small PASS max_err=0 max_rel=0
+TEST torch medium PASS
+TEST baseline1 medium PASS max_err=0.00138164 max_rel=23.4972
+TEST baseline2 medium PASS max_err=0.00138158 max_rel=23.5472
+TEST optimized medium PASS max_err=0 max_rel=0
+TEST torch target PASS
+TEST baseline1 target SKIP custom_two_pass_target_preskip
+TEST baseline2 target SKIP custom_two_pass_target_preskip
+TEST optimized target PASS max_err=0 max_rel=0
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l2_19_ConvTranspose2d_GELU_GroupNorm_1782386845/19_ConvTranspose2d_GELU_GroupNorm.py:110: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x)
+INFO bench baseline1 target SKIP custom_two_pass_target_preskip
+INFO bench baseline2 target SKIP custom_two_pass_target_preskip
+convtranspose2d_gelu_groupnorm:
+    label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   small       0.032951          0.035399          0.036641          0.034748
+1  medium       0.064347          0.071151          0.059009          0.059209
+2  target      17.198212               inf               inf         17.157969
+
+/home/s00929845/kernel_verify/l2_19_ConvTranspose2d_GELU_GroupNorm_1782386845/19_ConvTranspose2d_GELU_GroupNorm.py:110: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x)

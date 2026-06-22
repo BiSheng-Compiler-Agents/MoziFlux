@@ -4,7 +4,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 64
 DEFAULT_IN_CHANNELS = 64
 DEFAULT_OUT_CHANNELS = 64
@@ -32,7 +31,8 @@ def _fused_scale_lrelu_gelu(
     CHUNKS_PER_PROGRAM: tl.constexpr,
 ):
     pid_hw = tl.program_id(axis=0)
-    pid_plane = tl.program_id(axis=1) * BLOCK_PLANES + tl.arange(0, BLOCK_PLANES)
+    pid_plane = tl.program_id(axis=1) * BLOCK_PLANES + tl.arange(
+        0, BLOCK_PLANES)
     plane_mask = pid_plane < n_planes
     scale = tl.load(m_ptr + (pid_plane % C), mask=plane_mask, other=1.0)
     s32 = scale[:, None].to(tl.float32)
@@ -42,7 +42,8 @@ def _fused_scale_lrelu_gelu(
 
     for chunk_idx in tl.static_range(0, CHUNKS_PER_PROGRAM):
         hw_offsets = hw_base + chunk_idx * BLOCK_HW + hw_range
-        hw_offsets = tl.max_contiguous(tl.multiple_of(hw_offsets, BLOCK_HW), BLOCK_HW)
+        hw_offsets = tl.max_contiguous(tl.multiple_of(hw_offsets, BLOCK_HW),
+                                       BLOCK_HW)
         hw_mask = hw_offsets < HW
         mask = plane_mask[:, None] & hw_mask[None, :]
         base = pid_plane[:, None] * HW + hw_offsets[None, :]
@@ -56,6 +57,7 @@ def _fused_scale_lrelu_gelu(
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -72,7 +74,8 @@ class ModelNew(nn.Module):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
 
         x = self.conv(x).contiguous()
         n, c, h, w = x.shape
@@ -82,7 +85,8 @@ class ModelNew(nn.Module):
             )
 
         out = torch.empty_like(x)
-        m = self.multiplier.contiguous().reshape(-1).to(device=x.device, dtype=x.dtype)
+        m = self.multiplier.contiguous().reshape(-1).to(device=x.device,
+                                                        dtype=x.dtype)
         hw = h * w
         n_planes = n * c
         if hw >= 2048:
@@ -116,13 +120,17 @@ class ModelNew(nn.Module):
             elif block_hw < 2048:
                 block_hw *= 2
             else:
-                raise RuntimeError("Unable to satisfy Triton grid<65536 bound with the current plane-major mapping")
+                raise RuntimeError(
+                    "Unable to satisfy Triton grid<65536 bound with the current plane-major mapping"
+                )
             grid_hw = triton.cdiv(hw, block_hw * chunks_per_program)
 
-        grid = lambda meta: (
-            triton.cdiv(hw, meta["BLOCK_HW"] * meta["CHUNKS_PER_PROGRAM"]),
-            triton.cdiv(n_planes, meta["BLOCK_PLANES"]),
-        )
+        def grid(meta):
+            return (
+                triton.cdiv(hw, meta["BLOCK_HW"] * meta["CHUNKS_PER_PROGRAM"]),
+                triton.cdiv(n_planes, meta["BLOCK_PLANES"]),
+            )
+
         _fused_scale_lrelu_gelu[grid](
             x,
             m,

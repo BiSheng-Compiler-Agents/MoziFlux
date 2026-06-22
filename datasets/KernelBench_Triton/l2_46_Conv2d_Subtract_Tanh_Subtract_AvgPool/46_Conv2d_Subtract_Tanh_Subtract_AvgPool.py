@@ -9,6 +9,7 @@ except Exception:
     _TRITON_AVAILABLE = False
 
 if _TRITON_AVAILABLE:
+
     @triton.jit
     def _fused_sub_tanh_sub_kernel(
         x_ptr,
@@ -41,14 +42,19 @@ if _TRITON_AVAILABLE:
 
     @triton.jit
     def _fused_tanh_avgpool_sub2_kernel(
-        x_ptr,  # float* [N, C, H, W]
-        y_ptr,  # float* [N, C, outH, outW]
-        N, C, H, W,  # input dims
-        outH, outW,  # output dims (after pooling)
-        subtract1,   # float
-        subtract2,   # float
-        BLOCK_HW: tl.constexpr,  # number of output HW elements per program
-        K: tl.constexpr,         # pooling kernel size; stride assumed = K (AvgPool2d default)
+            x_ptr,  # float* [N, C, H, W]
+            y_ptr,  # float* [N, C, outH, outW]
+            N,
+            C,
+            H,
+            W,  # input dims
+            outH,
+            outW,  # output dims (after pooling)
+            subtract1,  # float
+            subtract2,  # float
+            BLOCK_HW: tl.constexpr,  # number of output HW elements per program
+            K: tl.
+        constexpr,  # pooling kernel size; stride assumed = K (AvgPool2d default)
     ):
         # program ids
         pid_nc = tl.program_id(axis=0)  # over N*C
@@ -104,7 +110,9 @@ class ModelNew(nn.Module):
     """
     Model that performs a convolution, subtraction, tanh activation, subtraction and average pooling.
     """
-    def __init__(self, in_channels, out_channels, kernel_size, subtract1_value, subtract2_value, kernel_size_pool):
+
+    def __init__(self, in_channels, out_channels, kernel_size, subtract1_value,
+                 subtract2_value, kernel_size_pool):
         super(ModelNew, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
         self.subtract1_value = subtract1_value
@@ -117,9 +125,11 @@ class ModelNew(nn.Module):
         if not _TRITON_AVAILABLE:
             raise RuntimeError("Triton is required for ModelNew forward")
         if x.device.type != "npu":
-            raise RuntimeError(f"ModelNew expects NPU inputs, got {x.device.type}")
+            raise RuntimeError(
+                f"ModelNew expects NPU inputs, got {x.device.type}")
         if x.dtype != torch.float32:
-            raise RuntimeError(f"ModelNew expects float32 inputs, got {x.dtype}")
+            raise RuntimeError(
+                f"ModelNew expects float32 inputs, got {x.dtype}")
 
         x = x.contiguous()
         N, C, H, W = x.shape
@@ -129,7 +139,10 @@ class ModelNew(nn.Module):
         y = torch.empty((N, C, outH, outW), device=x.device, dtype=x.dtype)
 
         BLOCK_HW = 1024
-        grid = lambda meta: (N * C, triton.cdiv(outH * outW, meta["BLOCK_HW"]))
+
+        def grid(meta):
+            return (N * C, triton.cdiv(outH * outW, meta["BLOCK_HW"]))
+
         _fused_tanh_avgpool_sub2_kernel[grid](
             x,
             y,
@@ -154,17 +167,22 @@ _MODEL_CACHE = {}
 
 def conv2d_subtract_tanh_subtract_avgpool(x):
     if x.device.type != "npu":
-        raise RuntimeError(f"conv2d_subtract_tanh_subtract_avgpool expects NPU input, got {x.device.type}")
+        raise RuntimeError(
+            f"conv2d_subtract_tanh_subtract_avgpool expects NPU input, got {x.device.type}"
+        )
 
     cache_key = (x.device.type, x.dtype)
     module = _MODEL_CACHE.get(cache_key)
     if module is None:
         torch.manual_seed(0)
-        module = ModelNew(*get_init_inputs()).to(device=x.device, dtype=torch.float32).eval()
+        module = ModelNew(*get_init_inputs()).to(device=x.device,
+                                                 dtype=torch.float32).eval()
         _MODEL_CACHE[cache_key] = module
 
     with torch.no_grad():
         return module(x.to(dtype=torch.float32))
+
+
 batch_size = 128
 in_channels = 64
 out_channels = 128
@@ -174,7 +192,13 @@ subtract1_value = 0.5
 subtract2_value = 0.2
 kernel_size_pool = 2
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, subtract1_value, subtract2_value, kernel_size_pool]
+    return [
+        in_channels, out_channels, kernel_size, subtract1_value,
+        subtract2_value, kernel_size_pool
+    ]

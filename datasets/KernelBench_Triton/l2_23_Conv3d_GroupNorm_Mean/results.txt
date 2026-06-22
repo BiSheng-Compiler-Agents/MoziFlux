@@ -1,0 +1,20 @@
+TEST torch_ref small_direct PASS
+TEST baseline1 small_direct SKIP comparison_preskip
+TEST baseline2 small_direct SKIP comparison_preskip
+TEST optimized small_direct PASS max_abs=1.717773e-08
+TEST torch_ref medium_direct PASS
+TEST baseline1 medium_direct SKIP comparison_preskip
+TEST baseline2 medium_direct SKIP comparison_preskip
+TEST optimized medium_direct PASS max_abs=2.076026e-08
+TEST torch_ref target_direct PASS
+TEST baseline1 target_direct SKIP comparison_preskip
+TEST baseline2 target_direct SKIP comparison_preskip
+TEST optimized target_direct PASS max_abs=2.774325e-08
+TEST optimized persistent_dispatch PASS max_abs=0.000000e+00
+UNIT_TEST PASS
+
+conv3d_groupnorm_mean:
+           label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   small_direct       0.016822               inf               inf          0.001298
+1  medium_direct       0.080243               inf               inf          0.004290
+2  target_direct       1.778131               inf               inf          0.005557

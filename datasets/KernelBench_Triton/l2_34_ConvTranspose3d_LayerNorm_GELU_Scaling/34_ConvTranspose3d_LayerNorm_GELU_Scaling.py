@@ -10,27 +10,62 @@ torch.backends.cudnn.benchmark = True
 @triton.autotune(
     configs=[
         # Add lighter/wider mixes to improve occupancy on small N
-        triton.Config({'BLOCK_SIZE_N': 64, 'ROWS_PER_CTA': 8}, num_warps=1, num_stages=2),
-        triton.Config({'BLOCK_SIZE_N': 64, 'ROWS_PER_CTA': 16}, num_warps=2, num_stages=2),
-        triton.Config({'BLOCK_SIZE_N': 64, 'ROWS_PER_CTA': 32}, num_warps=2, num_stages=3),
-        triton.Config({'BLOCK_SIZE_N': 128, 'ROWS_PER_CTA': 8}, num_warps=4, num_stages=3),
-        triton.Config({'BLOCK_SIZE_N': 128, 'ROWS_PER_CTA': 16}, num_warps=4, num_stages=4),
-        triton.Config({'BLOCK_SIZE_N': 256, 'ROWS_PER_CTA': 8}, num_warps=8, num_stages=2),
-        triton.Config({'BLOCK_SIZE_N': 256, 'ROWS_PER_CTA': 16}, num_warps=8, num_stages=3),
+        triton.Config({
+            'BLOCK_SIZE_N': 64,
+            'ROWS_PER_CTA': 8
+        },
+                      num_warps=1,
+                      num_stages=2),
+        triton.Config({
+            'BLOCK_SIZE_N': 64,
+            'ROWS_PER_CTA': 16
+        },
+                      num_warps=2,
+                      num_stages=2),
+        triton.Config({
+            'BLOCK_SIZE_N': 64,
+            'ROWS_PER_CTA': 32
+        },
+                      num_warps=2,
+                      num_stages=3),
+        triton.Config({
+            'BLOCK_SIZE_N': 128,
+            'ROWS_PER_CTA': 8
+        },
+                      num_warps=4,
+                      num_stages=3),
+        triton.Config({
+            'BLOCK_SIZE_N': 128,
+            'ROWS_PER_CTA': 16
+        },
+                      num_warps=4,
+                      num_stages=4),
+        triton.Config({
+            'BLOCK_SIZE_N': 256,
+            'ROWS_PER_CTA': 8
+        },
+                      num_warps=8,
+                      num_stages=2),
+        triton.Config({
+            'BLOCK_SIZE_N': 256,
+            'ROWS_PER_CTA': 16
+        },
+                      num_warps=8,
+                      num_stages=3),
     ],
     key=['n_cols'],
 )
 @triton.jit
 def _layernorm_gelu_scale_kernel(
-    x_ptr,           # *[n_rows, n_cols]
-    y_ptr,           # *[n_rows, n_cols] (stores to dtype(y_ptr))
-    w_ptr,           # *[n_cols]
-    b_ptr,           # *[n_cols]
-    n_rows,          # total number of rows = prod(shape[:-1])
-    n_cols,          # size of last dim
-    inv_n_cols,      # 1.0 / n_cols
-    eps,             # eps for layernorm
-    scale,           # scaling factor after GELU
+    x_ptr,  # *[n_rows, n_cols]
+    y_ptr,  # *[n_rows, n_cols] (stores to dtype(y_ptr))
+    w_ptr,  # *[n_cols]
+    b_ptr,  # *[n_cols]
+    n_rows,  # total number of rows = prod(shape[:-1])
+    n_cols,  # size of last dim
+    inv_n_cols,  # 1.0 / n_cols
+    eps,  # eps for layernorm
+    scale,  # scaling factor after GELU
     ROWS_PER_CTA: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
 ):
@@ -62,7 +97,8 @@ def _layernorm_gelu_scale_kernel(
             next_row = row + 1
             offs_n = next_row * n_cols + cols
             mask_n = (next_row < n_rows) & col_mask
-            x_buf = tl.load(x_ptr + offs_n, mask=mask_n, other=0.0).to(tl.float32)
+            x_buf = tl.load(x_ptr + offs_n, mask=mask_n,
+                            other=0.0).to(tl.float32)
 
         # Compute statistics
         mu = tl.sum(x, axis=0) * inv_n_cols
@@ -84,16 +120,15 @@ def _layernorm_gelu_scale_kernel(
         tl.store(y_ptr + offs_store, y, mask=mask_store)
 
 
-def layernorm_gelu_scale_triton(x: torch.Tensor,
-                                weight: torch.Tensor,
-                                bias: torch.Tensor,
-                                eps: float,
+def layernorm_gelu_scale_triton(x: torch.Tensor, weight: torch.Tensor,
+                                bias: torch.Tensor, eps: float,
                                 scale: float) -> torch.Tensor:
     # Fused LayerNorm (over last dim) + GELU (exact) + scaling on Ascend NPU.
     if weight is None or bias is None:
         raise ValueError("weight and bias must be provided")
     if x.device.type != "npu":
-        raise RuntimeError("layernorm_gelu_scale_triton requires an Ascend NPU tensor")
+        raise RuntimeError(
+            "layernorm_gelu_scale_triton requires an Ascend NPU tensor")
     if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
         raise TypeError(f"Unsupported dtype for Triton path: {x.dtype}")
 
@@ -102,21 +137,30 @@ def layernorm_gelu_scale_triton(x: torch.Tensor,
     n_rows = xc.numel() // n_cols if n_cols > 0 else 0
 
     if n_rows == 0 or n_cols == 0:
-        raise RuntimeError("Zero-sized inputs are not supported by the Triton path")
+        raise RuntimeError(
+            "Zero-sized inputs are not supported by the Triton path")
     if weight.numel() != n_cols or bias.numel() != n_cols:
         raise ValueError(
             f"Expected affine parameters with {n_cols} elements, got "
-            f"{weight.numel()} and {bias.numel()}"
-        )
+            f"{weight.numel()} and {bias.numel()}")
 
     y_out = torch.empty_like(xc, dtype=xc.dtype)
     w = weight.contiguous().to(dtype=torch.float32, device=xc.device)
     b = bias.contiguous().to(dtype=torch.float32, device=xc.device)
 
-    grid = lambda meta: (triton.cdiv(n_rows, meta['ROWS_PER_CTA']),)
+    def grid(meta):
+        return (triton.cdiv(n_rows, meta['ROWS_PER_CTA']), )
+
     _layernorm_gelu_scale_kernel[grid](
-        xc, y_out, w, b,
-        n_rows, n_cols, 1.0 / float(n_cols), float(eps), float(scale),
+        xc,
+        y_out,
+        w,
+        b,
+        n_rows,
+        n_cols,
+        1.0 / float(n_cols),
+        float(eps),
+        float(scale),
     )
     return y_out
 
@@ -137,6 +181,7 @@ class ModelNew(nn.Module):
     """
     Model that performs a 3D transposed convolution, layer normalization, GELU activation, and scaling.
     """
+
     def __init__(
         self,
         in_channels=in_channels,
@@ -149,7 +194,12 @@ class ModelNew(nn.Module):
         scaling_factor=scaling_factor,
     ):
         super().__init__()
-        self.conv_transpose = nn.ConvTranspose3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, bias=bias)
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding,
+                                                 bias=bias)
         self.layer_norm = nn.LayerNorm(out_channels, eps=eps)
         self.scaling_factor = scaling_factor
 
@@ -172,6 +222,8 @@ class ModelNew(nn.Module):
             self.scaling_factor,
         )
         return x.permute(0, 4, 1, 2, 3).contiguous()
+
+
 batch_size = 32
 in_channels = 32
 out_channels = 64
@@ -183,7 +235,13 @@ bias = True
 eps = 1e-5
 scaling_factor = 1.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, D, H, W)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, bias, eps, scaling_factor]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding, bias, eps,
+        scaling_factor
+    ]

@@ -4,7 +4,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_CHANNELS = 8
 DEFAULT_OUT_CHANNELS = 32
@@ -29,13 +28,13 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 )
 @triton.jit
 def _bias_scale_sigmoid_kernel(
-    x_ptr,            # *f32 [N, C, H, W] contiguous
-    bias_ptr,         # *f32 [C, 1, 1] contiguous
-    scale_ptr,        # *f32 [C, 1, 1] contiguous
-    y_ptr,            # *f32 [N, C, H, W] contiguous
-    HW: tl.constexpr, # H * W
+    x_ptr,  # *f32 [N, C, H, W] contiguous
+    bias_ptr,  # *f32 [C, 1, 1] contiguous
+    scale_ptr,  # *f32 [C, 1, 1] contiguous
+    y_ptr,  # *f32 [N, C, H, W] contiguous
+    HW: tl.constexpr,  # H * W
     C: tl.constexpr,  # channels
-    n_elements,       # total elements N*C*H*W
+    n_elements,  # total elements N*C*H*W
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -60,13 +59,19 @@ def _bias_scale_sigmoid_kernel(
     tl.store(y_ptr + offs, y, mask=mask)
 
 
-def fused_bias_scale_sigmoid(x: torch.Tensor, bias: torch.Tensor, scale: torch.Tensor):
+def fused_bias_scale_sigmoid(x: torch.Tensor, bias: torch.Tensor,
+                             scale: torch.Tensor):
     if not _is_npu_tensor(x):
-        raise RuntimeError("fused_bias_scale_sigmoid expects input tensors on Ascend NPU")
+        raise RuntimeError(
+            "fused_bias_scale_sigmoid expects input tensors on Ascend NPU")
     if x.requires_grad:
-        raise RuntimeError("fused_bias_scale_sigmoid does not support autograd-enabled inputs")
+        raise RuntimeError(
+            "fused_bias_scale_sigmoid does not support autograd-enabled inputs"
+        )
     if x.dtype not in (torch.float16, torch.float32):
-        raise RuntimeError("fused_bias_scale_sigmoid supports only float16 and float32 inputs")
+        raise RuntimeError(
+            "fused_bias_scale_sigmoid supports only float16 and float32 inputs"
+        )
 
     x_contig = x.contiguous()
     bias_contig = bias.contiguous()
@@ -78,10 +83,17 @@ def fused_bias_scale_sigmoid(x: torch.Tensor, bias: torch.Tensor, scale: torch.T
 
     y = torch.empty_like(x_contig)
 
-    grid = lambda META: (triton.cdiv(n_elements, META["BLOCK_SIZE"]),)
+    def grid(META):
+        return (triton.cdiv(n_elements, META["BLOCK_SIZE"]), )
+
     _bias_scale_sigmoid_kernel[grid](
-        x_contig, bias_contig, scale_contig, y,
-        HW, C, n_elements,
+        x_contig,
+        bias_contig,
+        scale_contig,
+        y,
+        HW,
+        C,
+        n_elements,
     )
     return y
 
@@ -90,6 +102,7 @@ class ModelNew(nn.Module):
     """
     Model that performs a convolution, adds a bias term, scales, applies sigmoid, and performs group normalization.
     """
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -113,9 +126,11 @@ class ModelNew(nn.Module):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
         if x.dtype not in (torch.float16, torch.float32):
-            raise RuntimeError("ModelNew supports only float16 and float32 inputs")
+            raise RuntimeError(
+                "ModelNew supports only float16 and float32 inputs")
 
         x = self.conv(x)
         x = fused_bias_scale_sigmoid(x, self.bias, self.scale)
@@ -134,6 +149,8 @@ def run_operator(x: torch.Tensor) -> torch.Tensor:
         model.eval()
         _MODEL_CACHE[key] = model
     return model(x)
+
+
 batch_size = 128
 in_channels = 8
 out_channels = 32
@@ -143,7 +160,13 @@ num_groups = 8
 bias_shape = (out_channels, 1, 1)
 scale_shape = (out_channels, 1, 1)
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width, device='npu')]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, num_groups, bias_shape, scale_shape]
+    return [
+        in_channels, out_channels, kernel_size, num_groups, bias_shape,
+        scale_shape
+    ]

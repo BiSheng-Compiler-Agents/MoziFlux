@@ -90,10 +90,8 @@ def conv2d_nchw_fp32_kernel(
     tl.store(y_ptr + y_index, acc, mask=store_mask)
 
 
-def _conv2d_triton_nchw(x: torch.Tensor,
-                        weight: torch.Tensor,
-                        bias: torch.Tensor | None,
-                        stride: tuple[int, int],
+def _conv2d_triton_nchw(x: torch.Tensor, weight: torch.Tensor,
+                        bias: torch.Tensor | None, stride: tuple[int, int],
                         padding: tuple[int, int],
                         dilation: tuple[int, int]) -> torch.Tensor:
     # Assumes x and weight are float32 and contiguous in NCHW / OIHW layouts.
@@ -109,30 +107,44 @@ def _conv2d_triton_nchw(x: torch.Tensor,
     H_OUT = (H + 2 * ph - dh * (KH - 1) - 1) // sh + 1
     W_OUT = (W + 2 * pw - dw * (KW - 1) - 1) // sw + 1
 
-    y = torch.empty((N, OC, H_OUT, W_OUT), device=x.device, dtype=torch.float32)
+    y = torch.empty((N, OC, H_OUT, W_OUT),
+                    device=x.device,
+                    dtype=torch.float32)
 
     x_ = x.contiguous().to(torch.float32)
     # Pack weights to [K, OC] where K=C*KH*KW for coalesced OC loads
     K = C * KH * KW
-    w_packed = weight.permute(1, 2, 3, 0).reshape(K, OC).contiguous().to(torch.float32)
+    w_packed = weight.permute(1, 2, 3,
+                              0).reshape(K, OC).contiguous().to(torch.float32)
     # Guarantee a valid bias pointer: zeros if module has no bias
-    b_ = (bias.contiguous().to(torch.float32)
-          if bias is not None
-          else torch.zeros(OC, device=x.device, dtype=torch.float32))
+    b_ = (bias.contiguous().to(torch.float32) if bias is not None else
+          torch.zeros(OC, device=x.device, dtype=torch.float32))
 
     BLOCK_P = 64
     BLOCK_OC = 32
     grid = (triton.cdiv(N * H_OUT * W_OUT, BLOCK_P), triton.cdiv(OC, BLOCK_OC))
     conv2d_nchw_fp32_kernel[grid](
-        x_, w_packed, b_,
+        x_,
+        w_packed,
+        b_,
         y,
-        N, C, H, W,
-        OC, KH, KW,
-        sh, sw,
-        ph, pw,
-        dh, dw,
-        H_OUT, W_OUT,
-        BLOCK_P, BLOCK_OC,
+        N,
+        C,
+        H,
+        W,
+        OC,
+        KH,
+        KW,
+        sh,
+        sw,
+        ph,
+        pw,
+        dh,
+        dw,
+        H_OUT,
+        W_OUT,
+        BLOCK_P,
+        BLOCK_OC,
     )
     return y.to(dtype=x.dtype) if x.dtype != torch.float32 else y
 
@@ -159,15 +171,29 @@ class ModelNew(nn.Module):
     Args:
         in_channels (int): Number of channels in the input tensor.
         out_channels (int): Number of channels produced by the convolution.
-        kernel_size (tuple): Size of the convolution kernel (height, width). 
+        kernel_size (tuple): Size of the convolution kernel (height, width).
         stride (int, optional): Stride of the convolution. Defaults to 1.
         padding (tuple, optional): Padding applied to the input (top/bottom, left/right). Defaults to (0, 0).
         dilation (tuple, optional): Spacing between kernel elements (height, width). Defaults to (1, 1).
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: tuple, stride: int = 1, padding: tuple = (0, 0), dilation: tuple = (1, 1), bias: bool = False):
+
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 kernel_size: tuple,
+                 stride: int = 1,
+                 padding: tuple = (0, 0),
+                 dilation: tuple = (1, 1),
+                 bias: bool = False):
         super(ModelNew, self).__init__()
-        self.conv2d = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, bias=bias)
+        self.conv2d = nn.Conv2d(in_channels,
+                                out_channels,
+                                kernel_size,
+                                stride=stride,
+                                padding=padding,
+                                dilation=dilation,
+                                bias=bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -182,11 +208,19 @@ class ModelNew(nn.Module):
         # Extract parameters
         weight = self.conv2d.weight
         bias = self.conv2d.bias
-        stride = self.conv2d.stride if isinstance(self.conv2d.stride, tuple) else (self.conv2d.stride, self.conv2d.stride)
-        padding = self.conv2d.padding if isinstance(self.conv2d.padding, tuple) else (self.conv2d.padding, self.conv2d.padding)
-        dilation = self.conv2d.dilation if isinstance(self.conv2d.dilation, tuple) else (self.conv2d.dilation, self.conv2d.dilation)
+        stride = self.conv2d.stride if isinstance(
+            self.conv2d.stride, tuple) else (self.conv2d.stride,
+                                             self.conv2d.stride)
+        padding = self.conv2d.padding if isinstance(
+            self.conv2d.padding, tuple) else (self.conv2d.padding,
+                                              self.conv2d.padding)
+        dilation = self.conv2d.dilation if isinstance(
+            self.conv2d.dilation, tuple) else (self.conv2d.dilation,
+                                               self.conv2d.dilation)
 
         return conv2d_triton_nchw(x, weight, bias, stride, padding, dilation)
+
+
 batch_size = 8
 in_channels = 32
 out_channels = 64
@@ -197,8 +231,11 @@ stride = 1
 padding = (2, 4)
 dilation = (2, 3)
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, height, width)
     return [x]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, stride, padding, dilation]

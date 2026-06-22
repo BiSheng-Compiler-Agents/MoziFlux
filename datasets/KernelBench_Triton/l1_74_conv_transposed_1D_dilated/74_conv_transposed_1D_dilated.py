@@ -109,7 +109,8 @@ def conv_transposed_1d_dilated(
     if bias is not None and bias.device.type != "npu":
         raise RuntimeError("conv_transposed_1d_dilated expects bias on NPU.")
     if x.ndim != 3:
-        raise RuntimeError(f"Expected x to have shape [B, Cin, Lin], got {tuple(x.shape)}.")
+        raise RuntimeError(
+            f"Expected x to have shape [B, Cin, Lin], got {tuple(x.shape)}.")
     if weight.ndim != 3:
         raise RuntimeError(
             f"Expected weight to have shape [Cin, Cout, K], got {tuple(weight.shape)}."
@@ -119,7 +120,8 @@ def conv_transposed_1d_dilated(
             f"Input channels ({x.shape[1]}) must match weight.shape[0] ({weight.shape[0]})."
         )
     if bias is not None and bias.ndim != 1:
-        raise RuntimeError(f"Expected bias to have shape [Cout], got {tuple(bias.shape)}.")
+        raise RuntimeError(
+            f"Expected bias to have shape [Cout], got {tuple(bias.shape)}.")
     if bias is not None and bias.shape[0] != weight.shape[1]:
         raise RuntimeError(
             f"Bias size ({bias.shape[0]}) must match weight.shape[1] ({weight.shape[1]})."
@@ -192,6 +194,7 @@ class ModelNew(nn.Module):
         dilation (int, optional): Spacing between kernel elements. Defaults to 1.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
+
     def __init__(
         self,
         in_channels: int = 3,
@@ -243,6 +246,8 @@ class ModelNew(nn.Module):
             padding=padding,
             dilation=dilation,
         )
+
+
 batch_size = 32
 in_channels = 32
 out_channels = 64
@@ -252,8 +257,11 @@ stride = 1
 padding = 0
 dilation = 3
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, length)
     return [x]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, stride, padding, dilation]

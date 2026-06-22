@@ -1,0 +1,36 @@
+TEST B1_small baseline1: PASS max_abs=0.015625
+TEST B1_small baseline2: PASS max_abs=0.015625
+TEST B1_small optimized: PASS max_abs=0.015625
+TEST B4_medium baseline1: INFO coreDim would exceed Ascend 65535; benchmark returns inf
+TEST B4_medium baseline2: PASS max_abs=0.0625
+TEST B4_medium optimized: PASS max_abs=0.0625
+TEST benchmark baseline1: INFO coreDim would exceed Ascend 65535; benchmark returns inf
+TEST benchmark baseline2: PASS max_abs=0.0625
+TEST benchmark optimized: PASS max_abs=0.0625
+TEST B16_mid baseline1: PASS max_abs=0.03125
+TEST B16_mid baseline2: PASS max_abs=0.03125
+TEST B16_mid optimized: PASS max_abs=0.03125
+TEST B32_small baseline1: PASS max_abs=0.015625
+TEST B32_small baseline2: PASS max_abs=0.015625
+TEST B32_small optimized: PASS max_abs=0.015625
+TEST B1_nonpow2 baseline1: PASS max_abs=0.015625
+TEST B1_nonpow2 baseline2: PASS max_abs=0.015625
+TEST B1_nonpow2 optimized: PASS max_abs=0.015625
+TEST B4_large baseline1: INFO coreDim would exceed Ascend 65535; benchmark returns inf
+TEST B4_large baseline2: INFO coreDim would exceed Ascend 65535; benchmark returns inf
+TEST B4_large optimized: INFO coreDim would exceed Ascend 65535; benchmark returns inf
+UNIT_TEST PASS
+BENCH B4_medium baseline1: INFO correctness failed or launch invalid; returning inf
+BENCH benchmark baseline1: INFO correctness failed or launch invalid; returning inf
+BENCH B4_large baseline1: INFO correctness failed or launch invalid; returning inf
+BENCH B4_large baseline2: INFO correctness failed or launch invalid; returning inf
+BENCH B4_large optimized: INFO correctness failed or launch invalid; returning inf
+4D_tensor_matmul_perf:
+        label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    B1_small       0.026780          0.017737          0.017422          0.016080
+1   B4_medium      11.043859               inf          2.179066          3.919743
+2   benchmark      22.041544               inf          4.353390          7.827489
+3     B16_mid       3.385068          2.153591          2.129540          1.747721
+4   B32_small       0.636392          0.480177          0.475801          0.481029
+5  B1_nonpow2       0.108724          0.092050          0.089916          0.081836
+6    B4_large     106.741005               inf               inf               inf

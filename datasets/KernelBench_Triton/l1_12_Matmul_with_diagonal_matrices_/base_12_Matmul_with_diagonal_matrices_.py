@@ -3,14 +3,18 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _row_scale_kernel(
-    a_ptr,        # *A: shape [N]
-    b_ptr,        # *B: shape [N, M]
-    c_ptr,        # *C: shape [N, M]
-    N, M,
-    stride_bm, stride_bn,
-    stride_cm, stride_cn,
+    a_ptr,  # *A: shape [N]
+    b_ptr,  # *B: shape [N, M]
+    c_ptr,  # *C: shape [N, M]
+    N,
+    M,
+    stride_bm,
+    stride_bn,
+    stride_cm,
+    stride_cn,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
 ):
@@ -43,7 +47,10 @@ def _row_scale_kernel(
     else:
         cols_mask = offs_n < M
         mask = row_mask[:, None] & cols_mask[None, :]
-        a_vals = tl.load(a_ptr + rows, mask=row_mask, other=0, cache_modifier=".ca")
+        a_vals = tl.load(a_ptr + rows,
+                         mask=row_mask,
+                         other=0,
+                         cache_modifier=".ca")
         b = tl.load(b_ptrs, mask=mask, other=0, cache_modifier=".cg")
         tl.store(c_ptrs, b * a_vals[:, None], mask=mask)
 
@@ -53,9 +60,10 @@ class ModelNew(nn.Module):
     Simple model that performs a matrix multiplication of a diagonal matrix with another matrix.
     C = diag(A) * B
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
-    
+
     def forward(self, A, B):
         """
         Performs the matrix multiplication.
@@ -86,24 +94,38 @@ class ModelNew(nn.Module):
         # Batch a few rows per program to amortize row-level launch overhead.
         BLOCK_M = 16
         BLOCK_N = 1024
-        grid = lambda meta: (triton.cdiv(N, meta['BLOCK_M']), triton.cdiv(M, meta['BLOCK_N']))
+
+        def grid(meta):
+            return (triton.cdiv(N, meta['BLOCK_M']),
+                    triton.cdiv(M, meta['BLOCK_N']))
+
         _row_scale_kernel[grid](
-            A_cast, B_cast, C,
-            N, M,
-            B_cast.stride(0), B_cast.stride(1),
-            C.stride(0), C.stride(1),
+            A_cast,
+            B_cast,
+            C,
+            N,
+            M,
+            B_cast.stride(0),
+            B_cast.stride(1),
+            C.stride(0),
+            C.stride(1),
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
             num_warps=8,
             num_stages=2,
         )
         return C
+
+
 M = 4096
 N = 4096
+
 
 def get_inputs():
     A = torch.rand(N)
     B = torch.rand(N, M)
     return [A, B]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

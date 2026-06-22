@@ -7,15 +7,26 @@ import triton.language as tl
 
 @triton.jit
 def _fused_tanh_scale_bias_maxpool2d(
-    x_ptr,                # *f32 [B, C, H, W]
-    bias_ptr,             # *f32 [C]
-    y_ptr,                # *f32 [B, C, Hpo, Wpo]
-    B, C, H, W,           # input dims
-    HPO, WPO,             # pooled output dims
-    STRIDE_B, STRIDE_C, STRIDE_H, STRIDE_W,       # input strides (in elements)
-    O_STRIDE_B, O_STRIDE_C, O_STRIDE_H, O_STRIDE_W,  # output strides (in elements)
-    scale,                # float scaling factor
-    POOL_K: tl.constexpr, # pooling kernel size (assume stride=POOL_K, padding=0, ceil_mode=False)
+    x_ptr,  # *f32 [B, C, H, W]
+    bias_ptr,  # *f32 [C]
+    y_ptr,  # *f32 [B, C, Hpo, Wpo]
+    B,
+    C,
+    H,
+    W,  # input dims
+    HPO,
+    WPO,  # pooled output dims
+    STRIDE_B,
+    STRIDE_C,
+    STRIDE_H,
+    STRIDE_W,  # input strides (in elements)
+    O_STRIDE_B,
+    O_STRIDE_C,
+    O_STRIDE_H,
+    O_STRIDE_W,  # output strides (in elements)
+    scale,  # float scaling factor
+    POOL_K: tl.
+    constexpr,  # pooling kernel size (assume stride=POOL_K, padding=0, ceil_mode=False)
     SCALE_NONNEG: tl.constexpr,
     BLOCK_H: tl.constexpr,
     BLOCK_W: tl.constexpr,
@@ -78,13 +89,16 @@ class ModelNew(nn.Module):
     A model that performs a convolution, applies tanh, scaling, adds a bias term, and then max-pools.
     Fused Triton kernel computes tanh + scale + bias + max-pooling on CUDA for speed.
     """
-    def __init__(self, in_channels, out_channels, kernel_size, scaling_factor, bias_shape, pool_kernel_size):
+
+    def __init__(self, in_channels, out_channels, kernel_size, scaling_factor,
+                 bias_shape, pool_kernel_size):
         super(ModelNew, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
         self.scaling_factor = float(scaling_factor)
         self.bias = nn.Parameter(torch.randn(bias_shape))
         self.max_pool = nn.MaxPool2d(pool_kernel_size)
-        self._pool_k = pool_kernel_size if isinstance(pool_kernel_size, int) else pool_kernel_size[0]
+        self._pool_k = pool_kernel_size if isinstance(
+            pool_kernel_size, int) else pool_kernel_size[0]
 
     def forward(self, x):
         # Convolution
@@ -110,16 +124,29 @@ class ModelNew(nn.Module):
             # Keep the launch grid under the Ascend runtime limit for this shape.
             BLOCK_H = 63
             BLOCK_W = 40
-            grid = (B * C, triton.cdiv(HPO, BLOCK_H), triton.cdiv(WPO, BLOCK_W))
+            grid = (B * C, triton.cdiv(HPO,
+                                       BLOCK_H), triton.cdiv(WPO, BLOCK_W))
 
             scale_nonneg = self.scaling_factor >= 0.0
 
             _fused_tanh_scale_bias_maxpool2d[grid](
-                x, bias_flat, y,
-                B, C, H, W,
-                HPO, WPO,
-                sb, sc, sh, sw,
-                ob, oc, oh, ow,
+                x,
+                bias_flat,
+                y,
+                B,
+                C,
+                H,
+                W,
+                HPO,
+                WPO,
+                sb,
+                sc,
+                sh,
+                sw,
+                ob,
+                oc,
+                oh,
+                ow,
                 self.scaling_factor,
                 POOL_K=K,
                 SCALE_NONNEG=scale_nonneg,
@@ -136,6 +163,8 @@ class ModelNew(nn.Module):
             x = x + self.bias
             x = self.max_pool(x)
             return x
+
+
 batch_size = 128
 in_channels = 8
 out_channels = 64
@@ -145,7 +174,13 @@ scaling_factor = 2.0
 bias_shape = (out_channels, 1, 1)
 pool_kernel_size = 4
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, scaling_factor, bias_shape, pool_kernel_size]
+    return [
+        in_channels, out_channels, kernel_size, scaling_factor, bias_shape,
+        pool_kernel_size
+    ]

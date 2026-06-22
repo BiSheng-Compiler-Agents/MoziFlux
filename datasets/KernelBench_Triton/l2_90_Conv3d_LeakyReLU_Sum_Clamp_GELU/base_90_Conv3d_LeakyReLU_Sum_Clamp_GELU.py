@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_CHANNELS = 8
 DEFAULT_OUT_CHANNELS = 64
@@ -38,6 +37,7 @@ def _fused_post_conv_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -59,15 +59,13 @@ class ModelNew(nn.Module):
 
         nc = n * c
         grid = (triton.cdiv(inner, 2368), nc)
-        _fused_post_conv_kernel[grid](
-            x_contig,
-            bias,
-            out,
-            inner,
-            nc,
-            c,
-            BLOCK_SIZE=2368
-        )
+        _fused_post_conv_kernel[grid](x_contig,
+                                      bias,
+                                      out,
+                                      inner,
+                                      nc,
+                                      c,
+                                      BLOCK_SIZE=2368)
 
         return out
 

@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 DEFAULT_IN_CHANNELS = 32
 DEFAULT_OUT_CHANNELS = 64
 DEFAULT_KERNEL_SIZE = 3
@@ -18,7 +17,8 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 
 @triton.jit
-def _fused_add_hswish_mul_kernel(x_ptr, add_ptr, out_ptr, N, BLOCK: tl.constexpr):
+def _fused_add_hswish_mul_kernel(x_ptr, add_ptr, out_ptr, N,
+                                 BLOCK: tl.constexpr):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK + tl.arange(0, BLOCK)
     mask = offs < N
@@ -38,7 +38,8 @@ def _fused_add_hswish_mul_kernel(x_ptr, add_ptr, out_ptr, N, BLOCK: tl.constexpr
     tl.store(out_ptr + offs, out, mask=mask)
 
 
-def _fused_add_hswish_mul(x: torch.Tensor, add_input: torch.Tensor) -> torch.Tensor:
+def _fused_add_hswish_mul(x: torch.Tensor,
+                          add_input: torch.Tensor) -> torch.Tensor:
     if not _is_npu_tensor(x) or not _is_npu_tensor(add_input):
         raise RuntimeError("_fused_add_hswish_mul expects Ascend NPU tensors.")
     if x.device != add_input.device:
@@ -59,7 +60,10 @@ def _fused_add_hswish_mul(x: torch.Tensor, add_input: torch.Tensor) -> torch.Ten
         block = 2048
     else:
         block = 4096
-    grid = lambda meta: (triton.cdiv(N, meta["BLOCK"]),)
+
+    def grid(meta):
+        return (triton.cdiv(N, meta["BLOCK"]), )
+
     _fused_add_hswish_mul_kernel[grid](x_c, add_c, out, N, BLOCK=block)
     return out
 
@@ -70,6 +74,7 @@ class ModelNew(nn.Module):
     with a fused Triton kernel for the post-convolution elementwise computation:
       out = hardswish(convT(x) + add_input)
     """
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -104,6 +109,8 @@ class ModelNew(nn.Module):
             raise RuntimeError("ModelNew expects Ascend NPU input tensors.")
         x = self.conv_transpose(x)
         return _fused_add_hswish_mul(x, add_input)
+
+
 batch_size = 128
 in_channels = 32
 out_channels = 64
@@ -114,7 +121,17 @@ padding = 1
 output_padding = 1
 bias_shape = (out_channels, 1, 1, 1, 1)
 
+
 def get_inputs():
-    return [torch.rand(batch_size, in_channels, D, H, W), torch.rand(batch_size, out_channels, D*stride, H*stride, W*stride)]
+    return [
+        torch.rand(batch_size, in_channels, D, H, W),
+        torch.rand(batch_size, out_channels, D * stride, H * stride,
+                   W * stride)
+    ]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, bias_shape]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding,
+        output_padding, bias_shape
+    ]

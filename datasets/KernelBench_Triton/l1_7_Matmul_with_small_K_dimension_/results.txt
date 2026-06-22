@@ -1,0 +1,20 @@
+TEST small baseline1: PASS max_abs=0.0137167
+TEST small baseline2: PASS max_abs=0.0137167
+TEST small opt: PASS max_abs=0.0137167
+TEST nonpow2 baseline1: PASS max_abs=0.010251
+TEST nonpow2 baseline2: PASS max_abs=0.010251
+TEST nonpow2 opt: PASS max_abs=0.0110703
+TEST medium baseline1: PASS max_abs=0.0131905
+TEST medium baseline2: PASS max_abs=0.0131905
+TEST medium opt: PASS max_abs=0.0135565
+TEST benchmark baseline1: SKIP coreDim would exceed Ascend 65535 launch limit
+TEST benchmark baseline2: PASS max_abs=0.0175786
+TEST benchmark opt: PASS max_abs=0.0174605
+UNIT_TEST PASS
+BENCH benchmark baseline1: SKIP coreDim would exceed Ascend 65535 launch limit
+matmul_small_k_performance:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small       0.005663          0.005272          0.009094          0.004841
+1    nonpow2       0.008768          0.010575          0.019027          0.008786
+2     medium       0.027972          0.026270          0.022438          0.025880
+3  benchmark       5.836346               inf          3.375625          5.632235

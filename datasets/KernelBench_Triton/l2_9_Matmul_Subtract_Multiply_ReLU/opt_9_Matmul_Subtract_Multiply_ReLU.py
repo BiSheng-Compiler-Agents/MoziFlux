@@ -25,30 +25,35 @@ import triton.language as tl
 import triton.language.extra.cann.extension as al
 import triton.runtime.driver as driver
 
-
 # ---------------------------------------------------------------------------
 # Device kernel
 # ---------------------------------------------------------------------------
 
+
 @triton.jit
 def _fused_matmul_sub_mul_relu_opt(
-    A_ptr,            # [M, K]
-    W_ptr,            # [N, K], treated as [K, N] via strides
-    B_ptr,            # [N]
-    C_ptr,            # [M, N]
+    A_ptr,  # [M, K]
+    W_ptr,  # [N, K], treated as [K, N] via strides
+    B_ptr,  # [N]
+    C_ptr,  # [M, N]
     SUB_VAL: tl.constexpr,
     MUL_VAL: tl.constexpr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_wk, stride_wn,
-    stride_cm, stride_cn,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_wk,
+    stride_wn,
+    stride_cm,
+    stride_cn,
     NUM_BLOCKS_M: tl.constexpr,
     NUM_BLOCKS_N: tl.constexpr,
-    NUM_K_TILES:  tl.constexpr,
-    GROUP_M:      tl.constexpr,
-    BLOCK_M:      tl.constexpr,
-    BLOCK_N:      tl.constexpr,
-    BLOCK_K:      tl.constexpr,
+    NUM_K_TILES: tl.constexpr,
+    GROUP_M: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
 ):
     # ---- 1D pid → (pid_m, pid_n) with GROUP_M swizzle ----------------------
     pid = tl.program_id(0)
@@ -56,7 +61,7 @@ def _fused_matmul_sub_mul_relu_opt(
     BLOCK_THRESHOLD: tl.constexpr = 4
     if NUM_BLOCKS_M >= BLOCK_THRESHOLD and NUM_BLOCKS_N >= BLOCK_THRESHOLD:
         group_width = GROUP_M * NUM_BLOCKS_N
-        group_id    = pid // group_width
+        group_id = pid // group_width
         first_pid_m = group_id * GROUP_M
         group_size_m = tl.minimum(NUM_BLOCKS_M - first_pid_m, GROUP_M)
         pid_in_group = pid % group_width
@@ -64,19 +69,19 @@ def _fused_matmul_sub_mul_relu_opt(
         pid_n = pid_in_group // group_size_m
     else:
         pid_m = pid // NUM_BLOCKS_N
-        pid_n = pid  % NUM_BLOCKS_N
+        pid_n = pid % NUM_BLOCKS_N
 
     # ---- Tile offsets -------------------------------------------------------
     offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
 
     # Hoist boundary masks outside K loop
-    mask_m = offs_m < M   # [BLOCK_M]
-    mask_n = offs_n < N   # [BLOCK_N]
+    mask_m = offs_m < M  # [BLOCK_M]
+    mask_n = offs_n < N  # [BLOCK_N]
 
     # Base pointers for A row and W col blocks
-    A_row_ptr = A_ptr + offs_m[:, None] * stride_am   # [BLOCK_M, 1]
-    W_col_ptr = W_ptr + offs_n[None, :] * stride_wn   # [1, BLOCK_N]
+    A_row_ptr = A_ptr + offs_m[:, None] * stride_am  # [BLOCK_M, 1]
+    W_col_ptr = W_ptr + offs_n[None, :] * stride_wn  # [1, BLOCK_N]
 
     # ---- Accumulator --------------------------------------------------------
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
@@ -113,7 +118,8 @@ def _fused_matmul_sub_mul_relu_opt(
     acc = (acc - SUB_VAL) * MUL_VAL
     acc = tl.maximum(acc, 0.0)
 
-    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm +
+                      offs_n[None, :] * stride_cn)
     tl.store(c_ptrs, acc, mask=(mask_m[:, None] & mask_n[None, :]))
 
 
@@ -136,31 +142,42 @@ def _dispatch(x: torch.Tensor, W: torch.Tensor, B: torch.Tensor,
     B : [N]     (bias, on NPU)
     """
     M, K = x.shape
-    N    = W.shape[0]
+    N = W.shape[0]
 
     out = torch.empty((M, N), device=x.device, dtype=x.dtype)
 
     num_blocks_m = triton.cdiv(M, BLOCK_M)
     num_blocks_n = triton.cdiv(N, BLOCK_N)
-    num_k_tiles  = triton.cdiv(K, BLOCK_K)
+    num_k_tiles = triton.cdiv(K, BLOCK_K)
 
     # 1D grid: total tiles, capped at num_aicore for dispatch efficiency
     total_tiles = num_blocks_m * num_blocks_n
-    device      = torch.npu.current_device()
-    num_aicore  = driver.active.utils.get_device_properties(device)["num_aicore"]
-    grid        = (min(total_tiles, num_aicore * 4),)  # modest oversubscription
+    device = torch.npu.current_device()
+    num_aicore = driver.active.utils.get_device_properties(
+        device)["num_aicore"]
+    grid = (min(total_tiles, num_aicore * 4), )  # modest oversubscription
 
     # Use 1D grid = total_tiles when fitting for simplicity;
     # if it exceeds physical cores, the HW scheduler round-robins naturally.
-    grid = (total_tiles,)
+    grid = (total_tiles, )
 
     _fused_matmul_sub_mul_relu_opt[grid](
-        x, W, B, out,
-        sub_val, mul_val,
-        M, N, K,
-        x.stride(0), x.stride(1),
-        W.stride(1), W.stride(0),  # W stored [N,K]; stride_wk=W.stride(1), stride_wn=W.stride(0)
-        out.stride(0), out.stride(1),
+        x,
+        W,
+        B,
+        out,
+        sub_val,
+        mul_val,
+        M,
+        N,
+        K,
+        x.stride(0),
+        x.stride(1),
+        W.stride(1),
+        W.stride(
+            0),  # W stored [N,K]; stride_wk=W.stride(1), stride_wn=W.stride(0)
+        out.stride(0),
+        out.stride(1),
         NUM_BLOCKS_M=num_blocks_m,
         NUM_BLOCKS_N=num_blocks_n,
         NUM_K_TILES=num_k_tiles,
@@ -179,6 +196,7 @@ class ModelNew(nn.Module):
     Fused: C = ReLU((x @ weight.T + bias - subtract_value) * multiply_value)
     Accepts float16 or float32 input on Ascend NPU.
     """
+
     def __init__(
         self,
         in_features: int = 10,
@@ -207,12 +225,13 @@ class ModelNew(nn.Module):
         if self.linear.bias is None or self.linear.bias.device.type != "npu":
             raise RuntimeError("ModelNew bias must be on NPU")
         if self.linear.weight.dtype != x.dtype or self.linear.bias.dtype != x.dtype:
-            raise TypeError("Input, weight, and bias must share the same dtype")
+            raise TypeError(
+                "Input, weight, and bias must share the same dtype")
 
         return _dispatch(
             x,
-            self.linear.weight,   # [N, K]
-            self.linear.bias,     # [N]
+            self.linear.weight,  # [N, K]
+            self.linear.bias,  # [N]
             self.subtract_value,
             self.multiply_value,
         )
@@ -221,11 +240,11 @@ class ModelNew(nn.Module):
 # ---------------------------------------------------------------------------
 # Benchmark metadata (matches the shape used in the reference perf file)
 # ---------------------------------------------------------------------------
-batch_size      = 1024
-in_features     = 8192
-out_features    = 8192
-subtract_value  = 2.0
-multiply_value  = 1.5
+batch_size = 1024
+in_features = 8192
+out_features = 8192
+subtract_value = 2.0
+multiply_value = 1.5
 
 
 def get_inputs():

@@ -1,0 +1,22 @@
+TEST baseline1 small_direct PASS max_abs=7.15256e-07 max_rel=0.000214197
+TEST baseline2 small_direct PASS max_abs=1.07288e-06 max_rel=0.0003276
+TEST optimized small_direct PASS max_abs=7.15256e-07 max_rel=0.000214197
+TEST baseline1 medium_direct PASS max_abs=1.66893e-06 max_rel=0.0576927
+TEST baseline2 medium_direct PASS max_abs=9.53674e-07 max_rel=0.0399998
+TEST optimized medium_direct PASS max_abs=9.53674e-07 max_rel=0.0227272
+TEST baseline1 benchmark_persistent PASS max_abs=1.51396e-05 max_rel=2
+TEST baseline2 benchmark_persistent PASS max_abs=2.74181e-06 max_rel=0.619003
+TEST optimized benchmark_persistent PASS max_abs=1.66893e-06 max_rel=0.413052
+TEST optimized dispatch_persistent PASS max_abs=8.58307e-06 max_rel=4.73417e-06
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l1_35_GroupNorm__1782335035/35_GroupNorm_.py:110: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y_flat = torch.empty_like(x_flat, dtype=torch.float32)
+groupnorm-performance:
+                  label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0          small_direct       0.004783          0.034247          0.003587          0.036312
+1         medium_direct       0.023302          0.947628          0.025211          0.569545
+2  benchmark_persistent      15.645546        520.985474         16.206888        479.059418
+
+/home/s00929845/kernel_verify/l1_35_GroupNorm__1782335035/35_GroupNorm_.py:110: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y_flat = torch.empty_like(x_flat, dtype=torch.float32)

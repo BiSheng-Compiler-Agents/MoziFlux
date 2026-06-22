@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 64
 DEFAULT_IN_CHANNELS = 8
 DEFAULT_OUT_CHANNELS = 32
@@ -11,20 +10,20 @@ DEFAULT_DEPTH = 32
 DEFAULT_HEIGHT = 64
 DEFAULT_WIDTH = 64
 DEFAULT_KERNEL_SIZE = 3
-DEFAULT_BIAS_SHAPE = (out_channels, 1, 1, 1)
+DEFAULT_BIAS_SHAPE = (DEFAULT_OUT_CHANNELS, 1, 1, 1)
 
 _MODEL_CACHE = {}
 
 
 @triton.jit
 def _fused_post_ops_bias_kernel(
-    x_ptr,             # *f32
-    bias_ptr,          # *f32
-    y_ptr,             # *f32
-    n_elements,        # i32
-    C,                 # i32
-    stride_c,          # i32 (elements)
-    bias_stride_c,     # i32 (elements)
+    x_ptr,  # *f32
+    bias_ptr,  # *f32
+    y_ptr,  # *f32
+    n_elements,  # i32
+    C,  # i32
+    stride_c,  # i32 (elements)
+    bias_stride_c,  # i32 (elements)
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -68,6 +67,7 @@ class ModelNew(nn.Module):
     Model that performs a 3D convolution, applies ReLU, LeakyReLU, GELU, Sigmoid activations, and bias in sequence.
     Fused the post-conv elementwise ops + bias addition into a single Triton kernel for performance.
     """
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -98,7 +98,10 @@ class ModelNew(nn.Module):
         stride_c = y.stride(1)
         bias_stride_c = b.stride(0)
         block = 1024
-        grid = lambda meta: (triton.cdiv(n_elements, block),)
+
+        def grid(meta):
+            return (triton.cdiv(n_elements, block), )
+
         _fused_post_ops_bias_kernel[grid](
             y,
             b,
@@ -120,7 +123,8 @@ def _set_deterministic_seed(seed: int) -> None:
         torch.npu.manual_seed_all(seed)
 
 
-def conv3d_relu_leakyrelu_gelu_sigmoid_biasadd(x: torch.Tensor) -> torch.Tensor:
+def conv3d_relu_leakyrelu_gelu_sigmoid_biasadd(
+        x: torch.Tensor) -> torch.Tensor:
     if x.device.type != "npu":
         raise RuntimeError(
             "conv3d_relu_leakyrelu_gelu_sigmoid_biasadd expects an Ascend NPU tensor"
@@ -130,11 +134,14 @@ def conv3d_relu_leakyrelu_gelu_sigmoid_biasadd(x: torch.Tensor) -> torch.Tensor:
     model = _MODEL_CACHE.get(key)
     if model is None:
         _set_deterministic_seed(0)
-        model = ModelNew(*get_init_inputs()).eval().to(device=x.device, dtype=x.dtype)
+        model = ModelNew(*get_init_inputs()).eval().to(device=x.device,
+                                                       dtype=x.dtype)
         _MODEL_CACHE[key] = model
 
     with torch.no_grad():
         return model(x)
+
+
 batch_size = 64
 in_channels = 8
 out_channels = 32
@@ -142,7 +149,10 @@ depth, height, width = 32, 64, 64
 kernel_size = 3
 bias_shape = (out_channels, 1, 1, 1)
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, depth, height, width)]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, bias_shape]

@@ -57,9 +57,10 @@ def _rowwise_lse_leaky_gelu2(
 
 class ModelNew(nn.Module):
     """
-    Model that performs a matrix multiplication (Gemm), followed by LogSumExp, LeakyReLU, 
+    Model that performs a matrix multiplication (Gemm), followed by LogSumExp, LeakyReLU,
     LeakyReLU, GELU, and GELU activations.
     """
+
     def __init__(self, in_features=1024, out_features=512, bias=True):
         super(ModelNew, self).__init__()
         self.linear = nn.Linear(in_features, out_features, bias=bias)
@@ -77,7 +78,7 @@ class ModelNew(nn.Module):
         x_c = x.contiguous()
         y = torch.empty((B, 1), device=x.device, dtype=x.dtype)
 
-        grid = (B,)
+        grid = (B, )
         block_n = min(1024, triton.next_power_of_2(N))
         _rowwise_lse_leaky_gelu2[grid](
             x_c,
@@ -92,11 +93,16 @@ class ModelNew(nn.Module):
             num_stages=2,
         )
         return y
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features]

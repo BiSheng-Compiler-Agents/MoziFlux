@@ -38,8 +38,10 @@ def gemm_row_major_kernel(
     k_start = 0
     while k_start < K:
         k_idx = k_start + offs_k
-        a_ptrs = a_ptr + offs_m[:, None] * stride_am + k_idx[None, :] * stride_ak
-        b_ptrs = b_ptr + k_idx[:, None] * stride_bk + offs_n[None, :] * stride_bn
+        a_ptrs = a_ptr + offs_m[:,
+                                None] * stride_am + k_idx[None, :] * stride_ak
+        b_ptrs = b_ptr + k_idx[:,
+                               None] * stride_bk + offs_n[None, :] * stride_bn
 
         a_mask = (offs_m[:, None] < M) & (k_idx[None, :] < K)
         b_mask = (k_idx[:, None] < K) & (offs_n[None, :] < N)
@@ -58,7 +60,8 @@ def gemm_row_major_kernel(
 
 def _matmul_triton(a_2d: torch.Tensor, b_2d: torch.Tensor) -> torch.Tensor:
     if a_2d.dtype != torch.float32 or b_2d.dtype != torch.float32:
-        raise RuntimeError("matmul Triton path currently supports float32 only")
+        raise RuntimeError(
+            "matmul Triton path currently supports float32 only")
 
     a_c = a_2d.contiguous()
     b_c = b_2d.contiguous()
@@ -91,15 +94,25 @@ def _matmul_triton(a_2d: torch.Tensor, b_2d: torch.Tensor) -> torch.Tensor:
     return c
 
 
-def _conv2d_triton_forward(x, weight, bias, stride=1, padding=0, dilation=1, groups=1):
+def _conv2d_triton_forward(x,
+                           weight,
+                           bias,
+                           stride=1,
+                           padding=0,
+                           dilation=1,
+                           groups=1):
     if x.device.type != "npu":
         raise RuntimeError("conv2d Triton kernel requires NPU inputs")
     if x.dtype != torch.float32 or weight.dtype != torch.float32:
-        raise RuntimeError("conv2d Triton kernel currently supports float32 inputs and weights only")
+        raise RuntimeError(
+            "conv2d Triton kernel currently supports float32 inputs and weights only"
+        )
     if bias is not None and bias.dtype != torch.float32:
-        raise RuntimeError("conv2d Triton kernel currently supports float32 bias only")
+        raise RuntimeError(
+            "conv2d Triton kernel currently supports float32 bias only")
     if groups != 1:
-        raise RuntimeError("conv2d Triton kernel currently supports groups=1 only")
+        raise RuntimeError(
+            "conv2d Triton kernel currently supports groups=1 only")
 
     if isinstance(stride, int):
         stride = (stride, stride)
@@ -111,7 +124,8 @@ def _conv2d_triton_forward(x, weight, bias, stride=1, padding=0, dilation=1, gro
     n, c, h, w = x.shape
     oc, ci, kh, kw = weight.shape
     if ci != c:
-        raise RuntimeError("in_channels must match weight in_channels for groups=1")
+        raise RuntimeError(
+            "in_channels must match weight in_channels for groups=1")
 
     cols = F.unfold(
         x,
@@ -130,7 +144,8 @@ def _conv2d_triton_forward(x, weight, bias, stride=1, padding=0, dilation=1, gro
 
     h_out = (h + 2 * padding[0] - dilation[0] * (kh - 1) - 1) // stride[0] + 1
     w_out = (w + 2 * padding[1] - dilation[1] * (kw - 1) - 1) // stride[1] + 1
-    return out_2d.view(n, h_out * w_out, oc).transpose(1, 2).reshape(n, oc, h_out, w_out)
+    return out_2d.view(n, h_out * w_out,
+                       oc).transpose(1, 2).reshape(n, oc, h_out, w_out)
 
 
 class ModelNew(nn.Module):

@@ -13,12 +13,25 @@ def _triple(v):
 
 @triton.jit
 def avgpool3d_kernel(
-    x_ptr, y_ptr,
-    N, C, D, H, W,
-    OD, OH, OW,
-    SD, SH, SW,
-    PD, PH, PW,
-    KSIZE_D: tl.constexpr, KSIZE_H: tl.constexpr, KSIZE_W: tl.constexpr,
+    x_ptr,
+    y_ptr,
+    N,
+    C,
+    D,
+    H,
+    W,
+    OD,
+    OH,
+    OW,
+    SD,
+    SH,
+    SW,
+    PD,
+    PH,
+    PW,
+    KSIZE_D: tl.constexpr,
+    KSIZE_H: tl.constexpr,
+    KSIZE_W: tl.constexpr,
     BLOCK_W: tl.constexpr,
 ):
     pid_w = tl.program_id(axis=0)
@@ -65,9 +78,14 @@ class ModelNew(nn.Module):
     3D average pooling backed by a Triton kernel on Ascend NPU.
     """
 
-    def __init__(self, kernel_size: int = 3, stride: int = 2, padding: int = 1):
+    def __init__(self,
+                 kernel_size: int = 3,
+                 stride: int = 2,
+                 padding: int = 1):
         super(ModelNew, self).__init__()
-        self.avg_pool = nn.AvgPool3d(kernel_size=kernel_size, stride=stride, padding=padding)
+        self.avg_pool = nn.AvgPool3d(kernel_size=kernel_size,
+                                     stride=stride,
+                                     padding=padding)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if not hasattr(x, "is_npu") or not x.is_npu:
@@ -88,15 +106,30 @@ class ModelNew(nn.Module):
         y = torch.empty((N, C, OD, OH, OW), device=x.device, dtype=x.dtype)
 
         block_w = 128
-        grid = lambda META: (triton.cdiv(OW, META["BLOCK_W"]), OD * OH, N * C)
+
+        def grid(META):
+            return (triton.cdiv(OW, META["BLOCK_W"]), OD * OH, N * C)
 
         avgpool3d_kernel[grid](
-            x, y,
-            N, C, D, H, W,
-            OD, OH, OW,
-            sD, sH, sW,
-            pD, pH, pW,
-            KSIZE_D=kD, KSIZE_H=kH, KSIZE_W=kW,
+            x,
+            y,
+            N,
+            C,
+            D,
+            H,
+            W,
+            OD,
+            OH,
+            OW,
+            sD,
+            sH,
+            sW,
+            pD,
+            pH,
+            pW,
+            KSIZE_D=kD,
+            KSIZE_H=kH,
+            KSIZE_W=kW,
             BLOCK_W=block_w,
             num_warps=8,
             num_stages=1,

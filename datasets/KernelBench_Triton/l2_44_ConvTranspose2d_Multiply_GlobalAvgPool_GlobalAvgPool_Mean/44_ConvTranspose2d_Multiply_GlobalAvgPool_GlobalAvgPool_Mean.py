@@ -39,7 +39,8 @@ def _global_avg_mul_kernel(
 
 def _fused_mul_global_avg(x: torch.Tensor, multiplier: float) -> torch.Tensor:
     if x.device.type != "npu":
-        raise RuntimeError("_fused_mul_global_avg expects an Ascend NPU tensor")
+        raise RuntimeError(
+            "_fused_mul_global_avg expects an Ascend NPU tensor")
     if x.ndim != 4:
         raise RuntimeError("_fused_mul_global_avg expects an NCHW tensor")
 
@@ -57,7 +58,7 @@ def _fused_mul_global_avg(x: torch.Tensor, multiplier: float) -> torch.Tensor:
     num_warps = 4 if bs <= 1024 else 8
     num_stages = 4
 
-    grid = (NC,)
+    grid = (NC, )
     _global_avg_mul_kernel[grid](
         x.view(-1),
         out.view(-1),
@@ -73,19 +74,27 @@ def _fused_mul_global_avg(x: torch.Tensor, multiplier: float) -> torch.Tensor:
 
 class ModelNew(nn.Module):
     """
-    Model that performs a transposed convolution, multiplies by a scalar, applies global average pooling, 
+    Model that performs a transposed convolution, multiplies by a scalar, applies global average pooling,
     another global average pooling
     """
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, output_padding, multiplier):
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding,
+                 output_padding, multiplier):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, output_padding=output_padding)
+        self.conv_transpose = nn.ConvTranspose2d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding,
+                                                 output_padding=output_padding)
         self.multiplier = multiplier
 
     def forward(self, x):
         if x.device.type != "npu":
             raise RuntimeError("ModelNew expects inputs on Ascend NPU")
         if self.conv_transpose.weight.device.type != "npu":
-            raise RuntimeError("ModelNew expects ConvTranspose2d weights on Ascend NPU")
+            raise RuntimeError(
+                "ModelNew expects ConvTranspose2d weights on Ascend NPU")
         x = self.conv_transpose(x)
         x = _fused_mul_global_avg(x, self.multiplier)
         return x
@@ -112,6 +121,8 @@ def run_operator(x: torch.Tensor) -> torch.Tensor:
 
     with torch.no_grad():
         return model(x)
+
+
 batch_size = 16
 in_channels = 64
 out_channels = 128
@@ -122,7 +133,13 @@ padding = 1
 output_padding = 1
 multiplier = 0.5
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width, device='npu')]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, multiplier]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding,
+        output_padding, multiplier
+    ]

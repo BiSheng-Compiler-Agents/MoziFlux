@@ -1,0 +1,24 @@
+TEST baseline1 tiny_block64 PASS
+TEST baseline2 tiny_block64 PASS
+TEST optimized tiny_block64 PASS
+TEST baseline1 small_block1024 PASS
+TEST baseline2 small_block1024 PASS
+TEST optimized small_block1024 PASS
+TEST baseline1 mid_block2048 PASS
+TEST baseline2 mid_block2048 PASS
+TEST optimized mid_block2048 PASS
+TEST baseline1 large_block4096 PASS
+TEST baseline2 large_block4096 PASS
+TEST optimized large_block4096 PASS
+TEST baseline1 target PASS
+TEST baseline2 target PASS
+TEST optimized target PASS
+UNIT_TEST PASS
+
+l1norm-performance:
+             label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0     tiny_block64       0.028578          0.034433          0.032001          0.034874
+1  small_block1024       0.036347          0.033910          0.034465          0.033944
+2    mid_block2048       0.034256          0.036295          0.034048          0.033934
+3  large_block4096       0.037751          0.035410          0.034836          0.034109
+4           target      29.167211         14.926386         17.031329         14.871285

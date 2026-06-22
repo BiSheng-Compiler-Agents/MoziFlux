@@ -1,14 +1,28 @@
-Correctness check (atol=1e-3, rtol=1e-3):
-  N=256                       baseline [PASS]  optimized [PASS]  maxDelta_base=0.00e+00  maxDelta_opt=0.00e+00
-  N=512                       baseline [PASS]  optimized [PASS]  maxDelta_base=0.00e+00  maxDelta_opt=0.00e+00
-  N=1024                      baseline [PASS]  optimized [PASS]  maxDelta_base=0.00e+00  maxDelta_opt=0.00e+00
-  N=2048                      baseline [PASS]  optimized [PASS]  maxDelta_base=0.00e+00  maxDelta_opt=0.00e+00
-  N=4096                      baseline [PASS]  optimized [PASS]  maxDelta_base=0.00e+00  maxDelta_opt=0.00e+00
-All PASS
-matmul_benchmark:
-    label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
-0   N=256       0.004698          0.055383          0.051351          0.052079
-1   N=512       0.014185          0.080808          0.081057          0.053573
-2  N=1024       0.084935          0.459857          0.461490          0.087967
-3  N=2048       0.646791          2.896986          2.897128          0.656431
-4  N=4096       5.103217         34.525906         34.359409          5.152193
+TEST N256 baseline1: PASS max_abs=0.0168858
+TEST N256 baseline2: ERROR MLIR compile failure; benchmark returns inf
+TEST N256 optimized: PASS max_abs=0.0176592
+TEST N512 baseline1: PASS max_abs=0.0295559
+TEST N512 baseline2: ERROR MLIR compile failure; benchmark returns inf
+TEST N512 optimized: PASS max_abs=0.0280895
+TEST N1024 baseline1: PASS max_abs=0.0465221
+TEST N1024 baseline2: ERROR MLIR compile failure; benchmark returns inf
+TEST N1024 optimized: PASS max_abs=0.0466251
+TEST N2048 baseline1: PASS max_abs=0.0684433
+TEST N2048 baseline2: ERROR MLIR compile failure; benchmark returns inf
+TEST N2048 optimized: PASS max_abs=0.06674
+TEST benchmark baseline1: PASS max_abs=0.105062
+TEST benchmark baseline2: ERROR MLIR compile failure; benchmark returns inf
+TEST benchmark optimized: PASS max_abs=0.0947418
+UNIT_TEST PASS
+BENCH N256 baseline2: ERROR MLIR compile failure; returning inf
+BENCH N512 baseline2: ERROR MLIR compile failure; returning inf
+BENCH N1024 baseline2: ERROR MLIR compile failure; returning inf
+BENCH N2048 baseline2: ERROR MLIR compile failure; returning inf
+BENCH benchmark baseline2: ERROR MLIR compile failure; returning inf
+square_matmul_performance:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0       N256       0.005339          0.018239               inf          0.007328
+1       N512       0.017363          0.084816               inf          0.013888
+2      N1024       0.103997          0.489786               inf          0.084144
+3      N2048       0.760329          3.088447               inf          0.407258
+4  benchmark       5.846602         24.324955               inf          2.738105

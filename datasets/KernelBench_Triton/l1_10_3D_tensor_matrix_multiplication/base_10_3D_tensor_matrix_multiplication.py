@@ -9,18 +9,33 @@ import triton.language as tl
 # Fixed-tile Batched GEMM: C[(N*M), L] = A[(N*M), K] @ B[K, L]
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'BLOCK_K': 64}, num_warps=8, num_stages=4),
+        triton.Config({
+            'BLOCK_M': 128,
+            'BLOCK_N': 128,
+            'BLOCK_K': 64
+        },
+                      num_warps=8,
+                      num_stages=4),
     ],
     key=['M', 'N', 'K'],
 )
 @triton.jit
 def _matmul_2d_kernel(
-    A_ptr, B_ptr, C_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_cm, stride_cn,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
+    A_ptr,
+    B_ptr,
+    C_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_cm,
+    stride_cn,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
     OUT_DTYPE: tl.constexpr,
 ):
     pid_m = tl.program_id(axis=0)
@@ -30,8 +45,10 @@ def _matmul_2d_kernel(
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
     offs_k = tl.arange(0, BLOCK_K)
 
-    a_ptrs = A_ptr + (offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak)
-    b_ptrs = B_ptr + (offs_k[:, None] * stride_bk + offs_n[None, :] * stride_bn)
+    a_ptrs = A_ptr + (offs_m[:, None] * stride_am +
+                      offs_k[None, :] * stride_ak)
+    b_ptrs = B_ptr + (offs_k[:, None] * stride_bk +
+                      offs_n[None, :] * stride_bn)
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 
@@ -49,7 +66,8 @@ def _matmul_2d_kernel(
         a_ptrs += BLOCK_K * stride_ak
         b_ptrs += BLOCK_K * stride_bk
 
-    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm +
+                      offs_n[None, :] * stride_cn)
     c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
     tl.store(c_ptrs, acc.to(OUT_DTYPE), mask=c_mask)
 
@@ -65,12 +83,10 @@ def _batched_matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     if A.dtype != B.dtype:
         raise ValueError("Inputs must have the same dtype.")
     if A.dtype not in (torch.float16, torch.bfloat16):
-        raise TypeError(f"Unsupported dtype for Triton batched matmul: {A.dtype}.")
-    if not (
-        A.is_cuda
-        or A.device.type == "npu"
-        or os.environ.get("TRITON_INTERPRET") == "1"
-    ):
+        raise TypeError(
+            f"Unsupported dtype for Triton batched matmul: {A.dtype}.")
+    if not (A.is_cuda or A.device.type == "npu"
+            or os.environ.get("TRITON_INTERPRET") == "1"):
         raise RuntimeError(
             "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1 for Triton interpreter mode."
         )
@@ -96,11 +112,18 @@ def _batched_matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     # Grid for the single autotune config (BLOCK_M=128, BLOCK_N=128)
     grid = (triton.cdiv(M_flat, 128), triton.cdiv(N_out, 128))
     _matmul_2d_kernel[grid](
-        A_2d, B, C_2d,
-        M_flat, N_out, K,
-        stride_am, stride_ak,
-        stride_bk, stride_bn,
-        stride_cm, stride_cn,
+        A_2d,
+        B,
+        C_2d,
+        M_flat,
+        N_out,
+        K,
+        stride_am,
+        stride_ak,
+        stride_bk,
+        stride_bn,
+        stride_cm,
+        stride_cn,
         OUT_DTYPE=tl.float16 if A.dtype == torch.float16 else tl.bfloat16,
     )
     C = C_2d.view(N_b, M_a, N_out)
@@ -111,9 +134,10 @@ class ModelNew(nn.Module):
     """
     Performs 3D tensor-matrix multiplication using the Triton kernel.
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
-    
+
     def forward(self, A, B):
         """
         Performs 3D tensor-matrix multiplication.
@@ -126,15 +150,21 @@ class ModelNew(nn.Module):
             torch.Tensor: Output tensor of shape (N, M, L), resulting from the multiplication of A and B along the last dimension of A.
         """
         return _batched_matmul_triton(A, B)
+
+
 N = 16
 M = 1024
 K = 2048
 L = 768
 
+
 def get_inputs():
-    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    device = "npu" if hasattr(torch,
+                              "npu") and torch.npu.is_available() else "cpu"
     A = torch.rand(N, M, K, device=device)
     B = torch.rand(K, L, device=device)
     return [A, B]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

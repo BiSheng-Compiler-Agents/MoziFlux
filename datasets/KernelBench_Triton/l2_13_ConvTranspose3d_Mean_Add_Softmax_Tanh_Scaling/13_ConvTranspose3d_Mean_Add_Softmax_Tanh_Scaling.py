@@ -27,26 +27,30 @@ class ModelNew(nn.Module):
     produced by ConvTranspose3d. We compute that shape analytically and fill it
     using a fast Triton kernel.
     """
+
     def __init__(
-        self,
-        in_channels=8,
-        out_channels=16,
-        kernel_size=3,
-        stride=2,
-        padding=1,
-        bias_shape=(1, 1, 1, 1, 1),
-        scaling_factor=2.0,
+            self,
+            in_channels=8,
+            out_channels=16,
+            kernel_size=3,
+            stride=2,
+            padding=1,
+            bias_shape=(1, 1, 1, 1, 1),
+            scaling_factor=2.0,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose3d(
-            in_channels, out_channels, kernel_size, stride=stride, padding=padding
-        )
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding)
         self.bias = nn.Parameter(torch.randn(bias_shape))
         self.scaling_factor = scaling_factor
 
         # Cache conv attributes as 3-tuples to avoid per-forward branching
         def _to3(x):
             return (x, x, x) if isinstance(x, int) else x
+
         self._k = _to3(self.conv_transpose.kernel_size)
         self._s = _to3(self.conv_transpose.stride)
         self._p = _to3(self.conv_transpose.padding)
@@ -72,36 +76,52 @@ class ModelNew(nn.Module):
         n_elements = out.numel()
 
         # Choose larger blocks to reduce CTA count and launch overhead on H200
-        if n_elements >= (1 << 22):      # >= 4,194,304
+        if n_elements >= (1 << 22):  # >= 4,194,304
             BLOCK = 131072
             num_warps = 8
-        elif n_elements >= (1 << 20):    # >= 1,048,576
+        elif n_elements >= (1 << 20):  # >= 1,048,576
             BLOCK = 65536
             num_warps = 8
-        elif n_elements >= (1 << 18):    # >= 262,144
+        elif n_elements >= (1 << 18):  # >= 262,144
             BLOCK = 32768
             num_warps = 8
-        elif n_elements >= (1 << 16):    # >= 65,536
+        elif n_elements >= (1 << 16):  # >= 65,536
             BLOCK = 16384
             num_warps = 4
         else:
             BLOCK = 4096
             num_warps = 4
 
-        grid = lambda META: (triton.cdiv(n_elements, META['BLOCK_SIZE']),)
-        _fill_const_kernel[grid](out, const_val, n_elements, BLOCK_SIZE=BLOCK, num_warps=num_warps, num_stages=1)
+        def grid(META):
+            return (triton.cdiv(n_elements, META['BLOCK_SIZE']), )
+
+        _fill_const_kernel[grid](out,
+                                 const_val,
+                                 n_elements,
+                                 BLOCK_SIZE=BLOCK,
+                                 num_warps=num_warps,
+                                 num_stages=1)
         return out
+
+
 batch_size = 16
-in_channels  = 16  
-out_channels = 64  
-depth = 32; height = width = 128  
-depth = 32; height = width = 128  
-kernel_size  = 3
-stride       = 1  
+in_channels = 16
+out_channels = 64
+depth = 32
+height = width = 128
+depth = 32
+height = width = 128
+kernel_size = 3
+stride = 1
 padding = 1
 scaling_factor = 2.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, depth, height, width)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, scaling_factor]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding, scaling_factor
+    ]

@@ -18,7 +18,6 @@ import sys
 from pathlib import Path
 
 import torch
-import torch.nn as nn
 
 _DIR = Path(__file__).parent
 sys.path.insert(0, str(_DIR))
@@ -53,7 +52,11 @@ _PROVIDERS = [
     ("optimized", "Optimized Triton"),
 ]
 _VARIANTS = [(k, n) for k, n in _PROVIDERS if k != "torch_ref"]
-_MODS = {"baseline1": _baseline1, "baseline2": _baseline2, "optimized": _optimized}
+_MODS = {
+    "baseline1": _baseline1,
+    "baseline2": _baseline2,
+    "optimized": _optimized
+}
 
 
 def hinge_loss_torch(pred, targ):
@@ -69,12 +72,12 @@ def _run_provider(key, pred, targ):
 
 SHAPES = [
     # (label, N) — labels must contain NO spaces (parser splits on whitespace)
-    ("tiny",   512),      # direct single-tile (N <= BLOCK)
-    ("small",  4096),     # multi-tile, power-of-2
-    ("medium", 32768),    # reference shape
-    ("large",  131072),   # stress test
-    ("nopow2", 5000),     # non-power-of-2 edge case
-    ("bench",  32768),    # benchmark shape
+    ("tiny", 512),  # direct single-tile (N <= BLOCK)
+    ("small", 4096),  # multi-tile, power-of-2
+    ("medium", 32768),  # reference shape
+    ("large", 131072),  # stress test
+    ("nopow2", 5000),  # non-power-of-2 edge case
+    ("bench", 32768),  # benchmark shape
 ]
 
 
@@ -92,7 +95,7 @@ def test_correctness():
     for label, N in SHAPES:
         torch.manual_seed(42)
         pred = (torch.rand(N, device="npu", dtype=torch.float32) * 2 - 1)
-        targ = (torch.randint(0, 2, (N,), device="npu").float() * 2 - 1)
+        targ = (torch.randint(0, 2, (N, ), device="npu").float() * 2 - 1)
         ref = hinge_loss_torch(pred, targ).item()
 
         cells = []
@@ -104,7 +107,8 @@ def test_correctness():
                 ok = diff < 1e-3 + 1e-3 * abs(ref)
             except Exception as e:
                 ok = False
-                cells.append(f"{name}=[ERROR:{type(e).__name__}: {str(e)[:50]}]")
+                cells.append(
+                    f"{name}=[ERROR:{type(e).__name__}: {str(e)[:50]}]")
                 all_pass = False
                 continue
             cells.append(f"{name}=[{'PASS' if ok else 'FAIL'} {diff:.2e}]")
@@ -132,13 +136,12 @@ def test_correctness():
         ylabel="Latency (ms)",
         plot_name="hinge_loss_benchmark",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     _, N = next(s for s in SHAPES if s[0] == label)
     torch.manual_seed(42)
     pred = (torch.rand(N, device="npu", dtype=torch.float32) * 2 - 1)
-    targ = (torch.randint(0, 2, (N,), device="npu").float() * 2 - 1)
+    targ = (torch.randint(0, 2, (N, ), device="npu").float() * 2 - 1)
     try:
         return do_bench(lambda: _run_provider(provider, pred, targ),
                         quantiles=[0.5, 0.2, 0.8])[0]

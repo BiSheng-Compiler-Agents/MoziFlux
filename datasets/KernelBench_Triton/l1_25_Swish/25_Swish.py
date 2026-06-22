@@ -22,9 +22,10 @@ class ModelNew(nn.Module):
     """
     Simple model that performs a Swish activation.
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Applies Swish activation to the input tensor.
@@ -41,7 +42,8 @@ class ModelNew(nn.Module):
         if x.dtype not in supported_dtypes:
             raise RuntimeError(f"Unsupported dtype for ModelNew: {x.dtype}")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked inputs")
 
         x_contig = x.contiguous()
         n_elements = x_contig.numel()
@@ -52,7 +54,9 @@ class ModelNew(nn.Module):
         block_size = 4096
         num_warps = 8
 
-        grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
+        def grid(meta):
+            return (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
+
         _swish_kernel[grid](
             x_contig,
             y,
@@ -63,11 +67,16 @@ class ModelNew(nn.Module):
         )
 
         return y
+
+
 batch_size = 4096
 dim = 393216
+
 
 def get_inputs():
     x = torch.rand(batch_size, dim)
     return [x]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

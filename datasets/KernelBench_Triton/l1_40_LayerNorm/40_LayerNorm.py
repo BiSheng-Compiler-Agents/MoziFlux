@@ -85,10 +85,12 @@ def _layernorm_apply_kernel(
     tl.store(y_ptr + idx, y, mask=mask)
 
 
-def _layer_norm_triton(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, normalized_shape: tuple, eps: float):
+def _layer_norm_triton(x: torch.Tensor, weight: torch.Tensor,
+                       bias: torch.Tensor, normalized_shape: tuple,
+                       eps: float):
     # Flatten to (rows, M)
     if isinstance(normalized_shape, int):
-        normalized_shape = (normalized_shape,)
+        normalized_shape = (normalized_shape, )
     M = math.prod(normalized_shape)
     rows = x.numel() // M
 
@@ -119,10 +121,18 @@ def _layer_norm_triton(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
 
     # Pass 2: compute mean and rstd per row
     inv_m = float(1.0 / M)
-    _layernorm_stats_kernel[(rows,)](sums, sumsq, mean, rstd, inv_m, float(eps))
+    _layernorm_stats_kernel[(rows, )](sums, sumsq, mean, rstd, inv_m,
+                                      float(eps))
 
     # Pass 3: apply normalization + affine
-    _layernorm_apply_kernel[grid_2d](x_in, w, b, mean, rstd, y_out, M, BLOCK_SIZE=BLOCK)
+    _layernorm_apply_kernel[grid_2d](x_in,
+                                     w,
+                                     b,
+                                     mean,
+                                     rstd,
+                                     y_out,
+                                     M,
+                                     BLOCK_SIZE=BLOCK)
 
     return y_out.view_as(x)
 
@@ -143,24 +153,33 @@ class ModelNew(nn.Module):
     """
     LayerNorm implemented with a fast Triton kernel. Matches torch.nn.LayerNorm semantics.
     """
+
     def __init__(self, normalized_shape: tuple):
         super(ModelNew, self).__init__()
         if isinstance(normalized_shape, int):
-            normalized_shape = (normalized_shape,)
+            normalized_shape = (normalized_shape, )
         self.normalized_shape = tuple(normalized_shape)
-        self.weight = nn.Parameter(torch.ones(self.normalized_shape, dtype=torch.float32))
-        self.bias = nn.Parameter(torch.zeros(self.normalized_shape, dtype=torch.float32))
+        self.weight = nn.Parameter(
+            torch.ones(self.normalized_shape, dtype=torch.float32))
+        self.bias = nn.Parameter(
+            torch.zeros(self.normalized_shape, dtype=torch.float32))
         self.eps = 1e-5
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return layer_norm(x, self.weight, self.bias, self.normalized_shape, self.eps)
+        return layer_norm(x, self.weight, self.bias, self.normalized_shape,
+                          self.eps)
+
+
 batch_size = 16
 features = 64
 dim1 = 256
 dim2 = 256
 
+
 def get_inputs():
     x = torch.rand(batch_size, features, dim1, dim2)
     return [x]
+
+
 def get_init_inputs():
     return [(features, dim1, dim2)]

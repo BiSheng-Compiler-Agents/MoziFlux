@@ -6,10 +6,14 @@ import triton.language as tl
 
 @triton.jit
 def _l1norm_row_kernel(
-    x_ptr, y_ptr,
-    B, N,
-    stride_xm, stride_xn,
-    stride_ym, stride_yn,
+    x_ptr,
+    y_ptr,
+    B,
+    N,
+    stride_xm,
+    stride_xn,
+    stride_ym,
+    stride_yn,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     UNROLL: tl.constexpr,
@@ -24,13 +28,16 @@ def _l1norm_row_kernel(
 
     x_row_ptr = x_ptr + rows[:, None] * stride_xm
     y_row_ptr = y_ptr + rows[:, None] * stride_ym
-    acc = tl.zeros((BLOCK_M,), dtype=tl.float32)
+    acc = tl.zeros((BLOCK_M, ), dtype=tl.float32)
     start = 0
     while start < N:
         offs0 = start + cols
         tl.multiple_of(offs0, 8)
         mask0 = row_mask & (offs0[None, :] < N)
-        x0 = tl.load(x_row_ptr + offs0[None, :] * stride_xn, mask=mask0, other=0.0, cache_modifier=".cg")
+        x0 = tl.load(x_row_ptr + offs0[None, :] * stride_xn,
+                     mask=mask0,
+                     other=0.0,
+                     cache_modifier=".cg")
         acc += tl.sum(tl.abs(x0.to(tl.float32)), axis=1)
 
         if UNROLL > 1:
@@ -61,7 +68,10 @@ def _l1norm_row_kernel(
             other=0.0,
             cache_modifier=".cg",
         ).to(tl.float32)
-        tl.store(y_row_ptr + offs0[None, :] * stride_yn, x0 * inv[:, None], mask=mask0, eviction_policy="evict_last")
+        tl.store(y_row_ptr + offs0[None, :] * stride_yn,
+                 x0 * inv[:, None],
+                 mask=mask0,
+                 eviction_policy="evict_last")
 
         if UNROLL > 1:
             offs1 = offs0 + BLOCK_N
@@ -87,6 +97,7 @@ class ModelNew(nn.Module):
     """
     Performs row-wise L1 normalization with a Triton kernel on Ascend NPU.
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -96,7 +107,8 @@ class ModelNew(nn.Module):
         if x.ndim != 2:
             raise ValueError("ModelNew expects a 2D tensor")
         if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-            raise TypeError("ModelNew supports float16, bfloat16, and float32 inputs")
+            raise TypeError(
+                "ModelNew supports float16, bfloat16, and float32 inputs")
 
         B, N = x.shape
         x_contig = x.contiguous()
@@ -124,21 +136,30 @@ class ModelNew(nn.Module):
 
         BLOCK_M = min(BLOCK_M, max(B, 1))
 
-        _l1norm_row_kernel[(triton.cdiv(B, BLOCK_M),)](
-            x_contig, y,
-            B, N,
-            stride_xm, stride_xn,
-            stride_ym, stride_yn,
+        _l1norm_row_kernel[(triton.cdiv(B, BLOCK_M), )](
+            x_contig,
+            y,
+            B,
+            N,
+            stride_xm,
+            stride_xn,
+            stride_ym,
+            stride_yn,
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
             UNROLL=UNROLL,
         )
         return y
+
+
 batch_size = 32768
 dim = 65535
+
 
 def get_inputs():
     x = torch.rand(batch_size, dim)
     return [x]
+
+
 def get_init_inputs():
     return []

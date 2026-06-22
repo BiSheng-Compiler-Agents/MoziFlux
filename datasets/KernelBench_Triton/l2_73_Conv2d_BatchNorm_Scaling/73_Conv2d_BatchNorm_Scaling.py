@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 
-
 batch_size = 128
 in_channels = 3
 out_channels = 16
@@ -33,20 +32,24 @@ def _scale_triton(x: torch.Tensor, scale: float) -> torch.Tensor:
     y = torch.empty_like(x_contig)
     n_elements = x_contig.numel()
     BLOCK_SIZE = 16384
-    grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-    _scale_kernel[grid](
-        x_contig, y, scale, n_elements, BLOCK_SIZE=BLOCK_SIZE, num_warps=8, num_stages=2
-    )
+
+    def grid(meta):
+        return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]), )
+
+    _scale_kernel[grid](x_contig,
+                        y,
+                        scale,
+                        n_elements,
+                        BLOCK_SIZE=BLOCK_SIZE,
+                        num_warps=8,
+                        num_stages=2)
     return y
 
 
 @triton.jit
-def _bn_fuse_params_kernel(
-    mean_ptr, var_ptr, gamma_ptr, beta_ptr, convb_ptr,
-    g_out_ptr, b_out_ptr,
-    eps, scale, n_elements,
-    BLOCK_SIZE: tl.constexpr
-):
+def _bn_fuse_params_kernel(mean_ptr, var_ptr, gamma_ptr, beta_ptr, convb_ptr,
+                           g_out_ptr, b_out_ptr, eps, scale, n_elements,
+                           BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     tl.multiple_of(offs, 8)
@@ -79,7 +82,8 @@ def _bn_fuse_params_triton(
     eps: float,
     scale: float,
 ):
-    if any(t.device.type != "npu" for t in (running_mean, running_var, gamma, beta, conv_bias)):
+    if any(t.device.type != "npu"
+           for t in (running_mean, running_var, gamma, beta, conv_bias)):
         raise RuntimeError("_bn_fuse_params_triton expects Ascend NPU tensors")
     C = running_mean.numel()
     rm = running_mean.contiguous()
@@ -90,13 +94,22 @@ def _bn_fuse_params_triton(
     g_out = torch.empty_like(ga)
     b_out = torch.empty_like(be)
     BLOCK_SIZE = 128
-    grid = lambda meta: (triton.cdiv(C, meta["BLOCK_SIZE"]),)
-    _bn_fuse_params_kernel[grid](
-        rm, rv, ga, be, cb,
-        g_out, b_out,
-        float(eps), float(scale), C,
-        BLOCK_SIZE=BLOCK_SIZE, num_warps=1
-    )
+
+    def grid(meta):
+        return (triton.cdiv(C, meta["BLOCK_SIZE"]), )
+
+    _bn_fuse_params_kernel[grid](rm,
+                                 rv,
+                                 ga,
+                                 be,
+                                 cb,
+                                 g_out,
+                                 b_out,
+                                 float(eps),
+                                 float(scale),
+                                 C,
+                                 BLOCK_SIZE=BLOCK_SIZE,
+                                 num_warps=1)
     return g_out, b_out
 
 
@@ -109,6 +122,7 @@ class ModelNew(nn.Module):
         by precomputing per-channel fused scale/bias on GPU via a tiny Triton kernel.
       - Fallback Triton kernel for full-tensor scaling remains available but is avoided in common paths.
     """
+
     def __init__(
         self,
         in_channels=in_channels,
@@ -140,19 +154,23 @@ class ModelNew(nn.Module):
 
             running_mean = self.bn.running_mean.to(dtype=dtype)
             running_var = self.bn.running_var.to(dtype=dtype)
-            conv_bias = B if B is not None else torch.zeros(C, device=device, dtype=dtype)
+            conv_bias = B if B is not None else torch.zeros(
+                C, device=device, dtype=dtype)
 
             # Compute per-channel fused scale and bias with Triton
-            g, b = _bn_fuse_params_triton(
-                running_mean, running_var, gamma, beta, conv_bias, self.bn.eps, float(self.scaling_factor)
-            )
+            g, b = _bn_fuse_params_triton(running_mean, running_var, gamma,
+                                          beta, conv_bias, self.bn.eps,
+                                          float(self.scaling_factor))
 
             # Fold into conv weights/bias and run a single conv
             W_fused = W * g.view(-1, 1, 1, 1)
-            y = F.conv2d(
-                x, W_fused, b, stride=self.conv.stride, padding=self.conv.padding,
-                dilation=self.conv.dilation, groups=self.conv.groups
-            )
+            y = F.conv2d(x,
+                         W_fused,
+                         b,
+                         stride=self.conv.stride,
+                         padding=self.conv.padding,
+                         dilation=self.conv.dilation,
+                         groups=self.conv.groups)
             return y
 
         # Training or non-tracked path: fold final scaling into BN's affine or functional weight.
@@ -184,8 +202,8 @@ class ModelNew(nn.Module):
             C = self.bn.num_features
             device = x.device
             dtype = x.dtype
-            fused_weight = torch.full((C,), s, device=device, dtype=dtype)
-            fused_bias = torch.zeros((C,), device=device, dtype=dtype)
+            fused_weight = torch.full((C, ), s, device=device, dtype=dtype)
+            fused_bias = torch.zeros((C, ), device=device, dtype=dtype)
             x = F.batch_norm(
                 x,
                 running_mean=running_mean,
@@ -197,6 +215,8 @@ class ModelNew(nn.Module):
                 eps=self.bn.eps,
             )
             return x
+
+
 batch_size = 128
 in_channels = 8
 out_channels = 64
@@ -204,7 +224,10 @@ height, width = 128, 128
 kernel_size = 3
 scaling_factor = 2.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, scaling_factor]

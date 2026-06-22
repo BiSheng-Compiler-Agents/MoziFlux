@@ -6,7 +6,9 @@ import triton.language as tl
 
 @triton.jit
 def _smooth_l1_mean_atomic_kernel(
-    pred_ptr, tgt_ptr, out_mean_ptr,
+    pred_ptr,
+    tgt_ptr,
+    out_mean_ptr,
     n_elements,
     inv_n,
     beta: tl.constexpr,
@@ -42,7 +44,9 @@ def _smooth_l1_mean_atomic_kernel(
     tl.atomic_add(out_mean_ptr, acc * inv_n)
 
 
-def smooth_l1_loss_triton(predictions: torch.Tensor, targets: torch.Tensor, beta: float = 1.0):
+def smooth_l1_loss_triton(predictions: torch.Tensor,
+                          targets: torch.Tensor,
+                          beta: float = 1.0):
     assert predictions.shape == targets.shape, "predictions and targets must have the same shape"
     assert hasattr(torch, "npu"), "torch.npu is required for this operator"
     assert predictions.device.type == "npu", "predictions must be on NPU"
@@ -59,10 +63,12 @@ def smooth_l1_loss_triton(predictions: torch.Tensor, targets: torch.Tensor, beta
     inv_n = 1.0 / n_elements
 
     BLOCK_SIZE = 262144
-    grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
+    grid = (triton.cdiv(n_elements, BLOCK_SIZE), )
 
     _smooth_l1_mean_atomic_kernel[grid](
-        preds, tgts, out_mean,
+        preds,
+        tgts,
+        out_mean,
         n_elements,
         inv_n,
         beta,
@@ -74,6 +80,7 @@ def smooth_l1_loss_triton(predictions: torch.Tensor, targets: torch.Tensor, beta
 
 
 class ModelNew(nn.Module):
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -82,13 +89,16 @@ class ModelNew(nn.Module):
 
 
 batch_size = 32768
-input_shape = (32768,)
+input_shape = (32768, )
 dim = 1
 
 
 def get_inputs():
     scale = torch.rand(())
-    return [torch.rand(batch_size, *input_shape) * scale, torch.rand(batch_size, *input_shape)]
+    return [
+        torch.rand(batch_size, *input_shape) * scale,
+        torch.rand(batch_size, *input_shape)
+    ]
 
 
 def get_init_inputs():

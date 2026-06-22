@@ -162,14 +162,23 @@ def _matmul_a_bt_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     out_dtype = A_.dtype
     C = torch.empty((M, N), device=A_.device, dtype=out_dtype)
 
-    grid = lambda META: (triton.cdiv(M, META["BLOCK_M"]), triton.cdiv(N, META["BLOCK_N"]))
+    def grid(META):
+        return (triton.cdiv(M,
+                            META["BLOCK_M"]), triton.cdiv(N, META["BLOCK_N"]))
 
     _a_bt_matmul_kernel[grid](
-        A_, Bt_, C,
-        M, N, K,
-        A_.stride(0), A_.stride(1),
-        Bt_.stride(0), Bt_.stride(1),
-        C.stride(0), C.stride(1),
+        A_,
+        Bt_,
+        C,
+        M,
+        N,
+        K,
+        A_.stride(0),
+        A_.stride(1),
+        Bt_.stride(0),
+        Bt_.stride(1),
+        C.stride(0),
+        C.stride(1),
     )
     return C
 
@@ -178,9 +187,10 @@ class ModelNew(nn.Module):
     """
     Simple model that performs a single matrix multiplication (C = A * B)
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
-    
+
     def forward(self, A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
         """
         Performs C = A @ B.T for A shaped (M, K) and B shaped (N, K).
@@ -196,13 +206,18 @@ class ModelNew(nn.Module):
         if A.dtype not in (torch.float16, torch.bfloat16):
             raise ValueError("Only float16 and bfloat16 inputs are supported")
         return _matmul_a_bt_triton(A, B)
+
+
 M = 1024 * 2
 K = 4096 * 2
 N = 2048 * 2
+
 
 def get_inputs():
     A = torch.rand(M, K)
     B = torch.rand(N, K)
     return [A, B]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

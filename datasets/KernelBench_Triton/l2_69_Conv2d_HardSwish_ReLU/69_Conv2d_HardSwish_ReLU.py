@@ -4,7 +4,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_CHANNELS = 8
 DEFAULT_OUT_CHANNELS = 64
@@ -44,6 +43,7 @@ class ModelNew(nn.Module):
     """
     Model that performs a convolution, applies HardSwish, and then ReLU.
     """
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -55,9 +55,11 @@ class ModelNew(nn.Module):
 
     def _fused_hardswish_relu_triton(self, x: torch.Tensor) -> torch.Tensor:
         if not _is_npu_tensor(x):
-            raise RuntimeError("ModelNew expects Ascend NPU tensors for the Triton path")
+            raise RuntimeError(
+                "ModelNew expects Ascend NPU tensors for the Triton path")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
         if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
             raise RuntimeError(
                 f"ModelNew supports float16, bfloat16, and float32 inputs, got {x.dtype}"
@@ -78,7 +80,9 @@ class ModelNew(nn.Module):
             BLOCK_SIZE = 2048
             num_warps = 4
 
-        grid = lambda META: (triton.cdiv(n_elements, META["BLOCK_SIZE"]),)
+        def grid(META):
+            return (triton.cdiv(n_elements, META["BLOCK_SIZE"]), )
+
         y = torch.empty_like(x_in)
         _hswish_relu_kernel[grid](
             x_in,
@@ -117,7 +121,10 @@ out_channels = 64
 height, width = 128, 128
 kernel_size = 3
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size]

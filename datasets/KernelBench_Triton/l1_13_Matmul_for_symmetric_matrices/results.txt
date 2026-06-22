@@ -1,0 +1,38 @@
+TEST N32 baseline1: PASS max_abs=0
+TEST N32 baseline2: PASS max_abs=0
+TEST N32 optimized: PASS max_abs=0
+TEST N128 baseline1: PASS max_abs=0
+TEST N128 baseline2: PASS max_abs=0
+TEST N128 optimized: PASS max_abs=0
+TEST N256 baseline1: PASS max_abs=0
+TEST N256 baseline2: PASS max_abs=0
+TEST N256 optimized: PASS max_abs=0
+TEST N512 baseline1: PASS max_abs=0
+TEST N512 baseline2: PASS max_abs=0
+TEST N512 optimized: PASS max_abs=0
+TEST N1024 baseline1: PASS max_abs=0
+TEST N1024 baseline2: PASS max_abs=0
+TEST N1024 optimized: PASS max_abs=0
+TEST N2048 baseline1: PASS max_abs=0.00195312
+TEST N2048 baseline2: PASS max_abs=0.00195312
+TEST N2048 optimized: PASS max_abs=0.00195312
+TEST benchmark baseline1: PASS max_abs=0.0065918
+TEST benchmark baseline2: INFO AttributeError: module 'triton.language' has no attribute 'compile_hint'
+TEST benchmark optimized: PASS max_abs=0.0065918
+TEST N8192 baseline1: INFO coreDim would exceed Ascend 65535; benchmark returns inf
+TEST N8192 baseline2: INFO coreDim would exceed Ascend 65535; benchmark returns inf
+TEST N8192 optimized: PASS max_abs=0.0246582
+UNIT_TEST PASS
+BENCH benchmark baseline2: INFO AttributeError: module 'triton.language' has no attribute 'compile_hint'
+BENCH N8192 baseline1: INFO coreDim would exceed Ascend 65535; returning inf
+BENCH N8192 baseline2: INFO coreDim would exceed Ascend 65535; returning inf
+symmetric_matmul_performance:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0        N32       0.002735          0.136562          0.136272          0.001763
+1       N128       0.003412          0.137824          0.135032          0.003757
+2       N256       0.005961          0.132829          0.141716          0.006160
+3       N512       0.018188          0.178753          0.183995          0.023075
+4      N1024       0.104586          0.517750          0.522550          0.128275
+5      N2048       0.771776          2.993475          2.985354          0.890665
+6  benchmark       5.858850         24.801809               inf          6.877185
+7      N8192      47.060081               inf               inf         54.502300

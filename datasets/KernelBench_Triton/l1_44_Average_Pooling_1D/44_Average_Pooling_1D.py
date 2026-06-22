@@ -1,10 +1,8 @@
-import math
 import torch
 import torch.nn as nn
 import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
-
 
 DEFAULT_KERNEL_SIZE = 8
 DEFAULT_STRIDE = 1
@@ -65,6 +63,7 @@ class ModelNew(nn.Module):
     Simple model that performs 1D Average Pooling using a Triton kernel.
     Semantics match nn.AvgPool1d with count_include_pad=True and ceil_mode=False.
     """
+
     def __init__(
         self,
         kernel_size: int = DEFAULT_KERNEL_SIZE,
@@ -82,16 +81,18 @@ class ModelNew(nn.Module):
         if x.dtype not in (torch.float16, torch.float32, torch.bfloat16):
             raise RuntimeError(
                 f"Unsupported dtype for ModelNew: {x.dtype}. "
-                "Supported dtypes are float16, float32, and bfloat16."
-            )
+                "Supported dtypes are float16, float32, and bfloat16.")
         if x.ndim != 3:
             raise RuntimeError(
                 f"ModelNew expects a 3D tensor shaped [batch, channels, length], got {tuple(x.shape)}"
             )
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked inputs")
         if self.kernel_size <= 0 or self.stride <= 0 or self.padding < 0:
-            raise RuntimeError("kernel_size and stride must be positive, and padding must be non-negative")
+            raise RuntimeError(
+                "kernel_size and stride must be positive, and padding must be non-negative"
+            )
 
         # Ensure contiguous memory for predictable strides
         x = x.contiguous()
@@ -119,7 +120,7 @@ class ModelNew(nn.Module):
             num_warps = 4
 
         n_col_blocks = triton.cdiv(L_out, BLOCK)
-        grid = (N_ROWS,)
+        grid = (N_ROWS, )
         avgpool1d_forward_kernel[grid](
             x2,
             y2,
@@ -151,6 +152,8 @@ def avg_pool1d(
         stride=stride,
         padding=padding,
     )(x)
+
+
 batch_size = 64
 in_channels = 128
 input_length = 65536
@@ -158,8 +161,11 @@ kernel_size = 8
 stride = 1
 padding = 4
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, input_length)
     return [x]
+
+
 def get_init_inputs():
     return [kernel_size, stride, padding]

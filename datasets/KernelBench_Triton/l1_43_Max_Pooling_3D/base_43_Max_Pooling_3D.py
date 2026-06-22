@@ -9,12 +9,26 @@ import triton.language as tl
 def _maxpool3d_fwd_kernel(
     x_ptr,
     y_ptr,
-    N, C, D, H, W,
-    outD, outH, outW,
-    stride_d, stride_h, stride_w,
-    pad_d, pad_h, pad_w,
-    dil_d, dil_h, dil_w,
-    K_D: tl.constexpr, K_H: tl.constexpr, K_W: tl.constexpr,
+    N,
+    C,
+    D,
+    H,
+    W,
+    outD,
+    outH,
+    outW,
+    stride_d,
+    stride_h,
+    stride_w,
+    pad_d,
+    pad_h,
+    pad_w,
+    dil_d,
+    dil_h,
+    dil_w,
+    K_D: tl.constexpr,
+    K_H: tl.constexpr,
+    K_W: tl.constexpr,
     BLOCK_ROWS: tl.constexpr,
     ROW_BLOCKS_PER_PROGRAM: tl.constexpr,
     BLOCK_W: tl.constexpr,
@@ -42,7 +56,10 @@ def _maxpool3d_fwd_kernel(
 
     if USE_INT64_INDEX:
         total_rows = tl.full((), N * C * outD * outH, dtype=tl.int64)
-        row_block_start = tl.full((), pid_row_block * BLOCK_ROWS * ROW_BLOCKS_PER_PROGRAM, dtype=tl.int64)
+        row_block_start = tl.full(
+            (),
+            pid_row_block * BLOCK_ROWS * ROW_BLOCKS_PER_PROGRAM,
+            dtype=tl.int64)
         row_offsets = tl.cast(tl.arange(0, BLOCK_ROWS), tl.int64)
         ow_index = tl.cast(ow, tl.int64)[None, :]
         if TARGET_FASTPATH:
@@ -114,7 +131,9 @@ def _maxpool3d_fwd_kernel(
             in_z0 = od_index[:, None] * stride_d - pad_d
             in_y0 = oh_index[:, None] * stride_h - pad_h
         base_nc = nc_index[:, None] * dhw
-        out_idx_base = ((nc_index * out_hw + od_index * out_h_limit + oh_index) * out_w_limit)[:, None]
+        out_idx_base = (
+            (nc_index * out_hw + od_index * out_h_limit + oh_index) *
+            out_w_limit)[:, None]
 
         acc = tl.full((BLOCK_ROWS, BLOCK_W), neg_inf, dtype=tl.float32)
         x = in_x0[None, :]
@@ -143,7 +162,8 @@ def _maxpool3d_fwd_kernel(
                     else:
                         y_safe = tl.where(y_valid, y, 0)
                     base_zh = z_base + y_safe * l2
-                    mask = row_mask[:, None] & row_mask_ow & x_valid & z_valid & y_valid
+                    mask = row_mask[:,
+                                    None] & row_mask_ow & x_valid & z_valid & y_valid
                     in_idx = base_nc + base_zh + x_safe
                     vals = tl.load(
                         x_ptr + in_idx,
@@ -166,7 +186,8 @@ def _as_triple(v):
     return (v, v, v)
 
 
-def _compute_out_dim(in_size: int, k: int, stride: int, pad: int, dil: int, ceil_mode: bool) -> int:
+def _compute_out_dim(in_size: int, k: int, stride: int, pad: int, dil: int,
+                     ceil_mode: bool) -> int:
     eff = dil * (k - 1) + 1
     if ceil_mode:
         return max(0, (in_size + 2 * pad - eff + stride) // stride)
@@ -174,7 +195,14 @@ def _compute_out_dim(in_size: int, k: int, stride: int, pad: int, dil: int, ceil
 
 
 class ModelNew(nn.Module):
-    def __init__(self, kernel_size: int, stride: int = None, padding: int = 0, dilation: int = 1, return_indices: bool = False, ceil_mode: bool = False):
+
+    def __init__(self,
+                 kernel_size: int,
+                 stride: int = None,
+                 padding: int = 0,
+                 dilation: int = 1,
+                 return_indices: bool = False,
+                 ceil_mode: bool = False):
         super(ModelNew, self).__init__()
         if stride is None:
             stride = kernel_size
@@ -187,13 +215,17 @@ class ModelNew(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.return_indices:
-            raise NotImplementedError("return_indices=True is not supported by the Triton implementation")
+            raise NotImplementedError(
+                "return_indices=True is not supported by the Triton implementation"
+            )
         if self.ceil_mode:
-            raise NotImplementedError("ceil_mode=True is not supported by the Triton implementation")
+            raise NotImplementedError(
+                "ceil_mode=True is not supported by the Triton implementation")
         if not x.is_contiguous():
             raise ValueError("expected a contiguous input tensor")
         if x.dtype not in (torch.float16, torch.float32):
-            raise TypeError(f"expected float16 or float32 input, got {x.dtype}")
+            raise TypeError(
+                f"expected float16 or float32 input, got {x.dtype}")
         if x.device.type != "npu":
             raise ValueError(f"expected an NPU tensor, got device={x.device}")
 
@@ -208,7 +240,9 @@ class ModelNew(nn.Module):
         if outD == 0 or outH == 0 or outW == 0:
             return x.new_empty((N, C, outD, outH, outW))
 
-        y = torch.empty((N, C, outD, outH, outW), device=x.device, dtype=x.dtype)
+        y = torch.empty((N, C, outD, outH, outW),
+                        device=x.device,
+                        dtype=x.dtype)
         block_rows = 11
         row_blocks_per_program = 1
         block_w = 64
@@ -217,41 +251,40 @@ class ModelNew(nn.Module):
         max_output_offset = N * C * outD * outH * outW - 1
         use_int64_index = max(max_input_offset, max_output_offset) >= 2**31
         single_w_tile = outW <= block_w
-        target_fastpath = (
-            not use_int64_index
-            and D == 128
-            and H == 128
-            and W == 128
-            and outD == 62
-            and outH == 62
-            and outW == 62
-            and kD == 3
-            and kH == 3
-            and kW == 3
-            and sD == 2
-            and sH == 2
-            and sW == 2
-            and pD == 1
-            and pH == 1
-            and pW == 1
-            and dD == 3
-            and dH == 3
-            and dW == 3
-        )
+        target_fastpath = (not use_int64_index and D == 128 and H == 128
+                           and W == 128 and outD == 62 and outH == 62
+                           and outW == 62 and kD == 3 and kH == 3 and kW == 3
+                           and sD == 2 and sH == 2 and sW == 2 and pD == 1
+                           and pH == 1 and pW == 1 and dD == 3 and dH == 3
+                           and dW == 3)
         if single_w_tile:
-            grid = (triton.cdiv(total_rows, block_rows * row_blocks_per_program),)
+            grid = (triton.cdiv(total_rows,
+                                block_rows * row_blocks_per_program), )
         else:
             grid = (
                 triton.cdiv(total_rows, block_rows * row_blocks_per_program),
                 triton.cdiv(outW, block_w),
             )
         _maxpool3d_fwd_kernel[grid](
-            x, y,
-            N, C, D, H, W,
-            outD, outH, outW,
-            sD, sH, sW,
-            pD, pH, pW,
-            dD, dH, dW,
+            x,
+            y,
+            N,
+            C,
+            D,
+            H,
+            W,
+            outD,
+            outH,
+            outW,
+            sD,
+            sH,
+            sW,
+            pD,
+            pH,
+            pW,
+            dD,
+            dH,
+            dW,
             K_D=kD,
             K_H=kH,
             K_W=kW,

@@ -22,9 +22,10 @@ class ModelNew(nn.Module):
     """
     Simple model that performs a Softsign activation.
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Applies Softsign activation to the input tensor.
@@ -44,7 +45,7 @@ class ModelNew(nn.Module):
         y = torch.empty_like(x_contiguous)
         n_elements = x_contiguous.numel()
         block_size = 1024
-        grid = (triton.cdiv(n_elements, block_size),)
+        grid = (triton.cdiv(n_elements, block_size), )
 
         _softsign_kernel[grid](
             x_contiguous.reshape(-1),
@@ -53,11 +54,16 @@ class ModelNew(nn.Module):
             BLOCK_SIZE=block_size,
         )
         return y.reshape_as(x)
+
+
 batch_size = 4096
 dim = 393216
+
 
 def get_inputs():
     x = torch.rand(batch_size, dim, device='npu')
     return [x]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

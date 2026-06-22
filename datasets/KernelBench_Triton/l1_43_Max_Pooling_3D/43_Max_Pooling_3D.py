@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 
@@ -116,7 +115,8 @@ def _as_triple(v):
     return (v, v, v)
 
 
-def _compute_out_dim(in_size: int, k: int, stride: int, pad: int, dil: int, ceil_mode: bool) -> int:
+def _compute_out_dim(in_size: int, k: int, stride: int, pad: int, dil: int,
+                     ceil_mode: bool) -> int:
     # effective kernel size with dilation
     eff = dil * (k - 1) + 1
     if ceil_mode:
@@ -129,7 +129,14 @@ class ModelNew(nn.Module):
     """
     Simple model that performs Max Pooling 3D.
     """
-    def __init__(self, kernel_size: int, stride: int = None, padding: int = 0, dilation: int = 1, return_indices: bool = False, ceil_mode: bool = False):
+
+    def __init__(self,
+                 kernel_size: int,
+                 stride: int = None,
+                 padding: int = 0,
+                 dilation: int = 1,
+                 return_indices: bool = False,
+                 ceil_mode: bool = False):
         """
         Initializes the Max Pooling 3D layer.
         """
@@ -148,13 +155,17 @@ class ModelNew(nn.Module):
         Applies Max Pooling 3D to the input tensor.
         """
         if self.return_indices:
-            raise NotImplementedError("return_indices=True is not supported by the Triton implementation")
+            raise NotImplementedError(
+                "return_indices=True is not supported by the Triton implementation"
+            )
         if self.ceil_mode:
-            raise NotImplementedError("ceil_mode=True is not supported by the Triton implementation")
+            raise NotImplementedError(
+                "ceil_mode=True is not supported by the Triton implementation")
         if not x.is_contiguous():
             raise ValueError("expected a contiguous input tensor")
         if x.dtype not in (torch.float16, torch.float32):
-            raise TypeError(f"expected float16 or float32 input, got {x.dtype}")
+            raise TypeError(
+                f"expected float16 or float32 input, got {x.dtype}")
         if x.device.type != "npu":
             raise ValueError(f"expected an NPU tensor, got device={x.device}")
 
@@ -172,17 +183,36 @@ class ModelNew(nn.Module):
         if outD == 0 or outH == 0 or outW == 0:
             return x.new_empty((N, C, outD, outH, outW))
 
-        y = torch.empty((N, C, outD, outH, outW), device=x.device, dtype=x.dtype)
+        y = torch.empty((N, C, outD, outH, outW),
+                        device=x.device,
+                        dtype=x.dtype)
 
-        grid = lambda META: (N * C * outD * outH, triton.cdiv(outW, META["BLOCK_W"]))
+        def grid(META):
+            return (N * C * outD * outH, triton.cdiv(outW, META["BLOCK_W"]))
+
         _maxpool3d_fwd_kernel[grid](
-            x, y,
-            N, C, D, H, W,
-            outD, outH, outW,
-            sD, sH, sW,
-            pD, pH, pW,
-            dD, dH, dW,
-            K_D=kD, K_H=kH, K_W=kW,
+            x,
+            y,
+            N,
+            C,
+            D,
+            H,
+            W,
+            outD,
+            outH,
+            outW,
+            sD,
+            sH,
+            sW,
+            pD,
+            pH,
+            pW,
+            dD,
+            dH,
+            dW,
+            K_D=kD,
+            K_H=kH,
+            K_W=kW,
         )
         return y
 
@@ -212,6 +242,8 @@ def max_pool3d(
         return_indices=return_indices,
         ceil_mode=ceil_mode,
     )(x)
+
+
 batch_size = 16
 channels = 32
 dim1 = 128
@@ -222,8 +254,11 @@ stride = 2
 padding = 1
 dilation = 3
 
+
 def get_inputs():
     x = torch.rand(batch_size, channels, dim1, dim2, dim3)
     return [x]
+
+
 def get_init_inputs():
     return [kernel_size, stride, padding, dilation]

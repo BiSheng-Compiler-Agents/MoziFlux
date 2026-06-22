@@ -28,15 +28,17 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 
 if TRITON_AVAILABLE:
+
     @triton.jit
     def _lse_hswish_bias_clamp_kernel(
-        x_ptr,             # *const float
-        out_ptr,           # *float
-        min_bias_ptr,      # *const float (1 element)
-        M,                 # int32: total number of elements per (N*D*H*W)
-        STRIDE_C,          # int32: stride between channels (D*H*W)
-        C: tl.constexpr,   # number of channels to reduce over (compile-time constant)
-        BLOCK: tl.constexpr,  # block size along M
+            x_ptr,  # *const float
+            out_ptr,  # *float
+            min_bias_ptr,  # *const float (1 element)
+            M,  # int32: total number of elements per (N*D*H*W)
+            STRIDE_C,  # int32: stride between channels (D*H*W)
+            C: tl.
+        constexpr,  # number of channels to reduce over (compile-time constant)
+            BLOCK: tl.constexpr,  # block size along M
     ):
         pid = tl.program_id(axis=0)
         offs = pid * BLOCK + tl.arange(0, BLOCK)
@@ -46,15 +48,17 @@ if TRITON_AVAILABLE:
         neg_inf = -float("inf")
         base_ptr = x_ptr + offs
 
-        m = tl.full((BLOCK,), neg_inf, dtype=tl.float32)
+        m = tl.full((BLOCK, ), neg_inf, dtype=tl.float32)
         for c in tl.static_range(0, C):
-            v = tl.load(base_ptr + c * STRIDE_C, mask=mask, other=neg_inf).to(tl.float32)
+            v = tl.load(base_ptr + c * STRIDE_C, mask=mask,
+                        other=neg_inf).to(tl.float32)
             m = tl.maximum(m, v)
         m = tl.where(mask, m, 0.0)
 
-        s = tl.zeros((BLOCK,), dtype=tl.float32)
+        s = tl.zeros((BLOCK, ), dtype=tl.float32)
         for c in tl.static_range(0, C):
-            v = tl.load(base_ptr + c * STRIDE_C, mask=mask, other=neg_inf).to(tl.float32)
+            v = tl.load(base_ptr + c * STRIDE_C, mask=mask,
+                        other=neg_inf).to(tl.float32)
             s += tl.exp(v - m)
 
         lse = tl.where(mask, m + tl.log(s), 0.0)
@@ -78,6 +82,7 @@ class ModelNew(nn.Module):
         - subtract min(bias) and clamp,
         - result equals max over channels of clamp(h - bias_c) due to clamp monotonicity.
     """
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -88,17 +93,26 @@ class ModelNew(nn.Module):
         bias_shape=DEFAULT_BIAS_SHAPE,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding)
         self.bias = nn.Parameter(torch.randn(bias_shape))
 
     def forward(self, x):
         if not TRITON_AVAILABLE:
-            raise RuntimeError("Triton is required for ModelNew, but it is not available in this environment.")
+            raise RuntimeError(
+                "Triton is required for ModelNew, but it is not available in this environment."
+            )
         if not _is_npu_tensor(x):
-            raise RuntimeError(f"ModelNew requires NPU inputs, but received device={x.device}.")
+            raise RuntimeError(
+                f"ModelNew requires NPU inputs, but received device={x.device}."
+            )
 
         weight = self.conv_transpose.weight.to(dtype=x.dtype)
-        bias = None if self.conv_transpose.bias is None else self.conv_transpose.bias.to(dtype=x.dtype)
+        bias = None if self.conv_transpose.bias is None else self.conv_transpose.bias.to(
+            dtype=x.dtype)
         y = F.conv_transpose3d(
             x,
             weight,
@@ -110,32 +124,37 @@ class ModelNew(nn.Module):
             dilation=self.conv_transpose.dilation,
         )
         if not _is_npu_tensor(y):
-            raise RuntimeError(f"ConvTranspose3d output must stay on NPU, but received device={y.device}.")
+            raise RuntimeError(
+                f"ConvTranspose3d output must stay on NPU, but received device={y.device}."
+            )
 
         B, C, D, H, W = y.shape
         M = B * D * H * W
         y = y.contiguous()
         stride_c = y.stride(1)
-        out = torch.empty((B, 1, D, H, W), device=y.device, dtype=y.dtype).contiguous()
-        min_bias_t = self.bias.amin().reshape(1).to(device=y.device, dtype=y.dtype).contiguous()
+        out = torch.empty((B, 1, D, H, W), device=y.device,
+                          dtype=y.dtype).contiguous()
+        min_bias_t = self.bias.amin().reshape(1).to(
+            device=y.device, dtype=y.dtype).contiguous()
 
         # Launch Triton kernel
         def grid(meta):
-            return (triton.cdiv(M, meta["BLOCK"]),)
+            return (triton.cdiv(M, meta["BLOCK"]), )
 
         _lse_hswish_bias_clamp_kernel[grid](
-            y.view(-1),                # x_ptr
-            out.view(-1),              # out_ptr flattened
-            min_bias_t,                # min_bias_ptr
-            M,                         # total elements over (N*D*H*W)
-            stride_c,                  # stride between channels
-            C=C,                       # number of channels (constexpr)
-            BLOCK=1024,                # tuned block size
-            num_warps=8,               # more warps for H200 throughput
+            y.view(-1),  # x_ptr
+            out.view(-1),  # out_ptr flattened
+            min_bias_t,  # min_bias_ptr
+            M,  # total elements over (N*D*H*W)
+            stride_c,  # stride between channels
+            C=C,  # number of channels (constexpr)
+            BLOCK=1024,  # tuned block size
+            num_warps=8,  # more warps for H200 throughput
             num_stages=3,
         )
 
         return out
+
 
 batch_size = DEFAULT_BATCH_SIZE
 in_channels = DEFAULT_IN_CHANNELS
@@ -146,8 +165,12 @@ stride = DEFAULT_STRIDE
 padding = DEFAULT_PADDING
 bias_shape = DEFAULT_BIAS_SHAPE
 
+
 def get_inputs():
     return [torch.randn(batch_size, in_channels, depth, height, width)]
 
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, bias_shape]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding, bias_shape
+    ]

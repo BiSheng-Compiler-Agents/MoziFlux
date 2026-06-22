@@ -1,0 +1,18 @@
+TEST baseline1 batch1_target_norm PASS max_abs=2.14577e-06 max_rel=0.929265
+TEST baseline2 batch1_target_norm PASS max_abs=3.57628e-07 max_rel=0.206503
+TEST optimized batch1_target_norm PASS max_abs=2.38419e-07 max_rel=0.103252
+TEST baseline1 target PASS max_abs=6.4373e-06 max_rel=1.44518
+TEST baseline2 target PASS max_abs=7.15256e-07 max_rel=0.206517
+TEST optimized target PASS max_abs=7.15256e-07 max_rel=0.206456
+TEST optimized persistent_dispatch PASS max_abs=1.5378e-05 max_rel=8.63433e-06
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l1_40_LayerNorm_1782339354/40_LayerNorm.py:96: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y_out = torch.empty_like(x_in)
+layernorm-performance:
+                label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0  batch1_target_norm       0.699630          0.093534          0.141619          0.093807
+1              target       1.039973          0.779914          0.752659          0.761496
+
+/home/s00929845/kernel_verify/l1_40_LayerNorm_1782339354/40_LayerNorm.py:96: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y_out = torch.empty_like(x_in)

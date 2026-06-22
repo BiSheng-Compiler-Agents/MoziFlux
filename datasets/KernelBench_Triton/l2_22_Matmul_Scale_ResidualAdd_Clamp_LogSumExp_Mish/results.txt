@@ -1,0 +1,17 @@
+TEST baseline1 small_triton PASS max_abs=1.52588e-05
+TEST baseline2 small_triton PASS max_abs=1.90735e-05
+TEST optimized small_triton PASS max_abs=1.52588e-05
+TEST baseline1 medium_acl PASS max_abs=2.28882e-05
+TEST baseline2 medium_acl PASS max_abs=2.28882e-05
+TEST optimized medium_acl PASS max_abs=2.28882e-05
+TEST baseline1 target_acl PASS max_abs=2.28882e-05
+TEST baseline2 target_acl PASS max_abs=2.28882e-05
+TEST optimized target_acl PASS max_abs=0
+TEST optimized gridcap_acl PASS max_abs=0
+UNIT_TEST PASS
+
+matmul_scale_residual_lse_mish:
+          label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0  small_triton       0.047480          0.020534          0.018077          0.020070
+1    medium_acl       0.166260          0.147096          0.140203          0.146245
+2    target_acl       1.059926          1.145896          1.053282          1.054515

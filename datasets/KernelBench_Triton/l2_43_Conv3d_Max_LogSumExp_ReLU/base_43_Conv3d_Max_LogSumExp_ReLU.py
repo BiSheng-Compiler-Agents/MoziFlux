@@ -5,7 +5,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_IN_CHANNELS = 32
 DEFAULT_OUT_CHANNELS = 64
 DEFAULT_KERNEL_SIZE = 3
@@ -19,10 +18,24 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 @triton.jit
 def _pool_lse_relu_stream_kernel(
-    x_ptr, y_ptr, M, DO, HO, WO,
-    sxn, sxc, sxd, sxh, sxw,
-    syn, syc, syd, syh, syw,
-    C: tl.constexpr, BLOCK: tl.constexpr,
+    x_ptr,
+    y_ptr,
+    M,
+    DO,
+    HO,
+    WO,
+    sxn,
+    sxc,
+    sxd,
+    sxh,
+    sxw,
+    syn,
+    syc,
+    syd,
+    syh,
+    syw,
+    C: tl.constexpr,
+    BLOCK: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK + tl.arange(0, BLOCK)
@@ -63,9 +76,9 @@ def _pool_lse_relu_stream_kernel(
     o5 = sxd + sxw
     o6 = sxd + sxh
     o7 = sxd + sxh + sxw
-    neg_inf = tl.full((BLOCK,), float("-inf"), tl.float32)
+    neg_inf = tl.full((BLOCK, ), float("-inf"), tl.float32)
     m = neg_inf
-    s = tl.zeros((BLOCK,), dtype=tl.float32)
+    s = tl.zeros((BLOCK, ), dtype=tl.float32)
     p0 = x_ptr + base_x
     for c in tl.static_range(0, C):
         pc = p0 + c * sxc
@@ -96,16 +109,27 @@ def _pool_lse_relu_stream_kernel(
 def _pool_lse_relu_triton(x: torch.Tensor) -> torch.Tensor:
     assert x.ndim == 5
     if not _is_npu_tensor(x):
-        raise ValueError("_pool_lse_relu_triton requires an Ascend NPU tensor input")
+        raise ValueError(
+            "_pool_lse_relu_triton requires an Ascend NPU tensor input")
     pooled = torch.nn.functional.max_pool3d(x, kernel_size=2, stride=2)
     return _lse_relu_triton(pooled)
 
 
 @triton.jit
 def _lse_relu_reduce_c_kernel(
-    x_ptr, out_ptr, M, Z, Y, X,
-    stride_n, stride_c, stride_z, stride_y, stride_x,
-    C: tl.constexpr, BLOCK: tl.constexpr,
+    x_ptr,
+    out_ptr,
+    M,
+    Z,
+    Y,
+    X,
+    stride_n,
+    stride_c,
+    stride_z,
+    stride_y,
+    stride_x,
+    C: tl.constexpr,
+    BLOCK: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK + tl.arange(0, BLOCK)
@@ -132,9 +156,9 @@ def _lse_relu_reduce_c_kernel(
     YX64 = tl.full([], YX, tl.int64)
     X64 = tl.full([], X, tl.int64)
     base_out = n64 * ZYX64 + z64 * YX64 + y64 * X64 + x64
-    neg_inf = tl.full((BLOCK,), float("-inf"), tl.float32)
+    neg_inf = tl.full((BLOCK, ), float("-inf"), tl.float32)
     m = neg_inf
-    s = tl.zeros((BLOCK,), dtype=tl.float32)
+    s = tl.zeros((BLOCK, ), dtype=tl.float32)
 
     p = x_ptr + base_in
     for c in tl.static_range(0, C):
@@ -160,11 +184,24 @@ def _lse_relu_triton(x: torch.Tensor) -> torch.Tensor:
     out = torch.empty((N, 1, Z, Y, X), device=x.device, dtype=torch.float32)
     sN, sC, sZ, sY, sX = x.stride()
     M = N * Z * Y * X
-    grid = lambda META: (triton.cdiv(M, META["BLOCK"]),)
+
+    def grid(META):
+        return (triton.cdiv(M, META["BLOCK"]), )
+
     _lse_relu_reduce_c_kernel[grid](
-        x, out, M, Z, Y, X,
-        sN, sC, sZ, sY, sX,
-        C=C, BLOCK=64,
+        x,
+        out,
+        M,
+        Z,
+        Y,
+        X,
+        sN,
+        sC,
+        sZ,
+        sY,
+        sX,
+        C=C,
+        BLOCK=64,
     )
     if orig_dtype != torch.float32:
         out = out.to(orig_dtype)
@@ -172,6 +209,7 @@ def _lse_relu_triton(x: torch.Tensor) -> torch.Tensor:
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -181,12 +219,17 @@ class ModelNew(nn.Module):
         padding=DEFAULT_PADDING,
     ):
         super(ModelNew, self).__init__()
-        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        self.conv = nn.Conv3d(in_channels,
+                              out_channels,
+                              kernel_size,
+                              stride=stride,
+                              padding=padding)
 
     def forward(self, x):
         x = self.conv(x)
         if not _is_npu_tensor(x):
-            raise ValueError("ModelNew.forward requires Ascend NPU inputs and weights")
+            raise ValueError(
+                "ModelNew.forward requires Ascend NPU inputs and weights")
         return _pool_lse_relu_triton(x)
 
 

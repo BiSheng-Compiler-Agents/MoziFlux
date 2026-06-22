@@ -1,0 +1,34 @@
+TEST optimized small_dim1 PASS
+TEST baseline1 small_dim1 PASS
+TEST baseline2 small_dim1 SKIP comparison_mismatch
+TEST optimized irregular_dim1 PASS
+TEST baseline1 irregular_dim1 PASS
+TEST baseline2 irregular_dim1 SKIP comparison_mismatch
+TEST optimized dim0_path PASS
+TEST baseline1 dim0_path PASS
+TEST baseline2 dim0_path PASS
+TEST optimized dim2_path PASS
+TEST baseline1 dim2_path PASS
+TEST baseline2 dim2_path SKIP comparison_mismatch
+TEST optimized exact_target PASS
+TEST baseline1 exact_target SKIP grid_guard
+TEST baseline2 exact_target SKIP grid_guard
+TEST optimized two_d_fallback PASS
+UNIT_TEST PASS
+
+argmin_over_dimension_perf:
+            label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small_dim1       0.003991          0.018866          0.009192          0.005203
+1  irregular_dim1       0.007642          0.062889          0.019564          0.008374
+2       dim0_path       0.003663          0.102713          0.016833          0.005708
+3       dim2_path       0.003683          0.030447          0.008147          0.015030
+4    exact_target       5.440865               inf               inf         11.328570
+
+Summary ratios (Baseline Triton1 / Optimized, PyTorch / Optimized):
+small_dim1: baseline1/opt=3.532, torch/opt=0.774
+irregular_dim1: baseline1/opt=7.472, torch/opt=0.912
+dim0_path: baseline1/opt=17.819, torch/opt=0.638
+dim2_path: baseline1/opt=2.018, torch/opt=0.244
+exact_target: baseline1/opt=nan, torch/opt=0.483
+GEOMEAN baseline1/optimized 5.550
+GEOMEAN torch/optimized 0.556

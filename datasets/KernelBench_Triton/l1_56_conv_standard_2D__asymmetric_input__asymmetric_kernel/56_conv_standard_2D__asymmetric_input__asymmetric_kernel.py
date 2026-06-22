@@ -21,31 +21,37 @@ def _touch_triton_path(x: torch.Tensor) -> None:
     # Keep a minimal Triton kernel path without exceeding Ascend's 1D grid limit
     # on the large benchmark shape embedded in this operator workspace.
     touch_elements = min(x.numel(), x.shape[0] * x.shape[1] * 256)
-    grid = (triton.cdiv(touch_elements, 256),)
+    grid = (triton.cdiv(touch_elements, 256), )
     _touch_tensor_kernel[grid](x, touch_elements, BLOCK=256)
 
 
 def conv_standard_2d_asymmetric_input_asymmetric_kernel(
-    x: torch.Tensor,
-    weight: torch.Tensor,
-    bias: torch.Tensor | None = None,
-    stride: tuple[int, int] = (1, 1),
-    padding: tuple[int, int] = (0, 0),
-    dilation: tuple[int, int] = (1, 1),
-    groups: int = 1,
+        x: torch.Tensor,
+        weight: torch.Tensor,
+        bias: torch.Tensor | None = None,
+        stride: tuple[int, int] = (1, 1),
+        padding: tuple[int, int] = (0, 0),
+        dilation: tuple[int, int] = (1, 1),
+        groups: int = 1,
 ) -> torch.Tensor:
     if not _is_npu_tensor(x):
-        raise RuntimeError("conv_standard_2d_asymmetric_input_asymmetric_kernel expects an Ascend NPU tensor")
+        raise RuntimeError(
+            "conv_standard_2d_asymmetric_input_asymmetric_kernel expects an Ascend NPU tensor"
+        )
     if x.dim() != 4:
-        raise ValueError(f"expected a 4D input tensor, got shape {tuple(x.shape)}")
+        raise ValueError(
+            f"expected a 4D input tensor, got shape {tuple(x.shape)}")
     if weight.dim() != 4:
-        raise ValueError(f"expected a 4D weight tensor, got shape {tuple(weight.shape)}")
+        raise ValueError(
+            f"expected a 4D weight tensor, got shape {tuple(weight.shape)}")
     if x.dtype not in (torch.float16, torch.float32):
         raise TypeError(f"unsupported input dtype: {x.dtype}")
     if weight.dtype != x.dtype:
-        raise TypeError(f"weight dtype {weight.dtype} must match input dtype {x.dtype}")
+        raise TypeError(
+            f"weight dtype {weight.dtype} must match input dtype {x.dtype}")
     if bias is not None and bias.dtype != x.dtype:
-        raise TypeError(f"bias dtype {bias.dtype} must match input dtype {x.dtype}")
+        raise TypeError(
+            f"bias dtype {bias.dtype} must match input dtype {x.dtype}")
     if bias is not None and not _is_npu_tensor(bias):
         raise RuntimeError("bias must be allocated on Ascend NPU")
     if not _is_npu_tensor(weight):
@@ -111,6 +117,8 @@ class ModelNew(nn.Module):
             dilation=self.conv2d.dilation,
             groups=self.conv2d.groups,
         )
+
+
 batch_size = 8
 in_channels = 64
 out_channels = 128
@@ -118,8 +126,13 @@ kernel_size = (5, 7)
 height = 512
 width = 256
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, height, width)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization
+    return [
+        in_channels, out_channels, kernel_size
+    ]  # Provide in_channels, out_channels, kernel_size for initialization

@@ -6,10 +6,10 @@ import triton.language as tl
 
 @triton.jit
 def _deconv1d_stride1_kernel(
-    x_ptr,         # *f32/f16/bf16 [B, C_IN, L_IN]
-    w_ptr,         # *f32/f16/bf16 [C_IN, C_OUT, K]
-    b_ptr,         # *f32[C_OUT] or dummy if no bias
-    y_ptr,         # *dtype(x)[B, C_OUT, L_OUT]
+    x_ptr,  # *f32/f16/bf16 [B, C_IN, L_IN]
+    w_ptr,  # *f32/f16/bf16 [C_IN, C_OUT, K]
+    b_ptr,  # *f32[C_OUT] or dummy if no bias
+    y_ptr,  # *dtype(x)[B, C_OUT, L_OUT]
     B,
     C_IN: tl.constexpr,
     C_OUT,
@@ -49,13 +49,18 @@ def _deconv1d_stride1_kernel(
                 t_in = t_offsets - k_idx
                 valid_t = (t_in >= 0) & (t_in < L_IN) & t_mask & cin_mask
                 safe_t_in = tl.where(valid_t, t_in, 0)
-                x_vals = tl.load(x_ptr + x_base + safe_t_in, mask=valid_t, other=0.0).to(tl.float32)
+                x_vals = tl.load(x_ptr + x_base + safe_t_in,
+                                 mask=valid_t,
+                                 other=0.0).to(tl.float32)
                 w_offs = (cin_idx * C_OUT + oc_offs) * K + k_idx
-                w_vals = tl.load(w_ptr + w_offs, mask=oc_mask, other=0.0).to(tl.float32)
-                acc += tl.reshape(x_vals, (BLOCK_T, 1)) * tl.reshape(w_vals, (1, BLOCK_COUT))
+                w_vals = tl.load(w_ptr + w_offs, mask=oc_mask,
+                                 other=0.0).to(tl.float32)
+                acc += tl.reshape(x_vals, (BLOCK_T, 1)) * tl.reshape(
+                    w_vals, (1, BLOCK_COUT))
 
     if HAS_BIAS:
-        b_vals = tl.load(b_ptr + oc_offs, mask=oc_mask, other=0.0).to(tl.float32)
+        b_vals = tl.load(b_ptr + oc_offs, mask=oc_mask,
+                         other=0.0).to(tl.float32)
         acc += tl.reshape(b_vals, (1, BLOCK_COUT))
 
     for oc_offset in tl.static_range(0, BLOCK_COUT):
@@ -64,7 +69,8 @@ def _deconv1d_stride1_kernel(
         safe_oc_idx = tl.where(oc_valid, oc_idx, 0)
         y_base = y_batch_base + safe_oc_idx * L_OUT
         col_mask = (tl.arange(0, BLOCK_COUT) == oc_offset)
-        extracted = tl.sum(acc * tl.reshape(col_mask.to(tl.float32), (1, BLOCK_COUT)), 1)
+        extracted = tl.sum(
+            acc * tl.reshape(col_mask.to(tl.float32), (1, BLOCK_COUT)), 1)
         tl.store(y_ptr + y_base + t_offsets, extracted, mask=t_mask & oc_valid)
 
 
@@ -82,6 +88,7 @@ class ModelNew(nn.Module):
         groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
+
     def __init__(
         self,
         in_channels: int = 64,
@@ -116,13 +123,15 @@ class ModelNew(nn.Module):
             torch.Tensor: Output tensor of shape (batch_size, out_channels, length_out).
         """
         mod = self.conv1d_transpose
-        stride_ok = mod.stride == (1,) or mod.stride == 1
-        padding_ok = mod.padding == (0,) or mod.padding == 0
-        outpad_ok = mod.output_padding == (0,) or mod.output_padding == 0
+        stride_ok = mod.stride == (1, ) or mod.stride == 1
+        padding_ok = mod.padding == (0, ) or mod.padding == 0
+        outpad_ok = mod.output_padding == (0, ) or mod.output_padding == 0
         groups_ok = mod.groups == 1
 
         if x.device.type != "npu":
-            raise RuntimeError("ModelNew expects NPU inputs and does not provide a non-NPU fallback.")
+            raise RuntimeError(
+                "ModelNew expects NPU inputs and does not provide a non-NPU fallback."
+            )
         if x.dtype not in (torch.float32, torch.float16, torch.bfloat16):
             raise RuntimeError(f"Unsupported dtype for ModelNew: {x.dtype}.")
         if not (stride_ok and padding_ok and outpad_ok and groups_ok):
@@ -169,14 +178,21 @@ class ModelNew(nn.Module):
             HAS_BIAS=(b is not None),
         )
         return y
+
+
 batch_size = 64
 in_channels = 128
 out_channels = 128
 kernel_size = 3
 length = 65536
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, length)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization
+    return [
+        in_channels, out_channels, kernel_size
+    ]  # Provide in_channels, out_channels, kernel_size for initialization

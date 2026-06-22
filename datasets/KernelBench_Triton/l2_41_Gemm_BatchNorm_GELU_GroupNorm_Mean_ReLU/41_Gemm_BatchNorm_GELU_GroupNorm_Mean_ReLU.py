@@ -81,6 +81,7 @@ class ModelNew(nn.Module):
     Model that performs a GEMM, BatchNorm, GELU, GroupNorm, Mean, and ReLU operations in sequence.
     Fuses GELU+GroupNorm+Mean+ReLU with a Triton kernel for improved performance.
     """
+
     def __init__(self, in_features=None, out_features=None, num_groups=None):
         super(ModelNew, self).__init__()
         in_features = in_features_default if in_features is None else in_features
@@ -105,7 +106,8 @@ class ModelNew(nn.Module):
         if x.device.type != "npu":
             raise RuntimeError("ModelNew expects inputs on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked inputs")
 
         N, C = x.shape
         G = self.group_norm.num_groups
@@ -119,7 +121,7 @@ class ModelNew(nn.Module):
 
         out = torch.empty((N, 1), device=x.device, dtype=x.dtype)
 
-        grid = (N,)
+        grid = (N, )
         _fused_gelu_groupnorm_mean_relu[grid](
             x_contig,
             weight,
@@ -141,8 +143,10 @@ in_features_default = 512
 out_features_default = 1024
 num_groups_default = 8
 
+
 def get_inputs():
     return [torch.randn(batch_size, in_features_default, device="npu")]
+
 
 def get_init_inputs():
     return [in_features_default, out_features_default, num_groups_default]

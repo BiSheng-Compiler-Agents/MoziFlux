@@ -71,6 +71,7 @@ class ModelNew(nn.Module):
       - Insert zeros (upsample) via a Triton kernel.
       - Run torch.nn.functional.conv3d with flipped weights and adjusted padding.
     """
+
     def __init__(
         self,
         in_channels: int = 32,
@@ -103,8 +104,10 @@ class ModelNew(nn.Module):
         Ci_g = Cin // G
         Co = Co_g * G
         w_flip = weight.flip(dims=(2, 3, 4))  # flip kd,kh,kw
-        w_g = w_flip.view(G, Ci_g, Co_g, kD, kH, kW)  # [G, Ci_g, Co_g, kD, kH, kW]
-        w_conv = w_g.permute(0, 2, 1, 3, 4, 5).contiguous().view(Co, Ci_g, kD, kH, kW)
+        w_g = w_flip.view(G, Ci_g, Co_g, kD, kH,
+                          kW)  # [G, Ci_g, Co_g, kD, kH, kW]
+        w_conv = w_g.permute(0, 2, 1, 3, 4,
+                             5).contiguous().view(Co, Ci_g, kD, kH, kW)
         return w_conv
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -144,12 +147,16 @@ class ModelNew(nn.Module):
         pad_w = kW - 1 - pw
 
         if (pad_d < 0) or (pad_h < 0) or (pad_w < 0):
-            raise RuntimeError("ModelNew requires kernel_size - 1 >= padding in every spatial dimension")
+            raise RuntimeError(
+                "ModelNew requires kernel_size - 1 >= padding in every spatial dimension"
+            )
 
         w_conv = self._weight_to_conv3d(weight, groups).contiguous()
 
         # Ascend NPU tensor creation only supports contiguous layout here.
-        x_up = torch.zeros((N, Cin, Du, Hu, Wu), dtype=x.dtype, device=x.device)
+        x_up = torch.zeros((N, Cin, Du, Hu, Wu),
+                           dtype=x.dtype,
+                           device=x.device)
 
         # Launch Triton kernel to scatter x into x_up at strided positions
         in_strides = x.stride()
@@ -158,22 +165,42 @@ class ModelNew(nn.Module):
         BLOCK_W = 128
         grid = (N * Cin * Di * Hi, triton.cdiv(Wi, BLOCK_W))
         _upsample3d_scatter_kernel[grid](
-            x, x_up,
-            N, Cin, Di, Hi, Wi,
-            Du, Hu, Wu,
-            sd, sh, sw,
-            in_strides[0], in_strides[1], in_strides[2], in_strides[3], in_strides[4],
-            out_strides[0], out_strides[1], out_strides[2], out_strides[3], out_strides[4],
+            x,
+            x_up,
+            N,
+            Cin,
+            Di,
+            Hi,
+            Wi,
+            Du,
+            Hu,
+            Wu,
+            sd,
+            sh,
+            sw,
+            in_strides[0],
+            in_strides[1],
+            in_strides[2],
+            in_strides[3],
+            in_strides[4],
+            out_strides[0],
+            out_strides[1],
+            out_strides[2],
+            out_strides[3],
+            out_strides[4],
             BLOCK_W=BLOCK_W,
             num_warps=4,
             num_stages=2,
         )
 
         # Convolution with converted weights; stride=1, dilation=1, groups preserved
-        y = F.conv3d(
-            x_up, w_conv, bias=bias, stride=1,
-            padding=(pad_d, pad_h, pad_w), dilation=1, groups=groups
-        )
+        y = F.conv3d(x_up,
+                     w_conv,
+                     bias=bias,
+                     stride=1,
+                     padding=(pad_d, pad_h, pad_w),
+                     dilation=1,
+                     groups=groups)
         return y
 
 
@@ -189,6 +216,8 @@ def run_operator(x: torch.Tensor) -> torch.Tensor:
         _MODEL_CACHE[key] = model
     with torch.no_grad():
         return model(x)
+
+
 batch_size = 8
 in_channels = 32
 out_channels = 32
@@ -201,8 +230,14 @@ padding = (1, 2, 3)
 output_padding = (1, 1, 1)
 groups = 4
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, depth, height, width)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, groups]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding,
+        output_padding, groups
+    ]

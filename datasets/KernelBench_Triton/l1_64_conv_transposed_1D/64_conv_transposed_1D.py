@@ -65,6 +65,7 @@ class ModelNew(nn.Module):
         groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
+
     def __init__(
         self,
         in_channels: int = 64,
@@ -99,13 +100,15 @@ class ModelNew(nn.Module):
             torch.Tensor: Output tensor of shape (batch_size, out_channels, length_out).
         """
         mod = self.conv1d_transpose
-        stride_ok = mod.stride == (1,) or mod.stride == 1
-        padding_ok = mod.padding == (0,) or mod.padding == 0
-        outpad_ok = mod.output_padding == (0,) or mod.output_padding == 0
+        stride_ok = mod.stride == (1, ) or mod.stride == 1
+        padding_ok = mod.padding == (0, ) or mod.padding == 0
+        outpad_ok = mod.output_padding == (0, ) or mod.output_padding == 0
         groups_ok = mod.groups == 1
 
         if x.device.type != "npu":
-            raise RuntimeError("ModelNew expects NPU inputs and does not provide a non-NPU fallback.")
+            raise RuntimeError(
+                "ModelNew expects NPU inputs and does not provide a non-NPU fallback."
+            )
         if x.dtype not in (torch.float32, torch.float16, torch.bfloat16):
             raise RuntimeError(f"Unsupported dtype for ModelNew: {x.dtype}.")
         if not (stride_ok and padding_ok and outpad_ok and groups_ok):
@@ -147,14 +150,21 @@ class ModelNew(nn.Module):
             HAS_BIAS=(b is not None),
         )
         return y
+
+
 batch_size = 64
 in_channels = 128
 out_channels = 128
 kernel_size = 3
 length = 65536
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, length)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization
+    return [
+        in_channels, out_channels, kernel_size
+    ]  # Provide in_channels, out_channels, kernel_size for initialization

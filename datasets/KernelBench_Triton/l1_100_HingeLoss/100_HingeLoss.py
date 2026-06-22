@@ -10,10 +10,11 @@ except Exception:
     tl = None
     _TRITON_AVAILABLE = False
 
-
 if _TRITON_AVAILABLE:
+
     @triton.jit
-    def _hinge_loss_sum_kernel(pred_ptr, targ_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+    def _hinge_loss_sum_kernel(pred_ptr, targ_ptr, out_ptr, n_elements,
+                               BLOCK_SIZE: tl.constexpr):
         pid = tl.program_id(axis=0)
         block_start = pid * BLOCK_SIZE
         offsets = block_start + tl.arange(0, BLOCK_SIZE)
@@ -42,6 +43,7 @@ class ModelNew(nn.Module):
     Parameters:
         None
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -52,11 +54,15 @@ class ModelNew(nn.Module):
             raise RuntimeError("ModelNew expects NPU tensors")
         supported_dtypes = {torch.float16, torch.bfloat16, torch.float32}
         if predictions.dtype not in supported_dtypes or targets.dtype not in supported_dtypes:
-            raise TypeError("ModelNew expects float16, bfloat16, or float32 inputs")
+            raise TypeError(
+                "ModelNew expects float16, bfloat16, or float32 inputs")
         if predictions.requires_grad or targets.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked tensors")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked tensors")
         if predictions.numel() != targets.numel():
-            raise ValueError("predictions and targets must have the same number of elements")
+            raise ValueError(
+                "predictions and targets must have the same number of elements"
+            )
         N = predictions.numel()
         if N == 0:
             raise ValueError("predictions and targets must be non-empty")
@@ -79,15 +85,31 @@ class ModelNew(nn.Module):
         else:
             num_warps, num_stages = 1, 1
 
-        grid = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
-        _hinge_loss_sum_kernel[grid](p, t, sum_buf, N, BLOCK_SIZE=BLOCK_SIZE, num_warps=num_warps, num_stages=num_stages)
+        def grid(meta):
+            return (triton.cdiv(N, meta["BLOCK_SIZE"]), )
+
+        _hinge_loss_sum_kernel[grid](p,
+                                     t,
+                                     sum_buf,
+                                     N,
+                                     BLOCK_SIZE=BLOCK_SIZE,
+                                     num_warps=num_warps,
+                                     num_stages=num_stages)
 
         return sum_buf[0] / N
+
+
 batch_size = 32768
-input_shape = (32768,)
+input_shape = (32768, )
 dim = 1
 
+
 def get_inputs():
-    return [torch.rand(batch_size, *input_shape), torch.randint(0, 2, (batch_size,)).float() * 2 - 1]
+    return [
+        torch.rand(batch_size, *input_shape),
+        torch.randint(0, 2, (batch_size, )).float() * 2 - 1
+    ]
+
+
 def get_init_inputs():
     return []

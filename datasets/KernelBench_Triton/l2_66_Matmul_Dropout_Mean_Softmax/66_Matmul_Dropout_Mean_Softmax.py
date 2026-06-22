@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_FEATURES = 100
 DEFAULT_OUT_FEATURES = 50
@@ -29,6 +28,7 @@ class ModelNew(nn.Module):
     Note: mean(..., dim=1, keepdim=True) -> shape (B, 1), and softmax over a single element is exactly 1.
     Therefore, the final output is a tensor of ones with shape (batch_size, 1), independent of the preceding ops.
     """
+
     def __init__(
         self,
         in_features=DEFAULT_IN_FEATURES,
@@ -48,7 +48,9 @@ class ModelNew(nn.Module):
             torch.Tensor: Output tensor of shape (batch_size, 1).
         """
         if x.device.type != "npu":
-            raise RuntimeError("ModelNew expects Ascend NPU inputs and does not provide a PyTorch fallback path.")
+            raise RuntimeError(
+                "ModelNew expects Ascend NPU inputs and does not provide a PyTorch fallback path."
+            )
 
         # The final softmax is taken over a size-1 dimension, so the output is
         # analytically all ones regardless of the linear/dropout intermediate.
@@ -66,8 +68,12 @@ class ModelNew(nn.Module):
             BLOCK_SIZE = 32
         else:
             BLOCK_SIZE = 16
-        grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
-        _fill_ones_kernel[grid](out, n_elements, BLOCK_SIZE=BLOCK_SIZE, num_warps=1, num_stages=1)
+        grid = (triton.cdiv(n_elements, BLOCK_SIZE), )
+        _fill_ones_kernel[grid](out,
+                                n_elements,
+                                BLOCK_SIZE=BLOCK_SIZE,
+                                num_warps=1,
+                                num_stages=1)
         return out
 
 
@@ -76,8 +82,10 @@ in_features = DEFAULT_IN_FEATURES
 out_features = DEFAULT_OUT_FEATURES
 dropout_p = DEFAULT_DROPOUT_P
 
+
 def get_inputs():
     return [torch.randn(batch_size, in_features, device="npu")]
+
 
 def get_init_inputs():
     return [in_features, out_features, dropout_p]

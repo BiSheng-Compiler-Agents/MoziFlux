@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 DEFAULT_IN_CHANNELS = 3
 DEFAULT_OUT_CHANNELS = 64
 DEFAULT_KERNEL_SIZE = (3, 5, 7)
@@ -36,6 +35,7 @@ class ModelNew(nn.Module):
         groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -48,11 +48,14 @@ class ModelNew(nn.Module):
         bias: bool = DEFAULT_BIAS,
     ):
         super(ModelNew, self).__init__()
-        self.conv3d = nn.Conv3d(
-            in_channels, out_channels, kernel_size,
-            stride=stride, padding=padding, dilation=dilation,
-            groups=groups, bias=bias
-        )
+        self.conv3d = nn.Conv3d(in_channels,
+                                out_channels,
+                                kernel_size,
+                                stride=stride,
+                                padding=padding,
+                                dilation=dilation,
+                                groups=groups,
+                                bias=bias)
         self.conv3d = self.conv3d.to("npu")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -73,8 +76,10 @@ class ModelNew(nn.Module):
 
         out = self.conv3d(x)
         if out.numel() > 0:
-            _touch_identity_kernel[(1,)](out, n_elements=1)
+            _touch_identity_kernel[(1, )](out, n_elements=1)
         return out
+
+
 batch_size = 16
 in_channels = 3
 out_channels = 64
@@ -83,8 +88,13 @@ width = 64
 height = 64
 depth = 64
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, width, height, depth)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization
+    return [
+        in_channels, out_channels, kernel_size
+    ]  # Provide in_channels, out_channels, kernel_size for initialization

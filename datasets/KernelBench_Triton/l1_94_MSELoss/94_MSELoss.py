@@ -17,6 +17,7 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 
 if triton is not None:
+
     @triton.jit
     def _mse_partial_sum_kernel(
         x_ptr,  # *T
@@ -67,6 +68,7 @@ class ModelNew(nn.Module):
     Parameters:
         None
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
         # Lazy-initialized accumulator buffer to reduce per-call allocations
@@ -75,15 +77,20 @@ class ModelNew(nn.Module):
 
     def forward(self, predictions, targets):
         if predictions.shape != targets.shape:
-            raise ValueError("predictions and targets must have the same shape")
+            raise ValueError(
+                "predictions and targets must have the same shape")
         if predictions.device != targets.device:
-            raise ValueError("predictions and targets must be on the same device")
+            raise ValueError(
+                "predictions and targets must be on the same device")
         if not _is_npu_tensor(predictions) or not _is_npu_tensor(targets):
             raise RuntimeError("ModelNew expects Ascend NPU tensors")
         if _TRITON_IMPORT_ERROR is not None:
-            raise RuntimeError("Triton is required for ModelNew on Ascend NPU") from _TRITON_IMPORT_ERROR
-        if predictions.dtype not in (torch.float16, torch.float32, torch.bfloat16):
-            raise TypeError(f"unsupported dtype for predictions: {predictions.dtype}")
+            raise RuntimeError("Triton is required for ModelNew on Ascend NPU"
+                               ) from _TRITON_IMPORT_ERROR
+        if predictions.dtype not in (torch.float16, torch.float32,
+                                     torch.bfloat16):
+            raise TypeError(
+                f"unsupported dtype for predictions: {predictions.dtype}")
         if targets.dtype not in (torch.float16, torch.float32, torch.bfloat16):
             raise TypeError(f"unsupported dtype for targets: {targets.dtype}")
 
@@ -100,7 +107,9 @@ class ModelNew(nn.Module):
             raise ValueError("predictions and targets must be non-empty")
 
         dev = x.device
-        if (self._acc_buf is None) or (self._acc_buf_device != dev) or (self._acc_buf.dtype != torch.float32):
+        if (self._acc_buf is None) or (self._acc_buf_device
+                                       != dev) or (self._acc_buf.dtype
+                                                   != torch.float32):
             self._acc_buf = torch.zeros(1, device=dev, dtype=torch.float32)
             self._acc_buf_device = dev
         else:
@@ -108,11 +117,17 @@ class ModelNew(nn.Module):
 
         BLOCK_SIZE = 4096
 
-        grid = lambda META: (triton.cdiv(n, META['BLOCK_SIZE']),)
+        def grid(META):
+            return (triton.cdiv(n, META['BLOCK_SIZE']), )
+
         _mse_partial_sum_kernel[grid](
-            x, y, self._acc_buf, n,
+            x,
+            y,
+            self._acc_buf,
+            n,
             BLOCK_SIZE=BLOCK_SIZE,
-            num_warps=4,   # tuned lower to reduce scheduling overhead for this bandwidth-bound op
+            num_warps=
+            4,  # tuned lower to reduce scheduling overhead for this bandwidth-bound op
             num_stages=2,  # lightweight pipelining
         )
 
@@ -120,12 +135,20 @@ class ModelNew(nn.Module):
         # Match PyTorch dtype promotion for (pred - target)
         out_dtype = torch.result_type(predictions, targets)
         return mean.to(out_dtype)
+
+
 batch_size = 32768
-input_shape = (32768,)
+input_shape = (32768, )
 dim = 1
+
 
 def get_inputs():
     scale = torch.rand(())
-    return [torch.rand(batch_size, *input_shape)*scale, torch.rand(batch_size, *input_shape)]
+    return [
+        torch.rand(batch_size, *input_shape) * scale,
+        torch.rand(batch_size, *input_shape)
+    ]
+
+
 def get_init_inputs():
     return []

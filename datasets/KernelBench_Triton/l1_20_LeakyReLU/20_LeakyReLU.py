@@ -24,6 +24,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs a LeakyReLU activation.
     """
+
     def __init__(self, negative_slope: float = 0.01):
         """
         Initializes the LeakyReLU module.
@@ -33,7 +34,7 @@ class ModelNew(nn.Module):
         """
         super(ModelNew, self).__init__()
         self.negative_slope = negative_slope
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Applies LeakyReLU activation to the input tensor.
@@ -56,7 +57,7 @@ class ModelNew(nn.Module):
         x_contig = x.contiguous()
         n_elements = x.numel()
         BLOCK_SIZE = 4096
-        grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
+        grid = (triton.cdiv(n_elements, BLOCK_SIZE), )
         y = torch.empty_like(x_contig)
         _leaky_relu_kernel[grid](
             x_contig.view(-1),
@@ -68,11 +69,16 @@ class ModelNew(nn.Module):
             num_stages=1,
         )
         return y.view_as(x)
+
+
 batch_size = 4096
 dim = 393216
+
 
 def get_inputs():
     x = torch.rand(batch_size, dim)
     return [x]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

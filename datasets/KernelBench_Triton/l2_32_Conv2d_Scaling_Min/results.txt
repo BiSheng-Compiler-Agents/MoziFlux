@@ -1,0 +1,12 @@
+TEST baseline1 small_32 PASS max_abs=0
+TEST baseline2 small_32 SKIP baseline2_readonly_not_loaded
+TEST optimized small_32 PASS max_abs=0
+TEST baseline1 medium_128 PASS max_abs=0
+TEST baseline2 medium_128 SKIP baseline2_readonly_not_loaded
+TEST optimized medium_128 PASS max_abs=0
+TEST baseline1 exact_256 PASS max_abs=0
+TEST baseline2 exact_256 SKIP baseline2_readonly_not_loaded
+TEST optimized exact_256 PASS max_abs=0
+TEST optimized triton_direct_dispatch MISMATCH max_abs=nan
+TEST optimized triton_persistent_dispatch PASS max_abs=0
+UNIT_TEST FAIL

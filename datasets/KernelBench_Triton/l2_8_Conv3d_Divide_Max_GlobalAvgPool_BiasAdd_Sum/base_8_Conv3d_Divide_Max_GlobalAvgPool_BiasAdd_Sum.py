@@ -21,7 +21,9 @@ def _generic_reduce_bcdhw_to_b_kernel(
     pid = tl.program_id(0)
     offs = tl.arange(0, BLOCK_SIZE)
     mask = offs < C
-    vals = tl.load(x_ptr + pid * stride_b + offs * stride_c, mask=mask, other=0.0)
+    vals = tl.load(x_ptr + pid * stride_b + offs * stride_c,
+                   mask=mask,
+                   other=0.0)
     total = tl.sum(vals.to(tl.float32), axis=0)
     tl.store(out_ptr + pid, total)
 
@@ -52,7 +54,9 @@ def _reduce_bcdhw_to_b_kernel(
 
 
 class ModelNew(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, divisor, pool_size, bias_shape, sum_dim):
+
+    def __init__(self, in_channels, out_channels, kernel_size, divisor,
+                 pool_size, bias_shape, sum_dim):
         super(ModelNew, self).__init__()
         self.conv = nn.Conv3d(in_channels, out_channels, kernel_size)
         self.divisor = divisor
@@ -63,9 +67,12 @@ class ModelNew(nn.Module):
 
     def forward(self, x):
         if not _is_npu_tensor(x):
-            raise RuntimeError(f'ModelNew expects NPU input, got {x.device.type}')
+            raise RuntimeError(
+                f'ModelNew expects NPU input, got {x.device.type}')
         if self.sum_dim != 1:
-            raise RuntimeError(f'ModelNew only supports sum_dim == 1 for the Triton path, got {self.sum_dim}')
+            raise RuntimeError(
+                f'ModelNew only supports sum_dim == 1 for the Triton path, got {self.sum_dim}'
+            )
         w = self.conv.weight
         b = self.conv.bias
         x = F.conv3d(
@@ -81,9 +88,9 @@ class ModelNew(nn.Module):
         x = self.global_avg_pool(x)
         x = (x + self.bias).reshape(x.shape[0], x.shape[1]).contiguous()
         B, C = x.shape
-        out = torch.empty((B,), device=x.device, dtype=x.dtype)
+        out = torch.empty((B, ), device=x.device, dtype=x.dtype)
         if C == 16:
-            grid = (triton.cdiv(B, 64),)
+            grid = (triton.cdiv(B, 64), )
             _reduce_bcdhw_to_b_kernel[grid](
                 x,
                 out,
@@ -97,8 +104,10 @@ class ModelNew(nn.Module):
             )
         else:
             if C > 256:
-                raise RuntimeError(f'ModelNew only supports up to 256 output channels, got {C}')
-            _generic_reduce_bcdhw_to_b_kernel[(B,)](
+                raise RuntimeError(
+                    f'ModelNew only supports up to 256 output channels, got {C}'
+                )
+            _generic_reduce_bcdhw_to_b_kernel[(B, )](
                 x,
                 out,
                 x.stride(0),
@@ -123,7 +132,8 @@ def conv3d_divide_max_globalavgpool_biasadd_sum(x):
     model = _MODEL_CACHE.get(key)
     if model is None:
         torch.manual_seed(0)
-        model = ModelNew(*get_init_inputs()).to(device=x.device, dtype=torch.float32).eval()
+        model = ModelNew(*get_init_inputs()).to(device=x.device,
+                                                dtype=torch.float32).eval()
         _MODEL_CACHE[key] = model
     with torch.no_grad():
         return model(x.to(dtype=torch.float32))
@@ -147,4 +157,7 @@ def get_inputs():
 
 
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, divisor, pool_size, bias_shape, sum_dim]
+    return [
+        in_channels, out_channels, kernel_size, divisor, pool_size, bias_shape,
+        sum_dim
+    ]

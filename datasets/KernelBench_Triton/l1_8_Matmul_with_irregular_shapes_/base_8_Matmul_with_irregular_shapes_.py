@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import triton
 import triton.language as tl
+import triton.language.extra.cann.extension as al
 
 
 @triton.jit
@@ -61,8 +62,8 @@ def _matmul_kernel(
     for _ in range(0, k, block_k):
         a = tl.load(a_block_ptr, boundary_check=(0, 1), padding_option="zero")
         b = tl.load(b_block_ptr, boundary_check=(0, 1), padding_option="zero")
-        tl.compile_hint(a, "dot_pad_only_k")
-        tl.compile_hint(b, "dot_pad_only_k")
+        al.compile_hint(a, "dot_pad_only_k")
+        al.compile_hint(b, "dot_pad_only_k")
         acc += tl.dot(a, b, out_dtype=tl.float32)
         a_block_ptr = tl.advance(a_block_ptr, (0, block_k))
         b_block_ptr = tl.advance(b_block_ptr, (block_k, 0))
@@ -73,6 +74,7 @@ def _matmul_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self):
         super().__init__()
 
@@ -93,7 +95,7 @@ class ModelNew(nn.Module):
         num_stages: int,
     ) -> None:
         num_pid_n = triton.cdiv(n, block_n)
-        grid = (triton.cdiv(m, block_m) * num_pid_n,)
+        grid = (triton.cdiv(m, block_m) * num_pid_n, )
         _matmul_kernel[grid](
             a_contig,
             b_contig,
@@ -127,7 +129,8 @@ class ModelNew(nn.Module):
         if a.dtype != b.dtype:
             raise TypeError("ModelNew requires matching input dtypes")
         if a.dtype not in (torch.float16, torch.bfloat16):
-            raise TypeError("ModelNew supports float16 and bfloat16 inputs only")
+            raise TypeError(
+                "ModelNew supports float16 and bfloat16 inputs only")
 
         a_contig = a.contiguous()
         b_contig = b.contiguous()

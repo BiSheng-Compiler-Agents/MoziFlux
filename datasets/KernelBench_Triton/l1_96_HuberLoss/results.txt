@@ -1,0 +1,19 @@
+TEST baseline1 small_single PASS
+TEST baseline2 small_single PASS
+TEST optimized small_single PASS
+TEST optimized_triton_fallback small_single PASS
+TEST baseline1 direct_1m PASS
+TEST baseline2 direct_1m PASS
+TEST optimized direct_1m PASS
+TEST optimized_triton_fallback direct_1m PASS
+TEST baseline1 persistent_1g SKIP grid_guard
+TEST baseline2 persistent_1g PASS
+TEST optimized persistent_1g PASS
+TEST optimized_triton_fallback persistent_1g PASS
+UNIT_TEST PASS
+
+huber_loss_perf:
+           label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   small_single       0.008165           0.02510          0.039830          0.009871
+1      direct_1m       0.007595           0.02183          0.054041          0.008988
+2  persistent_1g       5.287467               inf          6.294936          5.312604

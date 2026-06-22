@@ -5,25 +5,46 @@ import triton
 import triton.language as tl
 import triton.language.extra.cann.extension as al
 
+
 @triton.autotune(
     configs=[
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32, "GROUP_M": 4},
+            {
+                "BLOCK_M": 128,
+                "BLOCK_N": 128,
+                "BLOCK_K": 32,
+                "GROUP_M": 4
+            },
             num_stages=2,
             num_warps=8,
         ),
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 64, "GROUP_M": 4},
+            {
+                "BLOCK_M": 128,
+                "BLOCK_N": 64,
+                "BLOCK_K": 64,
+                "GROUP_M": 4
+            },
             num_stages=3,
             num_warps=4,
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 64, "GROUP_M": 4},
+            {
+                "BLOCK_M": 64,
+                "BLOCK_N": 128,
+                "BLOCK_K": 64,
+                "GROUP_M": 4
+            },
             num_stages=3,
             num_warps=4,
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64, "GROUP_M": 4},
+            {
+                "BLOCK_M": 64,
+                "BLOCK_N": 64,
+                "BLOCK_K": 64,
+                "GROUP_M": 4
+            },
             num_stages=4,
             num_warps=4,
         ),
@@ -32,12 +53,25 @@ import triton.language.extra.cann.extension as al
 )
 @triton.jit
 def _bmm_kernel(
-    a_ptr, b_ptr, c_ptr,
-    BATCH, M, N, K,
-    stride_ab, stride_am, stride_ak,
-    stride_bb, stride_bk, stride_bn,
-    stride_cb, stride_cm, stride_cn,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    BATCH,
+    M,
+    N,
+    K,
+    stride_ab,
+    stride_am,
+    stride_ak,
+    stride_bb,
+    stride_bk,
+    stride_bn,
+    stride_cb,
+    stride_cm,
+    stride_cn,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
     GROUP_M: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -66,8 +100,10 @@ def _bmm_kernel(
     while k_iter < K:
         k_offs = k_iter + offs_k
 
-        a_ptrs = a_ptr_batch + (offs_m[:, None] * stride_am + k_offs[None, :] * stride_ak)
-        b_ptrs = b_ptr_batch + (k_offs[:, None] * stride_bk + offs_n[None, :] * stride_bn)
+        a_ptrs = a_ptr_batch + (offs_m[:, None] * stride_am +
+                                k_offs[None, :] * stride_ak)
+        b_ptrs = b_ptr_batch + (k_offs[:, None] * stride_bk +
+                                offs_n[None, :] * stride_bn)
 
         a_mask = (offs_m[:, None] < M) & (k_offs[None, :] < K)
         b_mask = (k_offs[:, None] < K) & (offs_n[None, :] < N)
@@ -80,7 +116,8 @@ def _bmm_kernel(
 
         k_iter += BLOCK_K
 
-    c_ptrs = c_ptr_batch + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+    c_ptrs = c_ptr_batch + (offs_m[:, None] * stride_cm +
+                            offs_n[None, :] * stride_cn)
     c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
     tl.store(c_ptrs, acc, mask=c_mask)
 
@@ -89,6 +126,7 @@ class ModelNew(nn.Module):
     """
     Performs batched matrix multiplication (C = A * B) where A, B, and C have the same batch dimension.
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -102,12 +140,15 @@ class ModelNew(nn.Module):
         if A.device != B.device:
             raise ValueError("A and B must be on the same device")
         if A.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-            raise TypeError("ModelNew supports float16, bfloat16, and float32 inputs")
+            raise TypeError(
+                "ModelNew supports float16, bfloat16, and float32 inputs")
 
         BATCH, M, K = A.shape
         BATCH_B, K_B, N = B.shape
         if BATCH != BATCH_B or K != K_B:
-            raise ValueError("A and B must satisfy A.shape == (batch, m, k) and B.shape == (batch, k, n)")
+            raise ValueError(
+                "A and B must satisfy A.shape == (batch, m, k) and B.shape == (batch, k, n)"
+            )
 
         A_ = A.contiguous()
         B_ = B.contiguous()
@@ -117,17 +158,30 @@ class ModelNew(nn.Module):
         stride_bb, stride_bk, stride_bn = B_.stride()
         stride_cb, stride_cm, stride_cn = C.stride()
 
-        grid = lambda META: (
-            triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
-            BATCH,
-        )
+        def grid(META):
+            return (
+                triton.cdiv(M, META["BLOCK_M"]) *
+                triton.cdiv(N, META["BLOCK_N"]),
+                BATCH,
+            )
 
         _bmm_kernel[grid](
-            A_, B_, C,
-            BATCH, M, N, K,
-            stride_ab, stride_am, stride_ak,
-            stride_bb, stride_bk, stride_bn,
-            stride_cb, stride_cm, stride_cn,
+            A_,
+            B_,
+            C,
+            BATCH,
+            M,
+            N,
+            K,
+            stride_ab,
+            stride_am,
+            stride_ak,
+            stride_bb,
+            stride_bk,
+            stride_bn,
+            stride_cb,
+            stride_cm,
+            stride_cn,
         )
         return C
 

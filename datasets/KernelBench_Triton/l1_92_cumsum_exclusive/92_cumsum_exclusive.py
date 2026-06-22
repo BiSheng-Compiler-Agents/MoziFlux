@@ -62,8 +62,7 @@ class ModelNew(nn.Module):
             raise RuntimeError("ModelNew expects inputs on Ascend NPU")
         if x.ndim != 2:
             raise RuntimeError(
-                f"ModelNew expects a 2D tensor, but received ndim={x.ndim}"
-            )
+                f"ModelNew expects a 2D tensor, but received ndim={x.ndim}")
         if (self.dim % x.ndim) != 1:
             raise RuntimeError(
                 f"ModelNew only supports dim=1 or -1 for 2D inputs, but received dim={self.dim}"
@@ -87,7 +86,7 @@ class ModelNew(nn.Module):
         else:
             block = 512
 
-        grid = (B - 1,)
+        grid = (B - 1, )
         _exclusive_cumsum_row_to_padded_kernel[grid](
             x,
             y,
@@ -103,11 +102,16 @@ class ModelNew(nn.Module):
             num_stages=2,
         )
         return y
+
+
 batch_size = 32768
-input_shape = (32768,)
+input_shape = (32768, )
 dim = 1
+
 
 def get_inputs():
     return [torch.rand(batch_size, *input_shape, device='npu')]
+
+
 def get_init_inputs():
     return [dim]

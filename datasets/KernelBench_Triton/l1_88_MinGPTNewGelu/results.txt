@@ -1,0 +1,22 @@
+TEST baseline1 odd_257x513 PASS max_err=1.19209e-07
+TEST baseline2 odd_257x513 PASS max_err=1.19209e-07
+TEST optimized odd_257x513 PASS max_err=1.19209e-07
+TEST baseline1 medium_1024x2048 PASS max_err=1.19209e-07
+TEST baseline2 medium_1024x2048 PASS max_err=1.19209e-07
+TEST optimized medium_1024x2048 PASS max_err=1.19209e-07
+TEST baseline1 target_8192x8192 PASS max_err=1.19209e-07
+TEST baseline2 target_8192x8192 PASS max_err=1.19209e-07
+TEST optimized target_8192x8192 PASS max_err=1.19209e-07
+TEST optimized persistent_forced PASS max_err=1.19209e-07
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l1_88_MinGPTNewGelu_1782367725/88_MinGPTNewGelu.py:35: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x_contig)
+mingpt_new_gelu:
+              label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0       odd_257x513       0.015196          0.002650          0.004242          0.005760
+1  medium_1024x2048       0.064670          0.020352          0.019407          0.020648
+2  target_8192x8192       4.100237          0.537209          0.446032          0.476982
+
+/home/s00929845/kernel_verify/l1_88_MinGPTNewGelu_1782367725/88_MinGPTNewGelu.py:35: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x_contig)

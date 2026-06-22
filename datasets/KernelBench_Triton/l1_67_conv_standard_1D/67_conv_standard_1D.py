@@ -112,14 +112,20 @@ def conv1d_fwd_kernel(
     tl.store(y_ptr + y_offsets, acc, mask=mask_y)
 
 
-def conv1d_triton_fp32(x: torch.Tensor, w: torch.Tensor, stride: int = 1, padding: int = 0, dilation: int = 1) -> torch.Tensor:
+def conv1d_triton_fp32(x: torch.Tensor,
+                       w: torch.Tensor,
+                       stride: int = 1,
+                       padding: int = 0,
+                       dilation: int = 1) -> torch.Tensor:
     # x: [B, C, L_IN], w: [OC, C, K]
     if x.device.type != "npu" or w.device.type != "npu":
         raise ValueError("conv1d_triton_fp32 requires NPU tensors")
     if x.dtype != torch.float32 or w.dtype != torch.float32:
-        raise ValueError("conv1d_triton_fp32 supports float32 inputs and weights only")
+        raise ValueError(
+            "conv1d_triton_fp32 supports float32 inputs and weights only")
     if x.ndim != 3 or w.ndim != 3:
-        raise ValueError("conv1d_triton_fp32 expects x[B, C, L] and w[OC, C, K]")
+        raise ValueError(
+            "conv1d_triton_fp32 expects x[B, C, L] and w[OC, C, K]")
 
     B, C, L_IN = x.shape
     OC, Cw, K = w.shape
@@ -127,7 +133,9 @@ def conv1d_triton_fp32(x: torch.Tensor, w: torch.Tensor, stride: int = 1, paddin
     # Compute output length per PyTorch formula
     L_OUT = (L_IN + 2 * padding - dilation * (K - 1) - 1) // stride + 1
     if L_OUT <= 0:
-        raise ValueError("conv1d_triton_fp32 received parameters that produce a non-positive output length")
+        raise ValueError(
+            "conv1d_triton_fp32 received parameters that produce a non-positive output length"
+        )
 
     x = x.contiguous()
     w = w.contiguous()
@@ -159,17 +167,36 @@ def conv1d_triton_fp32(x: torch.Tensor, w: torch.Tensor, stride: int = 1, paddin
 
     grid = (triton.cdiv(L_OUT, BLOCK_T), triton.cdiv(OC, BLOCK_OC), B)
     conv1d_fwd_kernel[grid](
-        x, w, y,
-        B, C, L_IN, OC, K,
-        stride, padding, dilation, L_OUT, CK,
-        BLOCK_OC=BLOCK_OC, BLOCK_T=BLOCK_T, BLOCK_P=BLOCK_P, NUM_P_ITERS=NUM_P_ITERS,
-        num_warps=num_warps, num_stages=num_stages,
+        x,
+        w,
+        y,
+        B,
+        C,
+        L_IN,
+        OC,
+        K,
+        stride,
+        padding,
+        dilation,
+        L_OUT,
+        CK,
+        BLOCK_OC=BLOCK_OC,
+        BLOCK_T=BLOCK_T,
+        BLOCK_P=BLOCK_P,
+        NUM_P_ITERS=NUM_P_ITERS,
+        num_warps=num_warps,
+        num_stages=num_stages,
     )
     return y
 
 
-def _conv1d_triton_fp32(x: torch.Tensor, w: torch.Tensor, stride: int, padding: int, dilation: int) -> torch.Tensor:
-    return conv1d_triton_fp32(x, w, stride=stride, padding=padding, dilation=dilation)
+def _conv1d_triton_fp32(x: torch.Tensor, w: torch.Tensor, stride: int,
+                        padding: int, dilation: int) -> torch.Tensor:
+    return conv1d_triton_fp32(x,
+                              w,
+                              stride=stride,
+                              padding=padding,
+                              dilation=dilation)
 
 
 class ModelNew(nn.Module):
@@ -186,10 +213,26 @@ class ModelNew(nn.Module):
         groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, stride: int = 1, padding: int = 0, dilation: int = 1, groups: int = 1, bias: bool = False):
+
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 kernel_size: int,
+                 stride: int = 1,
+                 padding: int = 0,
+                 dilation: int = 1,
+                 groups: int = 1,
+                 bias: bool = False):
         super(ModelNew, self).__init__()
-        self.conv1d = nn.Conv1d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
-        
+        self.conv1d = nn.Conv1d(in_channels,
+                                out_channels,
+                                kernel_size,
+                                stride=stride,
+                                padding=padding,
+                                dilation=dilation,
+                                groups=groups,
+                                bias=bias)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Performs the 1D convolution.
@@ -205,18 +248,32 @@ class ModelNew(nn.Module):
         if self.conv1d.bias is not None:
             raise NotImplementedError("ModelNew supports bias=False only")
 
-        stride = self.conv1d.stride[0] if isinstance(self.conv1d.stride, tuple) else self.conv1d.stride
-        padding = self.conv1d.padding[0] if isinstance(self.conv1d.padding, tuple) else self.conv1d.padding
-        dilation = self.conv1d.dilation[0] if isinstance(self.conv1d.dilation, tuple) else self.conv1d.dilation
-        return conv1d_triton_fp32(x, self.conv1d.weight, stride=stride, padding=padding, dilation=dilation)
+        stride = self.conv1d.stride[0] if isinstance(
+            self.conv1d.stride, tuple) else self.conv1d.stride
+        padding = self.conv1d.padding[0] if isinstance(
+            self.conv1d.padding, tuple) else self.conv1d.padding
+        dilation = self.conv1d.dilation[0] if isinstance(
+            self.conv1d.dilation, tuple) else self.conv1d.dilation
+        return conv1d_triton_fp32(x,
+                                  self.conv1d.weight,
+                                  stride=stride,
+                                  padding=padding,
+                                  dilation=dilation)
+
+
 batch_size = 32
 in_channels = 64
 out_channels = 128
 kernel_size = 3
 length = 131072
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, length)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization
+    return [
+        in_channels, out_channels, kernel_size
+    ]  # Provide in_channels, out_channels, kernel_size for initialization

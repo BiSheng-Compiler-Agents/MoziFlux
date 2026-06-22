@@ -1,0 +1,26 @@
+TEST baseline1 tiny PASS max_abs=1.90735e-06 tol=0.0118374
+TEST baseline2 tiny PASS max_abs=1.90735e-06 tol=0.0118374
+TEST optimized tiny PASS max_abs=0 tol=0.0118374
+TEST baseline1 odd PASS max_abs=8.39233e-05 tol=0.14095
+TEST baseline2 odd PASS max_abs=8.39233e-05 tol=0.14095
+TEST optimized odd PASS max_abs=0 tol=0.14095
+TEST baseline1 medium SKIP compile_guard
+TEST baseline2 medium SKIP compile_guard
+TEST optimized medium PASS max_abs=0 tol=1.06609
+TEST baseline1 target SKIP compile_guard
+TEST baseline2 target SKIP compile_guard
+TEST optimized target PASS max_abs=0 tol=16.5954
+TEST optimized_fallback fallback_tiny PASS max_abs=1.90735e-06 tol=0.0118374
+TEST optimized_fallback fallback_odd PASS max_abs=8.39233e-05 tol=0.14095
+UNIT_TEST PASS
+
+INFO bench baseline1 medium inf compile_guard
+INFO bench baseline2 medium inf compile_guard
+INFO bench baseline1 target inf compile_guard
+INFO bench baseline2 target inf compile_guard
+cumsum_exclusive_perf:
+    label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    tiny       0.011005          0.031263          0.031164          0.011003
+1     odd       0.018294          0.619441          0.062543          0.018301
+2  medium       0.394101               inf               inf          0.394098
+3  target     108.010254               inf               inf        108.011284

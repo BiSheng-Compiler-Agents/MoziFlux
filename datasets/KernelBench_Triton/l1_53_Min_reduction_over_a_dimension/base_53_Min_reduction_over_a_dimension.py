@@ -7,10 +7,16 @@ import triton.language as tl
 
 @triton.jit
 def _min_reduce_last_kernel(
-    x_ptr, out_ptr,
-    B, M, N,
-    stride_b, stride_m, stride_n,
-    out_stride_b, out_stride_m,
+    x_ptr,
+    out_ptr,
+    B,
+    M,
+    N,
+    stride_b,
+    stride_m,
+    stride_n,
+    out_stride_b,
+    out_stride_m,
     BLOCK_K: tl.constexpr,
 ):
     m = tl.program_id(axis=0)
@@ -38,7 +44,10 @@ def _min_reduce_last_kernel(
             idx = k + offs_k + u * BLOCK_K
             mask = idx < N
             ptrs = x_ptr + base + idx * stride_n
-            x = tl.load(ptrs, mask=mask, other=float("inf"), cache_modifier=".ca")
+            x = tl.load(ptrs,
+                        mask=mask,
+                        other=float("inf"),
+                        cache_modifier=".ca")
             acc = tl.minimum(acc, tl.min(x, axis=0))
         k += 2 * BLOCK_K
 
@@ -48,10 +57,16 @@ def _min_reduce_last_kernel(
 
 @triton.jit
 def _min_reduce_mid_kernel(
-    x_ptr, out_ptr,
-    B, M, N,
-    stride_b, stride_m, stride_n,
-    out_stride_b, out_stride_n,
+    x_ptr,
+    out_ptr,
+    B,
+    M,
+    N,
+    stride_b,
+    stride_m,
+    stride_n,
+    out_stride_b,
+    out_stride_n,
     BLOCK_K: tl.constexpr,
     BLOCK_N: tl.constexpr,
 ):
@@ -84,8 +99,13 @@ def _min_reduce_mid_kernel(
             idx = k + offs_k[:, None] + u * BLOCK_K
             mask = idx < M
             ptrs = x_ptr + base + idx * stride_m
-            x = tl.load(ptrs, mask=mask, other=float("inf"), cache_modifier=".cg")
-            acc = tl.minimum(acc, tl.min(x, axis=0), propagate_nan=tl.PropagateNan.ALL)
+            x = tl.load(ptrs,
+                        mask=mask,
+                        other=float("inf"),
+                        cache_modifier=".cg")
+            acc = tl.minimum(acc,
+                             tl.min(x, axis=0),
+                             propagate_nan=tl.PropagateNan.ALL)
         k += 2 * BLOCK_K
 
     out_off = b * out_stride_b + offs_n * out_stride_n
@@ -94,10 +114,16 @@ def _min_reduce_mid_kernel(
 
 @triton.jit
 def _min_reduce_first_kernel(
-    x_ptr, out_ptr,
-    B, M, N,
-    stride_b, stride_m, stride_n,
-    out_stride_m, out_stride_n,
+    x_ptr,
+    out_ptr,
+    B,
+    M,
+    N,
+    stride_b,
+    stride_m,
+    stride_n,
+    out_stride_m,
+    out_stride_n,
     BLOCK_K: tl.constexpr,
 ):
     n = tl.program_id(axis=0)
@@ -125,7 +151,10 @@ def _min_reduce_first_kernel(
             idx = k + offs_k + u * BLOCK_K
             mask = idx < B
             ptrs = x_ptr + base + idx * stride_b
-            x = tl.load(ptrs, mask=mask, other=float("inf"), cache_modifier=".ca")
+            x = tl.load(ptrs,
+                        mask=mask,
+                        other=float("inf"),
+                        cache_modifier=".ca")
             acc = tl.minimum(acc, tl.min(x, axis=0))
         k += 2 * BLOCK_K
 
@@ -134,6 +163,7 @@ def _min_reduce_first_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self, dim: int):
         super(ModelNew, self).__init__()
         self.dim = dim
@@ -150,7 +180,8 @@ class ModelNew(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.ndim != 3:
-            raise ValueError(f"ModelNew expects a 3D tensor, got shape {tuple(x.shape)}")
+            raise ValueError(
+                f"ModelNew expects a 3D tensor, got shape {tuple(x.shape)}")
         if not hasattr(torch, "npu") or x.device.type != "npu":
             raise ValueError("ModelNew requires an Ascend NPU tensor input")
 
@@ -158,7 +189,8 @@ class ModelNew(nn.Module):
         if dim < 0:
             dim += x.ndim
         if dim not in (0, 1, 2):
-            raise ValueError(f"Unsupported reduction dim {self.dim} for 3D input")
+            raise ValueError(
+                f"Unsupported reduction dim {self.dim} for 3D input")
 
         B, M, N = x.shape
         sb, sm, sn = x.stride()
@@ -167,7 +199,8 @@ class ModelNew(nn.Module):
             raise ValueError("Zero-sized reductions are not supported")
 
         if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-            raise TypeError(f"Unsupported dtype for Triton reduction: {x.dtype}")
+            raise TypeError(
+                f"Unsupported dtype for Triton reduction: {x.dtype}")
 
         if dim == 2 and sn == 1:
             out = torch.empty((B, M), device=x.device, dtype=x.dtype)
@@ -175,28 +208,43 @@ class ModelNew(nn.Module):
             grid = (M, B)
             BK, NW = self._choose_block_and_warps(N)
             _min_reduce_last_kernel[grid](
-                x, out,
-                B, M, N,
-                sb, sm, sn,
-                ob, om,
+                x,
+                out,
+                B,
+                M,
+                N,
+                sb,
+                sm,
+                sn,
+                ob,
+                om,
                 BLOCK_K=BK,
-                num_warps=NW, num_stages=4,
+                num_warps=NW,
+                num_stages=4,
             )
             return out
         elif dim == 1:
             out = torch.empty((B, N), device=x.device, dtype=x.dtype)
             ob, on = out.stride()
             BN = 128
-            grid = (B * triton.cdiv(N, BN),)
+            grid = (B * triton.cdiv(N, BN), )
             BK = 64
             NW = 8
             _min_reduce_mid_kernel[grid](
-                x, out,
-                B, M, N,
-                sb, sm, sn,
-                ob, on,
-                BLOCK_K=BK, BLOCK_N=BN,
-                num_warps=NW, num_stages=4,
+                x,
+                out,
+                B,
+                M,
+                N,
+                sb,
+                sm,
+                sn,
+                ob,
+                on,
+                BLOCK_K=BK,
+                BLOCK_N=BN,
+                num_warps=NW,
+                num_stages=4,
             )
             return out
         elif dim == 0:
@@ -205,12 +253,19 @@ class ModelNew(nn.Module):
             grid = (N, M)
             BK, NW = self._choose_block_and_warps(B)
             _min_reduce_first_kernel[grid](
-                x, out,
-                B, M, N,
-                sb, sm, sn,
-                om, on,
+                x,
+                out,
+                B,
+                M,
+                N,
+                sb,
+                sm,
+                sn,
+                om,
+                on,
                 BLOCK_K=BK,
-                num_warps=NW, num_stages=4,
+                num_warps=NW,
+                num_stages=4,
             )
             return out
         else:
@@ -221,12 +276,17 @@ class ModelNew(nn.Module):
 
 def min_reduce_triton(x: torch.Tensor, dim: int) -> torch.Tensor:
     return ModelNew(dim)(x)
+
+
 batch_size = 128
 dim1 = 4096
 dim2 = 4095
 
+
 def get_inputs():
     x = torch.rand(batch_size, dim1, dim2)
     return [x]
+
+
 def get_init_inputs():
     return [1]

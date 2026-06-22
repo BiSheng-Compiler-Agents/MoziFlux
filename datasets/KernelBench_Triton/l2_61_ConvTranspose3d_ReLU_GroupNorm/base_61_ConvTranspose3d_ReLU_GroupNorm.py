@@ -4,7 +4,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 16
 DEFAULT_IN_CHANNELS = 64
 DEFAULT_OUT_CHANNELS = 128
@@ -23,16 +22,20 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 @triton.jit
 def _relu_groupnorm_kernel(
-    x_ptr,           # *T
-    y_ptr,           # *T
-    w_ptr,           # *fp32
-    b_ptr,           # *fp32
-    N, C, D, H, W,   # int32
-    G,               # int32
-    eps,             # fp32
-    sC,              # int32 = D*H*W
-    sN,              # int32 = C*sC
-    GROUP_ELEMS,     # int32 = (C//G) * sC
+    x_ptr,  # *T
+    y_ptr,  # *T
+    w_ptr,  # *fp32
+    b_ptr,  # *fp32
+    N,
+    C,
+    D,
+    H,
+    W,  # int32
+    G,  # int32
+    eps,  # fp32
+    sC,  # int32 = D*H*W
+    sN,  # int32 = C*sC
+    GROUP_ELEMS,  # int32 = (C//G) * sC
     NUM_TILES: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
 ):
@@ -106,7 +109,8 @@ def _relu_groupnorm_kernel(
         ci += 1
 
 
-def _fused_relu_groupnorm_triton(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, groups: int, eps: float):
+def _fused_relu_groupnorm_triton(x: torch.Tensor, weight: torch.Tensor,
+                                 bias: torch.Tensor, groups: int, eps: float):
     # x: (N,C,D,H,W), weight/bias: (C,)
     if not _is_npu_tensor(x):
         raise RuntimeError("Triton kernel requires Ascend NPU tensor inputs")
@@ -134,11 +138,18 @@ def _fused_relu_groupnorm_triton(x: torch.Tensor, weight: torch.Tensor, bias: to
     w = weight.to(device=x.device, dtype=torch.float32).contiguous()
     b = bias.to(device=x.device, dtype=torch.float32).contiguous()
 
-    grid = (N * groups,)
+    grid = (N * groups, )
 
     _relu_groupnorm_kernel[grid](
-        x, y, w, b,
-        N, C, D, H, W,
+        x,
+        y,
+        w,
+        b,
+        N,
+        C,
+        D,
+        H,
+        W,
         groups,
         float(eps),
         sC,
@@ -156,6 +167,7 @@ class ModelNew(nn.Module):
     """
     Model that performs a transposed 3D convolution, applies ReLU, and then applies group normalization.
     """
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -166,8 +178,13 @@ class ModelNew(nn.Module):
         eps=DEFAULT_EPS,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose3d(in_channels, out_channels, kernel_size, bias=bias)
-        self.group_norm = nn.GroupNorm(num_groups=groups, num_channels=out_channels, eps=eps)
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 bias=bias)
+        self.group_norm = nn.GroupNorm(num_groups=groups,
+                                       num_channels=out_channels,
+                                       eps=eps)
 
     def forward(self, x):
         """
@@ -180,17 +197,21 @@ class ModelNew(nn.Module):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
 
         x = self.conv_transpose(x)
         if not x.is_contiguous():
             x = x.contiguous()
         if x.dtype not in (torch.float16, torch.float32, torch.bfloat16):
-            raise RuntimeError(f"Unsupported dtype for fused kernel: {x.dtype}")
+            raise RuntimeError(
+                f"Unsupported dtype for fused kernel: {x.dtype}")
 
         weight = self.group_norm.weight
         bias = self.group_norm.bias
-        return _fused_relu_groupnorm_triton(x, weight, bias, self.group_norm.num_groups, self.group_norm.eps)
+        return _fused_relu_groupnorm_triton(x, weight, bias,
+                                            self.group_norm.num_groups,
+                                            self.group_norm.eps)
 
 
 _MODEL_CACHE: dict[tuple[str, torch.dtype], ModelNew] = {}
@@ -204,6 +225,8 @@ def run_operator(x: torch.Tensor) -> torch.Tensor:
         model.eval()
         _MODEL_CACHE[key] = model
     return model(x)
+
+
 batch_size = 16
 in_channels = 64
 out_channels = 128
@@ -212,7 +235,10 @@ kernel_size = 3
 groups = 8
 bias = False
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, D, H, W, device='npu')]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, groups, bias]

@@ -8,14 +8,62 @@ import torch_npu  # noqa: F401
 
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 64}, num_warps=4, num_stages=4),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 64}, num_warps=4, num_stages=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_warps=4, num_stages=3),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 32}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 32}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 256, "BLOCK_K": 64}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 64}, num_warps=8, num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_warps=4,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64
+        },
+                      num_warps=4,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32
+        },
+                      num_warps=4,
+                      num_stages=3),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 256,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 256,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 256,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=4),
     ],
     key=["M", "N", "K"],
 )
@@ -51,8 +99,10 @@ def _matmul_AT_BT_kernel(
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 
-    a_ptrs = A_ptr + (offs_k[:, None] * stride_a_k + offs_m[None, :] * stride_a_m)
-    b_ptrs = B_ptr + (offs_n[None, :] * stride_b_n + offs_k[:, None] * stride_b_k)
+    a_ptrs = A_ptr + (offs_k[:, None] * stride_a_k +
+                      offs_m[None, :] * stride_a_m)
+    b_ptrs = B_ptr + (offs_n[None, :] * stride_b_n +
+                      offs_k[:, None] * stride_b_k)
 
     m_mask = offs_m < M
     n_mask = offs_n < N
@@ -76,7 +126,8 @@ def _matmul_AT_BT_kernel(
         a_ptrs += BLOCK_K * stride_a_k
         b_ptrs += BLOCK_K * stride_b_k
 
-    c_ptrs = C_ptr + (offs_m[:, None] * stride_c_m + offs_n[None, :] * stride_c_n)
+    c_ptrs = C_ptr + (offs_m[:, None] * stride_c_m +
+                      offs_n[None, :] * stride_c_n)
     tl.store(c_ptrs, acc, mask=m_mask[:, None] & n_mask[None, :])
 
 
@@ -84,13 +135,16 @@ def _matmul_at_bt_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     K, M = A.shape
     N, K_b = B.shape
     if K != K_b:
-        raise ValueError("Inner dimensions must match: A.shape[0] == B.shape[1]")
+        raise ValueError(
+            "Inner dimensions must match: A.shape[0] == B.shape[1]")
 
     A_ = A.contiguous()
     B_ = B.contiguous()
     C = torch.empty((M, N), device=A_.device, dtype=torch.float32)
 
-    grid = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]), triton.cdiv(N, meta["BLOCK_N"]))
+    def grid(meta):
+        return (triton.cdiv(M,
+                            meta["BLOCK_M"]), triton.cdiv(N, meta["BLOCK_N"]))
 
     _matmul_AT_BT_kernel[grid](
         A_,
@@ -131,13 +185,18 @@ class ModelNew(nn.Module):
         if A.dtype not in (torch.float16, torch.bfloat16):
             raise ValueError("Only float16 and bfloat16 inputs are supported")
         return _matmul_at_bt_triton(A, B)
+
+
 M = 1024 * 2
 K = 4096 * 2
 N = 2048 * 2
+
 
 def get_inputs():
     A = torch.rand(K, M)
     B = torch.rand(N, K)
     return [A, B]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

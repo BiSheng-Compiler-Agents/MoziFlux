@@ -1,0 +1,39 @@
+TEST K128_M256_N256 baseline1: PASS max_abs=2.67029e-05
+TEST K128_M256_N256 baseline2: PASS max_abs=2.67029e-05
+TEST K128_M256_N256 optimized: PASS max_abs=2.67029e-05
+TEST K256_M128_N256 baseline1: PASS max_abs=6.86646e-05
+TEST K256_M128_N256 baseline2: PASS max_abs=6.86646e-05
+TEST K256_M128_N256 optimized: PASS max_abs=7.62939e-05
+TEST K512_M512_N512 baseline1: PASS max_abs=0.000228882
+TEST K512_M512_N512 baseline2: PASS max_abs=0.000228882
+TEST K512_M512_N512 optimized: PASS max_abs=0.000228882
+TEST K1024_M256_N1024 baseline1: PASS max_abs=0.000640869
+TEST K1024_M256_N1024 baseline2: PASS max_abs=0.000640869
+TEST K1024_M256_N1024 optimized: PASS max_abs=0.000640869
+TEST K1024_M1024_N256 baseline1: PASS max_abs=0.000671387
+TEST K1024_M1024_N256 baseline2: PASS max_abs=0.000671387
+TEST K1024_M1024_N256 optimized: PASS max_abs=0.000671387
+TEST K2048_M2048_N2048 baseline1: PASS max_abs=0.00109863
+TEST K2048_M2048_N2048 baseline2: PASS max_abs=0.00109863
+TEST K2048_M2048_N2048 optimized: PASS max_abs=0.00109863
+TEST benchmark baseline1: PASS max_abs=0.00317383
+TEST benchmark baseline2: PASS max_abs=0.00317383
+TEST benchmark optimized: PASS max_abs=0.00317383
+TEST K4096_M256_N8192 baseline1: PASS max_abs=0.00183105
+TEST K4096_M256_N8192 baseline2: PASS max_abs=0.00183105
+TEST K4096_M256_N8192 optimized: PASS max_abs=0.00183105
+TEST K511_M257_N513 baseline1: PASS max_abs=0.000213623
+TEST K511_M257_N513 baseline2: PASS max_abs=0.000213623
+TEST K511_M257_N513 optimized: PASS max_abs=0.000213623
+UNIT_TEST PASS
+matmul_transposeA_performance:
+               label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0     K128_M256_N256       0.008178          0.006472          0.006564          0.005957
+1     K256_M128_N256       0.008568          0.009016          0.009033          0.007634
+2     K512_M512_N512       0.025681          0.026861          0.022532          0.026857
+3   K1024_M256_N1024       0.039246          0.048561          0.038744          0.048216
+4   K1024_M1024_N256       0.043502          0.048388          0.038559          0.048325
+5  K2048_M2048_N2048       0.818132          0.873444          0.873988          0.873491
+6          benchmark       6.541609          6.567818          6.563750          6.556532
+7   K4096_M256_N8192       0.782533          0.880371          0.879219          0.878532
+8     K511_M257_N513       0.018913          0.017629          0.017445          0.016836

@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 batch_size = 16
 in_channels = 64
 out_channels = 128
@@ -33,8 +32,12 @@ def _fused_mean_bias_lse(
     x_ptr,
     bias_ptr,
     out_ptr,
-    N, C, H, W,
-    stride_n, stride_c,
+    N,
+    C,
+    H,
+    W,
+    stride_n,
+    stride_c,
     bias_stride_c,
     BLOCK_C: tl.constexpr,
     BLOCK_HW: tl.constexpr,
@@ -57,18 +60,24 @@ def _fused_mean_bias_lse(
     for c_start in range(0, C, BLOCK_C):
         c_idx = c_start + c_arange
         c_mask = c_idx < C
-        sum_c = tl.zeros((BLOCK_C,), dtype=tl.float32)
+        sum_c = tl.zeros((BLOCK_C, ), dtype=tl.float32)
         base_c = n_base + c_idx * stride_c
         ptrs_base = base_c[:, None]
 
         for hw_start in range(0, HW, BLOCK_HW):
             offs_hw = hw_start + hw_arange
             load_mask = c_mask[:, None] & (offs_hw < HW)[None, :]
-            tile = tl.load(x_ptr + ptrs_base + offs_hw[None, :], mask=load_mask, other=0.0, cache_modifier=".cg")
+            tile = tl.load(x_ptr + ptrs_base + offs_hw[None, :],
+                           mask=load_mask,
+                           other=0.0,
+                           cache_modifier=".cg")
             sum_c += tl.sum(tile, axis=1)
 
         mean_c = sum_c * inv_hw
-        bias = tl.load(bias_ptr + c_idx * bias_stride_c, mask=c_mask, other=0.0, cache_modifier=".ca")
+        bias = tl.load(bias_ptr + c_idx * bias_stride_c,
+                       mask=c_mask,
+                       other=0.0,
+                       cache_modifier=".ca")
         v = tl.where(c_mask, mean_c + bias, NEG_INF)
         tile_max = tl.max(v, axis=0)
         m2 = tl.maximum(m, tile_max)
@@ -82,9 +91,14 @@ def _fused_mean_bias_lse(
 def _channel_mean_kernel(
     x_ptr,
     mean_ptr,
-    N, C, HW, C_TILES,
-    stride_n, stride_c,
-    mean_stride_n, mean_stride_c,
+    N,
+    C,
+    HW,
+    C_TILES,
+    stride_n,
+    stride_c,
+    mean_stride_n,
+    mean_stride_c,
     BLOCK_C: tl.constexpr,
     BLOCK_HW: tl.constexpr,
 ):
@@ -99,7 +113,7 @@ def _channel_mean_kernel(
     c_mask = c_idx < C
     base_c = pid_n * stride_n + c_idx * stride_c
     offs_hw = tl.arange(0, BLOCK_HW)
-    sums = tl.zeros((BLOCK_C,), dtype=tl.float32)
+    sums = tl.zeros((BLOCK_C, ), dtype=tl.float32)
 
     for hw_start in range(0, HW, BLOCK_HW):
         idx = hw_start + offs_hw
@@ -113,7 +127,9 @@ def _channel_mean_kernel(
         sums += tl.sum(vals, axis=1)
 
     means = sums * (1.0 / HW)
-    tl.store(mean_ptr + pid_n * mean_stride_n + c_idx * mean_stride_c, means, mask=c_mask)
+    tl.store(mean_ptr + pid_n * mean_stride_n + c_idx * mean_stride_c,
+             means,
+             mask=c_mask)
 
 
 @triton.jit
@@ -121,8 +137,10 @@ def _bias_lse_kernel(
     mean_ptr,
     bias_ptr,
     out_ptr,
-    N, C,
-    mean_stride_n, mean_stride_c,
+    N,
+    C,
+    mean_stride_n,
+    mean_stride_c,
     bias_stride_c,
     BLOCK_C: tl.constexpr,
 ):
@@ -164,6 +182,7 @@ class ModelNew(nn.Module):
     """
     Model that performs a transposed convolution, global average pooling, adds a bias, applies log-sum-exp, sum, and multiplication.
     """
+
     def __init__(
         self,
         in_channels=in_channels,
@@ -172,7 +191,8 @@ class ModelNew(nn.Module):
         bias_shape=bias_shape,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose2d(in_channels, out_channels, kernel_size)
+        self.conv_transpose = nn.ConvTranspose2d(in_channels, out_channels,
+                                                 kernel_size)
         self.bias = nn.Parameter(torch.randn(bias_shape))
 
     def forward(self, x):
@@ -187,14 +207,14 @@ class ModelNew(nn.Module):
         N, C, H, W = y.shape
         HW = H * W
         means = torch.empty((N, C), device=y.device, dtype=torch.float32)
-        out = torch.empty((N,), device=y.device, dtype=torch.float32)
+        out = torch.empty((N, ), device=y.device, dtype=torch.float32)
 
         if y.dtype == torch.float32:
             BLOCK_HW = min(FP32_MEAN_BLOCK_HW_CAP, _next_pow2(HW))
             BLOCK_C = min(FP32_LSE_BLOCK_C, _next_pow2(C))
             BLOCK_MEAN_C = min(FP32_MEAN_BLOCK_C, _next_pow2(C))
             c_tiles = triton.cdiv(C, BLOCK_MEAN_C)
-            _channel_mean_kernel[(N * c_tiles,)](
+            _channel_mean_kernel[(N * c_tiles, )](
                 y,
                 means,
                 N,
@@ -211,7 +231,7 @@ class ModelNew(nn.Module):
                 num_stages=FP32_MEAN_NUM_STAGES,
             )
 
-            _bias_lse_kernel[(N,)](
+            _bias_lse_kernel[(N, )](
                 means,
                 self.bias,
                 out,
@@ -228,7 +248,7 @@ class ModelNew(nn.Module):
             BLOCK_C = min(NON_FP32_BLOCK_C, _next_pow2(C))
             BLOCK_HW = min(NON_FP32_BLOCK_HW_CAP, _next_pow2(HW))
             tile_work = BLOCK_C * BLOCK_HW
-            _fused_mean_bias_lse[(N,)](
+            _fused_mean_bias_lse[(N, )](
                 y,
                 self.bias,
                 out,
@@ -247,7 +267,10 @@ class ModelNew(nn.Module):
 
         return out.view(N, 1)
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, bias_shape]

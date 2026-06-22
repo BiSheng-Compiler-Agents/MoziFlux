@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 FAST_GROUP_SIZE = 32
 FAST_BLOCK_M = 48
 FAST_NUM_WARPS = 4
@@ -117,7 +116,8 @@ def gemm_groupnorm_swish_multiply_swish(
     if x.dim() != 2:
         raise ValueError("expected `x` to be a 2D tensor")
     if not hasattr(x, "is_npu") or not x.is_npu:
-        raise ValueError("the Triton entrypoint only supports Ascend NPU tensors")
+        raise ValueError(
+            "the Triton entrypoint only supports Ascend NPU tensors")
 
     x = x.contiguous()
     linear_weight = linear_weight.contiguous()
@@ -179,7 +179,9 @@ def gemm_groupnorm_swish_multiply_swish(
 
 
 class ModelNew(nn.Module):
-    def __init__(self, in_features, out_features, num_groups, multiply_weight_shape):
+
+    def __init__(self, in_features, out_features, num_groups,
+                 multiply_weight_shape):
         super(ModelNew, self).__init__()
         self.gemm = nn.Linear(in_features, out_features)
         self.group_norm = nn.GroupNorm(num_groups, out_features)
@@ -202,7 +204,7 @@ batch_size = 1024
 in_features = 8192
 out_features = 8192
 num_groups = 256
-multiply_weight_shape = (out_features,)
+multiply_weight_shape = (out_features, )
 
 
 def get_inputs():

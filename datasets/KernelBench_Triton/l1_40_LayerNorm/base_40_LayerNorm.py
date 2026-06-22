@@ -27,7 +27,8 @@ def _layernorm_partial_sums_kernel(
         offsets = col_start + tl.arange(0, BLOCK_SIZE)
         offsets = tl.max_contiguous(offsets, BLOCK_SIZE)
         mask = offsets < M
-        x = tl.load(x_ptr + row * M + offsets, mask=mask, other=0.0).to(tl.float32)
+        x = tl.load(x_ptr + row * M + offsets, mask=mask,
+                    other=0.0).to(tl.float32)
         acc += tl.sum(x, axis=0)
         acc2 += tl.sum(x * x, axis=0)
         block_idx += PARTS_PER_ROW
@@ -87,7 +88,8 @@ def _layernorm_apply_partitioned_kernel(
         offsets = tl.max_contiguous(offsets, BLOCK_SIZE)
         mask = offsets < M
 
-        x = tl.load(x_ptr + row * M + offsets, mask=mask, other=0.0).to(tl.float32)
+        x = tl.load(x_ptr + row * M + offsets, mask=mask,
+                    other=0.0).to(tl.float32)
         w = tl.load(w_ptr + offsets, mask=mask, other=1.0).to(tl.float32)
         b = tl.load(b_ptr + offsets, mask=mask, other=0.0).to(tl.float32)
 
@@ -119,7 +121,7 @@ def _layer_norm_triton(
     eps: float,
 ):
     if isinstance(normalized_shape, int):
-        normalized_shape = (normalized_shape,)
+        normalized_shape = (normalized_shape, )
     M = math.prod(normalized_shape)
     rows = x.numel() // M
 
@@ -130,12 +132,14 @@ def _layer_norm_triton(
 
     parts_per_row, reduce_block, apply_block = _pick_configs(M, rows)
     partial_count = rows * parts_per_row
-    partial_sums = torch.empty(partial_count, device=x.device, dtype=torch.float32)
+    partial_sums = torch.empty(partial_count,
+                               device=x.device,
+                               dtype=torch.float32)
     partial_sumsq = torch.empty_like(partial_sums)
     mean = torch.empty(rows, device=x.device, dtype=torch.float32)
     rstd = torch.empty(rows, device=x.device, dtype=torch.float32)
 
-    reduction_grid = (partial_count,)
+    reduction_grid = (partial_count, )
     _layernorm_partial_sums_kernel[reduction_grid](
         x_in,
         partial_sums,
@@ -147,7 +151,7 @@ def _layer_norm_triton(
         num_stages=4,
     )
 
-    _layernorm_stats_from_partials_kernel[(rows,)](
+    _layernorm_stats_from_partials_kernel[(rows, )](
         partial_sums,
         partial_sumsq,
         mean,
@@ -187,17 +191,21 @@ def layer_norm(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self, normalized_shape: tuple):
         super(ModelNew, self).__init__()
         if isinstance(normalized_shape, int):
-            normalized_shape = (normalized_shape,)
+            normalized_shape = (normalized_shape, )
         self.normalized_shape = tuple(normalized_shape)
-        self.weight = nn.Parameter(torch.ones(self.normalized_shape, dtype=torch.float32))
-        self.bias = nn.Parameter(torch.zeros(self.normalized_shape, dtype=torch.float32))
+        self.weight = nn.Parameter(
+            torch.ones(self.normalized_shape, dtype=torch.float32))
+        self.bias = nn.Parameter(
+            torch.zeros(self.normalized_shape, dtype=torch.float32))
         self.eps = 1e-5
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return layer_norm(x, self.weight, self.bias, self.normalized_shape, self.eps)
+        return layer_norm(x, self.weight, self.bias, self.normalized_shape,
+                          self.eps)
 
 
 batch_size = 16

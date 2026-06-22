@@ -1,0 +1,25 @@
+=== Unit Test: l2_28_BMM_InstanceNorm_Sum_ResidualAdd_Multiply ===
+TEST baseline1 small_128x512x512 PASS max_diff=7.152557e-07
+TEST baseline2 small_128x512x512 PASS max_diff=5.960464e-07
+TEST optimized small_128x512x512 PASS max_diff=4.768372e-07
+TEST baseline1 irregular_257x768x640 PASS max_diff=9.536743e-07
+TEST baseline2 irregular_257x768x640 PASS max_diff=7.152557e-07
+TEST optimized irregular_257x768x640 PASS max_diff=9.536743e-07
+TEST baseline1 target_1024x8192x8192 PASS max_diff=1.430511e-06
+TEST baseline2 target_1024x8192x8192 PASS max_diff=9.536743e-07
+TEST optimized target_1024x8192x8192 PASS max_diff=1.907349e-06
+TEST baseline1 persistent_70000x32x32 SKIP dispatch_only
+TEST baseline2 persistent_70000x32x32 SKIP dispatch_only
+TEST optimized persistent_70000x32x32 PASS max_diff=4.768372e-07
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l2_28_BMM_InstanceNorm_Sum_ResidualAdd_Multiply_1782393298/28_BMM_InstanceNorm_Sum_ResidualAdd_Multiply.py:124: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out = torch.empty_like(y_c)
+l2_28_bmm_instancenorm_sum_residual_mul:
+                   label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small_128x512x512       0.036178          0.012769          0.011189          0.012834
+1  irregular_257x768x640       0.048468          0.026853          0.023169          0.026730
+2  target_1024x8192x8192       6.508702          6.424252          6.416978          6.424661
+
+/home/s00929845/kernel_verify/l2_28_BMM_InstanceNorm_Sum_ResidualAdd_Multiply_1782393298/28_BMM_InstanceNorm_Sum_ResidualAdd_Multiply.py:124: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out = torch.empty_like(y_c)

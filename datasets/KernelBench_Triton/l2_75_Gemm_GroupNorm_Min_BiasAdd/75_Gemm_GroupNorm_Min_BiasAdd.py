@@ -69,7 +69,9 @@ def _fused_groupnorm_min_bias_kernel(
     tl.store(out_ptrs, out_tile)
 
 
-def _groupnorm_min_bias_triton(x: torch.Tensor, gamma: torch.Tensor, beta: torch.Tensor, bias: torch.Tensor, num_groups: int, eps: float):
+def _groupnorm_min_bias_triton(x: torch.Tensor, gamma: torch.Tensor,
+                               beta: torch.Tensor, bias: torch.Tensor,
+                               num_groups: int, eps: float):
     """
     Fused Triton path:
     - computes GroupNorm(x, num_groups, gamma, beta)
@@ -78,14 +80,18 @@ def _groupnorm_min_bias_triton(x: torch.Tensor, gamma: torch.Tensor, beta: torch
     Returns: tensor of shape [1, C, N, 1]
     """
     if x.ndim != 2:
-        raise ValueError(f"Expected a 2D input tensor [N, C], got shape {tuple(x.shape)}")
+        raise ValueError(
+            f"Expected a 2D input tensor [N, C], got shape {tuple(x.shape)}")
 
     if x.device.type != "npu":
-        raise RuntimeError("The Triton fused GroupNorm-Min-Bias operator requires Ascend NPU tensors.")
+        raise RuntimeError(
+            "The Triton fused GroupNorm-Min-Bias operator requires Ascend NPU tensors."
+        )
 
     N, C = x.shape
     if C % num_groups != 0:
-        raise ValueError(f"Channel count {C} must be divisible by num_groups={num_groups}")
+        raise ValueError(
+            f"Channel count {C} must be divisible by num_groups={num_groups}")
 
     if gamma.numel() != C or beta.numel() != C:
         raise ValueError("GroupNorm affine parameters must have shape [C].")
@@ -113,14 +119,21 @@ def _groupnorm_min_bias_triton(x: torch.Tensor, gamma: torch.Tensor, beta: torch
     # Output [1, C, N, 1]
     out = torch.empty((1, C, N, 1), device=x.device, dtype=x.dtype)
 
-    grid = (N,)
+    grid = (N, )
     _fused_groupnorm_min_bias_kernel[grid](
-        x_ctg, gamma_ctg, beta_ctg, bvec, out,
-        N, C,
+        x_ctg,
+        gamma_ctg,
+        beta_ctg,
+        bvec,
+        out,
+        N,
+        C,
         x_ctg.stride(0),
-        out.stride(1), out.stride(2),
+        out.stride(1),
+        out.stride(2),
         eps,
-        GROUP_SIZE=group_size, NUM_GROUPS=num_groups,
+        GROUP_SIZE=group_size,
+        NUM_GROUPS=num_groups,
     )
     return out
 
@@ -155,6 +168,7 @@ class ModelNew(nn.Module):
     """
     Model that performs a GEMM, Group Normalization, Minimum operation, and Bias addition.
     """
+
     def __init__(self, in_features, out_features, num_groups, bias_shape):
         super(ModelNew, self).__init__()
         self.gemm = nn.Linear(in_features, out_features)
@@ -172,13 +186,18 @@ class ModelNew(nn.Module):
             self.group_norm.num_groups,
             self.group_norm.eps,
         )
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
 num_groups = 512
 bias_shape = (1, out_features, 1, 1)
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features, num_groups, bias_shape]

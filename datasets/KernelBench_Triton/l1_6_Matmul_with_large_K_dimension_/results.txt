@@ -1,0 +1,18 @@
+TEST baseline1 direct_small    : PASS max_abs=3.71188e-05
+TEST baseline2 direct_small    : PASS max_abs=3.71188e-05
+TEST optimized direct_small    : PASS max_abs=3.71286e-05
+TEST baseline1 direct_nonpow2  : PASS max_abs=2.89083e-06
+TEST baseline2 direct_nonpow2  : PASS max_abs=2.89083e-06
+TEST optimized direct_nonpow2  : PASS max_abs=4.06541e-05
+TEST baseline1 split_medium    : PASS max_abs=2.23517e-06
+TEST baseline2 split_medium    : PASS max_abs=2.23517e-06
+TEST optimized split_medium    : PASS max_abs=4.61936e-07
+TEST baseline1 benchmark_largeK: PASS max_abs=9.7774e-05
+TEST baseline2 benchmark_largeK: PASS max_abs=7.33733e-05
+TEST optimized benchmark_largeK: PASS max_abs=7.29505e-05
+matmul_large_k:
+              label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      direct_small       0.294226         17.794483         17.799896          2.606238
+1    direct_nonpow2       1.314245         23.003963         23.001659          9.617090
+2      split_medium       1.497458         23.226006         23.219593          5.001229
+3  benchmark_largeK       3.908298         22.708372          6.533974         14.502171

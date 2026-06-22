@@ -1,0 +1,18 @@
+TEST baseline1 small_dim1 PASS
+TEST baseline2 small_dim1 PASS
+TEST optimized small_dim1 PASS
+TEST baseline1 irregular_dim1 PASS
+TEST baseline2 irregular_dim1 SKIP value_mismatch count=387
+TEST optimized irregular_dim1 PASS
+TEST baseline1 target_dim1 SKIP RuntimeError
+TEST baseline2 target_dim1 SKIP RuntimeError
+TEST optimized target_dim1 PASS
+TEST optimized fallback_dim0 PASS
+TEST optimized fallback_dim2 PASS
+UNIT_TEST PASS
+
+argmax_over_dimension:
+            label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small_dim1       0.006141          0.011735          0.005974          0.005305
+1  irregular_dim1       0.006512          0.016545          0.007080          0.021318
+2     target_dim1       5.435073               inf               inf         18.542612

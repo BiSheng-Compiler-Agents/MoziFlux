@@ -9,8 +9,20 @@ import triton.language as tl
 
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 64}, num_warps=8, num_stages=3),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 64}, num_warps=4, num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=3),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_warps=4,
+                      num_stages=4),
     ],
     key=["N"],
 )
@@ -81,7 +93,8 @@ def _lower_tri_matmul_kernel(
     if tile_all_lower and full_in_bounds:
         tl.store(c_ptrs, acc.to(C_ptr.dtype.element_ty))
     else:
-        store_mask = (rm[:, None] >= rn[None, :]) & m_in[:, None] & n_in[None, :]
+        store_mask = (rm[:, None] >= rn[None, :]) & m_in[:,
+                                                         None] & n_in[None, :]
         tl.store(c_ptrs, acc.to(C_ptr.dtype.element_ty), mask=store_mask)
 
 
@@ -97,7 +110,8 @@ def _require_supported_runtime(tensor: torch.Tensor) -> None:
     )
 
 
-def _validate_inputs(a: torch.Tensor, b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def _validate_inputs(a: torch.Tensor,
+                     b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     if a.ndim != 2 or b.ndim != 2:
         raise ValueError("ModelNew expects two 2D tensors.")
     if a.shape != b.shape or a.shape[0] != a.shape[1]:
@@ -107,7 +121,8 @@ def _validate_inputs(a: torch.Tensor, b: torch.Tensor) -> tuple[torch.Tensor, to
     if a.dtype != b.dtype:
         raise ValueError("Inputs must have the same dtype.")
     if a.dtype not in {torch.float16, torch.float32}:
-        raise TypeError(f"Unsupported dtype for lower triangular matmul: {a.dtype}.")
+        raise TypeError(
+            f"Unsupported dtype for lower triangular matmul: {a.dtype}.")
     _require_supported_runtime(a)
     return a.contiguous(), b.contiguous()
 
@@ -125,10 +140,12 @@ class ModelNew(nn.Module):
         N = A.shape[0]
         C = torch.zeros((N, N), device=A.device, dtype=A.dtype)
 
-        grid = lambda META: (
-            triton.cdiv(N, META["BLOCK_M"]),
-            triton.cdiv(N, META["BLOCK_N"]),
-        )
+        def grid(META):
+            return (
+                triton.cdiv(N, META["BLOCK_M"]),
+                triton.cdiv(N, META["BLOCK_N"]),
+            )
+
         _lower_tri_matmul_kernel[grid](
             A,
             B,
@@ -142,14 +159,20 @@ class ModelNew(nn.Module):
             C.stride(1),
         )
         return C
+
+
 M = 4096
 
+
 def get_inputs():
-    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    device = "npu" if hasattr(torch,
+                              "npu") and torch.npu.is_available() else "cpu"
     A = torch.rand(M, M, device=device)
     B = torch.rand(M, M, device=device)
     A = torch.tril(A)
     B = torch.tril(B)
     return [A, B]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

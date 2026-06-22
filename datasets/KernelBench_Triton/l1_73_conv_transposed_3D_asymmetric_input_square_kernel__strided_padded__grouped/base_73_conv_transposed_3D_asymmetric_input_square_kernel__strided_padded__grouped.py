@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 
-
 SCATTER_BLOCK_D = 32
 SCATTER_BLOCK_H = 1
 SCATTER_BLOCK_W = 128
@@ -62,7 +61,8 @@ def _upsample3d_scatter_contiguous_kernel(
     in_nc_base = pid_nc * Di * Hi * Wi
     out_nc_base = pid_nc * Du * Hu * Wu
     in_ptrs = in_ptr + in_nc_base + (d_off * Hi + h_off) * Wi + w_off
-    out_ptrs = out_ptr + out_nc_base + ((d_off * SD) * Hu + (h_off * SH)) * Wu + (w_off * SW)
+    out_ptrs = out_ptr + out_nc_base + ((d_off * SD) * Hu +
+                                        (h_off * SH)) * Wu + (w_off * SW)
     x = tl.load(in_ptrs, mask=valid, other=0.0)
     tl.store(out_ptrs, x, mask=valid)
 
@@ -95,12 +95,14 @@ def _upsample3d_scatter_contiguous_nomask_kernel(
     in_nc_base = pid_nc * Di * Hi * Wi
     out_nc_base = pid_nc * Du * Hu * Wu
     in_ptrs = in_ptr + in_nc_base + (d_off * Hi + h_off) * Wi + w_off
-    out_ptrs = out_ptr + out_nc_base + ((d_off * SD) * Hu + (h_off * SH)) * Wu + (w_off * SW)
+    out_ptrs = out_ptr + out_nc_base + ((d_off * SD) * Hu +
+                                        (h_off * SH)) * Wu + (w_off * SW)
     x = tl.load(in_ptrs)
     tl.store(out_ptrs, x)
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_channels: int = in_channels,
@@ -134,15 +136,18 @@ class ModelNew(nn.Module):
         co = co_g * g
         w_flip = weight.flip(dims=(2, 3, 4))
         w_g = w_flip.view(g, ci_g, co_g, k_d, k_h, k_w)
-        return w_g.permute(0, 2, 1, 3, 4, 5).contiguous().view(co, ci_g, k_d, k_h, k_w)
+        return w_g.permute(0, 2, 1, 3, 4,
+                           5).contiguous().view(co, ci_g, k_d, k_h, k_w)
 
     def _get_conv_weight(self) -> torch.Tensor:
         weight = self.conv_transpose3d.weight
         if not CACHE_CONV_WEIGHT:
-            return self._weight_to_conv3d(weight, self.conv_transpose3d.groups).contiguous()
+            return self._weight_to_conv3d(
+                weight, self.conv_transpose3d.groups).contiguous()
         key = (weight.data_ptr(), str(weight.device), weight.dtype)
         if self._cached_w_conv_key != key or self._cached_w_conv is None:
-            self._cached_w_conv = self._weight_to_conv3d(weight, self.conv_transpose3d.groups).contiguous()
+            self._cached_w_conv = self._weight_to_conv3d(
+                weight, self.conv_transpose3d.groups).contiguous()
             self._cached_w_conv_key = key
         return self._cached_w_conv
 
@@ -170,22 +175,23 @@ class ModelNew(nn.Module):
         pad_h = k_h - 1 - ph
         pad_w = k_w - 1 - pw
         if (pad_d < 0) or (pad_h < 0) or (pad_w < 0):
-            raise RuntimeError("ModelNew requires kernel_size - 1 >= padding in every spatial dimension")
+            raise RuntimeError(
+                "ModelNew requires kernel_size - 1 >= padding in every spatial dimension"
+            )
 
         w_conv = self._get_conv_weight()
-        x_up = torch.zeros((n, cin, du, hu, wu), dtype=x.dtype, device=x.device)
+        x_up = torch.zeros((n, cin, du, hu, wu),
+                           dtype=x.dtype,
+                           device=x.device)
         num_wblk = triton.cdiv(wi, SCATTER_BLOCK_W)
         grid = (
             triton.cdiv(hi, SCATTER_BLOCK_H),
             triton.cdiv(di, SCATTER_BLOCK_D),
             num_wblk * n * cin,
         )
-        exact_tile_fast_path = (
-            num_wblk == 1
-            and (di % SCATTER_BLOCK_D) == 0
-            and (hi % SCATTER_BLOCK_H) == 0
-            and wi == SCATTER_BLOCK_W
-        )
+        exact_tile_fast_path = (num_wblk == 1 and (di % SCATTER_BLOCK_D) == 0
+                                and (hi % SCATTER_BLOCK_H) == 0
+                                and wi == SCATTER_BLOCK_W)
         if exact_tile_fast_path:
             _upsample3d_scatter_contiguous_nomask_kernel[grid](
                 x,
@@ -256,4 +262,7 @@ def get_inputs():
 
 
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, groups]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding,
+        output_padding, groups
+    ]

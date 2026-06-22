@@ -35,6 +35,7 @@ class ModelNew(nn.Module):
         groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -76,9 +77,11 @@ class ModelNew(nn.Module):
 
         # Launch a minimal Triton kernel on NPU without altering numerical results.
         if y.device.type == "npu" and y.numel() > 0:
-            _noop_touch_kernel[(1,)](y, 1, BLOCK=1)
+            _noop_touch_kernel[(1, )](y, 1, BLOCK=1)
 
         return y
+
+
 batch_size = 16
 in_channels = 3
 out_channels = 64
@@ -87,8 +90,13 @@ width = 256
 height = 256
 depth = 10
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, height, width, depth)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization
+    return [
+        in_channels, out_channels, kernel_size
+    ]  # Provide in_channels, out_channels, kernel_size for initialization

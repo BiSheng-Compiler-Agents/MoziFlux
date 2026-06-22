@@ -29,7 +29,8 @@ def _sumsq_kernel(
 
 
 @triton.jit
-def _reduce_partials_kernel(partials_ptr, n_partials, out_ptr, BLOCK: tl.constexpr):
+def _reduce_partials_kernel(partials_ptr, n_partials, out_ptr,
+                            BLOCK: tl.constexpr):
     offs = tl.arange(0, BLOCK)
     acc = 0.0
     idx = 0
@@ -68,6 +69,7 @@ def _scale_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -91,7 +93,7 @@ class ModelNew(nn.Module):
         scale_programs = min(n_blocks, 32768)
 
         sumsq = torch.zeros(1, device=x_contig.device, dtype=torch.float32)
-        _sumsq_kernel[(sum_programs,)](
+        _sumsq_kernel[(sum_programs, )](
             x_contig,
             n_elements,
             n_blocks,
@@ -104,7 +106,7 @@ class ModelNew(nn.Module):
 
         out_dtype = torch.promote_types(x_contig.dtype, torch.float32)
         y = torch.empty_like(x_contig, dtype=out_dtype)
-        _scale_kernel[(scale_programs,)](
+        _scale_kernel[(scale_programs, )](
             x_contig,
             y,
             n_elements,

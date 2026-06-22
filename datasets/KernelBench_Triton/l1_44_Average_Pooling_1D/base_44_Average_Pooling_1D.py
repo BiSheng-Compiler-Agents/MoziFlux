@@ -1,10 +1,8 @@
-import math
 import torch
 import torch.nn as nn
 import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
-
 
 DEFAULT_KERNEL_SIZE = 8
 DEFAULT_STRIDE = 1
@@ -101,6 +99,7 @@ class ModelNew(nn.Module):
     Simple model that performs 1D Average Pooling using a Triton kernel.
     Semantics match nn.AvgPool1d with count_include_pad=True and ceil_mode=False.
     """
+
     def __init__(
         self,
         kernel_size: int = DEFAULT_KERNEL_SIZE,
@@ -118,16 +117,18 @@ class ModelNew(nn.Module):
         if x.dtype not in (torch.float16, torch.float32, torch.bfloat16):
             raise RuntimeError(
                 f"Unsupported dtype for ModelNew: {x.dtype}. "
-                "Supported dtypes are float16, float32, and bfloat16."
-            )
+                "Supported dtypes are float16, float32, and bfloat16.")
         if x.ndim != 3:
             raise RuntimeError(
                 f"ModelNew expects a 3D tensor shaped [batch, channels, length], got {tuple(x.shape)}"
             )
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked inputs")
         if self.kernel_size <= 0 or self.stride <= 0 or self.padding < 0:
-            raise RuntimeError("kernel_size and stride must be positive, and padding must be non-negative")
+            raise RuntimeError(
+                "kernel_size and stride must be positive, and padding must be non-negative"
+            )
 
         x = x.contiguous()
         B, C, L_in = x.shape
@@ -148,7 +149,7 @@ class ModelNew(nn.Module):
             num_warps = 4
 
         n_col_blocks = triton.cdiv(L_out, BLOCK)
-        grid = (N_ROWS,)
+        grid = (N_ROWS, )
 
         if self.kernel_size == 8 and self.stride == 1 and self.padding == 4:
             avgpool1d_forward_kernel_specialized[grid](

@@ -1,0 +1,20 @@
+TEST torch small PASS
+TEST baseline1 small PASS
+TEST baseline2 small SKIP baseline2_readonly_not_loaded
+TEST optimized small PASS
+TEST torch medium PASS
+TEST baseline1 medium PASS
+TEST baseline2 medium SKIP baseline2_readonly_not_loaded
+TEST optimized medium PASS
+TEST torch target PASS
+TEST baseline1 target SKIP grid_guard
+TEST baseline2 target SKIP baseline2_readonly_not_loaded
+TEST optimized target PASS
+TEST optimized_fallback small PASS
+UNIT_TEST PASS
+
+l2_29_matmul_mish_mish:
+    label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   small       0.021892          0.056353               inf          0.021928
+1  medium       0.060687          2.565578               inf          0.061053
+2  target       7.025122               inf               inf          7.023730

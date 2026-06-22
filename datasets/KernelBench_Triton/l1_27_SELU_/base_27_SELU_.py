@@ -30,7 +30,10 @@ def _selu_kernel(
         offsets = tl.max_contiguous(tl.multiple_of(offsets, 16), BLOCK_SIZE)
 
         mask = offsets < n_elements
-        x = tl.load(x_ptr + offsets, mask=mask, other=0.0, eviction_policy="evict_first")
+        x = tl.load(x_ptr + offsets,
+                    mask=mask,
+                    other=0.0,
+                    eviction_policy="evict_first")
         x32 = x.to(tl.float32)
 
         exp_term = tl.exp(x32) - 1.0
@@ -39,6 +42,7 @@ def _selu_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -49,7 +53,8 @@ class ModelNew(nn.Module):
         if x.dtype not in supported_dtypes:
             raise RuntimeError(f"Unsupported dtype for ModelNew: {x.dtype}")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked inputs")
         if x.numel() == 0:
             return x.contiguous()
 
@@ -60,7 +65,7 @@ class ModelNew(nn.Module):
         total_tiles = triton.cdiv(n_elements, block_size)
         grid_size = min(total_tiles, 65535)
         tiles_per_program = triton.cdiv(total_tiles, grid_size)
-        grid = (grid_size,)
+        grid = (grid_size, )
 
         _selu_kernel[grid](
             x_contig,

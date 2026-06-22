@@ -33,7 +33,10 @@ def _scale_hardtanh_gelu_kernel(
         if full_tile:
             x = tl.load(x_ptr + offs, cache_modifier=".cg")
         else:
-            x = tl.load(x_ptr + offs, mask=mask, other=0.0, cache_modifier=".cg")
+            x = tl.load(x_ptr + offs,
+                        mask=mask,
+                        other=0.0,
+                        cache_modifier=".cg")
         xf = x.to(tl.float32) * scale
         xf = tl.minimum(tl.maximum(xf, minv), maxv)
         y32 = 0.5 * xf * (1.0 + tl.math.erf(xf * inv_sqrt2))
@@ -49,6 +52,7 @@ class ModelNew(nn.Module):
     Model that performs a GEMM, scaling, hardtanh, and GELU activation.
     Fuses scale + hardtanh + GELU into a single Triton kernel for speed.
     """
+
     def __init__(
         self,
         in_features=1024,
@@ -74,7 +78,7 @@ class ModelNew(nn.Module):
         numel = flat.numel()
         block_size = 1024
         blocks_per_program = 5
-        grid = (triton.cdiv(numel, block_size * blocks_per_program),)
+        grid = (triton.cdiv(numel, block_size * blocks_per_program), )
         _scale_hardtanh_gelu_kernel[grid](
             flat,
             flat,
@@ -96,10 +100,13 @@ class ModelNew(nn.Module):
         if x.dtype not in supported_dtypes:
             raise RuntimeError(f"Unsupported dtype for ModelNew: {x.dtype}")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked inputs")
 
         y = self.gemm(x)
         return self._post_ops_triton(y)
+
+
 batch_size = 2048
 in_features = 8192
 out_features = 8192
@@ -107,7 +114,12 @@ scaling_factor = 0.5
 hardtanh_min = -2
 hardtanh_max = 2
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
-    return [in_features, out_features, scaling_factor, hardtanh_min, hardtanh_max]
+    return [
+        in_features, out_features, scaling_factor, hardtanh_min, hardtanh_max
+    ]

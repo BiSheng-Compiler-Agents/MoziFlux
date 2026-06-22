@@ -22,6 +22,7 @@ class ModelNew(nn.Module):
     """
     Performs a transposed 3D convolution with a mandatory Triton post-kernel on Ascend NPU.
     """
+
     def __init__(
         self,
         in_channels: int = 32,
@@ -61,7 +62,10 @@ class ModelNew(nn.Module):
         y = self.conv_transpose3d(x).contiguous()
         n_elements = y.numel()
         if n_elements > 0:
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]), )
+
             _touch_inplace_kernel[grid](y, n_elements, BLOCK_SIZE=256)
         return y
 
@@ -77,6 +81,8 @@ def run_operator(x: torch.Tensor) -> torch.Tensor:
         model.eval()
         _MODEL_CACHE[key] = model
     return model(x)
+
+
 batch_size = 16
 in_channels = 32
 out_channels = 16
@@ -85,8 +91,18 @@ depth_in = 16
 height_in = 32
 width_in = 64
 
+
 def get_inputs():
-    x = torch.rand(batch_size, in_channels, depth_in, height_in, width_in, device='npu')
+    x = torch.rand(batch_size,
+                   in_channels,
+                   depth_in,
+                   height_in,
+                   width_in,
+                   device='npu')
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization
+    return [
+        in_channels, out_channels, kernel_size
+    ]  # Provide in_channels, out_channels, kernel_size for initialization

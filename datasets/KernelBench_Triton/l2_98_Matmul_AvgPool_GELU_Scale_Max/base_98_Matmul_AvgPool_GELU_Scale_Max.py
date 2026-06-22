@@ -36,7 +36,9 @@ def _max_gelu_scale_kernel(
 
 
 class ModelNew(nn.Module):
-    def __init__(self, in_features, out_features, pool_kernel_size, scale_factor):
+
+    def __init__(self, in_features, out_features, pool_kernel_size,
+                 scale_factor):
         super(ModelNew, self).__init__()
         self.matmul = nn.Linear(in_features, out_features)
         self.scale_factor = scale_factor
@@ -44,7 +46,7 @@ class ModelNew(nn.Module):
 
     def forward(self, x):
         return _fused_apply(x, self.matmul.weight, self.matmul.bias,
-                           self._pool_k, self.scale_factor)
+                            self._pool_k, self.scale_factor)
 
 
 def _fused_apply(x, weight, bias, pool_kernel_size, scale_factor):
@@ -62,7 +64,8 @@ def _fused_apply(x, weight, bias, pool_kernel_size, scale_factor):
 
     G = out_features // kernel_size
 
-    cache_key = ("grouped", out_features, kernel_size, in_features, x.device.type, x.device.index, x.dtype)
+    cache_key = ("grouped", out_features, kernel_size, in_features,
+                 x.device.type, x.device.index, x.dtype)
     if cache_key not in _PARAM_CACHE:
         weight_grouped = weight.reshape(G, kernel_size, in_features).sum(dim=1)
         bias_grouped = bias.reshape(G, kernel_size).sum(dim=1)
@@ -73,11 +76,14 @@ def _fused_apply(x, weight, bias, pool_kernel_size, scale_factor):
     projected = F.linear(x, weight_grouped, bias_grouped)
 
     block_g = 1 << (G - 1).bit_length()
-    out = torch.empty((batch_size,), device=x.device, dtype=x.dtype)
+    out = torch.empty((batch_size, ), device=x.device, dtype=x.dtype)
 
-    _max_gelu_scale_kernel[(batch_size,)](
-        projected, out,
-        G, float(scale_factor), kernel_size,
+    _max_gelu_scale_kernel[(batch_size, )](
+        projected,
+        out,
+        G,
+        float(scale_factor),
+        kernel_size,
         BLOCK_G=block_g,
     )
     return out
@@ -92,8 +98,12 @@ def _get_default_linear_params(x, out_dim=8192):
     if key not in _PARAM_CACHE:
         generator = torch.Generator(device="cpu")
         generator.manual_seed(_PARAM_SEED)
-        weight = torch.randn((out_dim, x.shape[1]), generator=generator, dtype=torch.float32)
-        bias = torch.randn((out_dim,), generator=generator, dtype=torch.float32)
+        weight = torch.randn((out_dim, x.shape[1]),
+                             generator=generator,
+                             dtype=torch.float32)
+        bias = torch.randn((out_dim, ),
+                           generator=generator,
+                           dtype=torch.float32)
         _PARAM_CACHE[key] = (
             weight.to(device=x.device, dtype=x.dtype),
             bias.to(device=x.device, dtype=x.dtype),

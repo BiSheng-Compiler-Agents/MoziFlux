@@ -32,21 +32,22 @@ def _reduce_min_sum_gelu(
     w_ptrs = w_offsets * sxw
     tl.multiple_of(w_ptrs, values=1)
 
-    acc = tl.zeros((BLOCK_W,), dtype=tl.float32)
+    acc = tl.zeros((BLOCK_W, ), dtype=tl.float32)
     inf = 1.0e20
 
     h = 0
     while (h + 3) < H:
-        min0 = tl.full((BLOCK_W,), inf, dtype=tl.float32)
-        min1 = tl.full((BLOCK_W,), inf, dtype=tl.float32)
-        min2 = tl.full((BLOCK_W,), inf, dtype=tl.float32)
-        min3 = tl.full((BLOCK_W,), inf, dtype=tl.float32)
+        min0 = tl.full((BLOCK_W, ), inf, dtype=tl.float32)
+        min1 = tl.full((BLOCK_W, ), inf, dtype=tl.float32)
+        min2 = tl.full((BLOCK_W, ), inf, dtype=tl.float32)
+        min3 = tl.full((BLOCK_W, ), inf, dtype=tl.float32)
 
         c_start = 0
         while c_start < C:
             c_tile = c_start + tl.arange(0, BLOCK_C)
             mask_ct = c_tile < C
-            base_cw = x_ptr + x_base_n + c_tile[:, None] * sxc + w_ptrs[None, :]
+            base_cw = x_ptr + x_base_n + c_tile[:,
+                                                None] * sxc + w_ptrs[None, :]
             mask_cw = mask_ct[:, None] & mask_w[None, :]
 
             v0 = tl.load(
@@ -84,12 +85,13 @@ def _reduce_min_sum_gelu(
         h += 4
 
     while h < H:
-        cur_min = tl.full((BLOCK_W,), inf, dtype=tl.float32)
+        cur_min = tl.full((BLOCK_W, ), inf, dtype=tl.float32)
         c_start = 0
         while c_start < C:
             c_tile = c_start + tl.arange(0, BLOCK_C)
             mask_ct = c_tile < C
-            base_cw = x_ptr + x_base_n + c_tile[:, None] * sxc + w_ptrs[None, :]
+            base_cw = x_ptr + x_base_n + c_tile[:,
+                                                None] * sxc + w_ptrs[None, :]
             x_vals = tl.load(
                 base_cw + h * sxh,
                 mask=mask_ct[:, None] & mask_w[None, :],
@@ -133,35 +135,44 @@ def _broadcast_bias_add(
     mask_w = w_offsets < W
     mask_c = c_offsets < C
 
-    tmp_vals = tl.load(tmp_ptr + pid_n * stn + w_offsets * stw, mask=mask_w, other=0.0).to(tl.float32)
-    bias_vals = tl.load(bias_ptr + c_offsets * sbc, mask=mask_c, other=0.0).to(tl.float32)
-    out_ptrs = y_ptr + pid_n * syn + c_offsets[:, None] * syc + w_offsets[None, :] * syw
+    tmp_vals = tl.load(tmp_ptr + pid_n * stn + w_offsets * stw,
+                       mask=mask_w,
+                       other=0.0).to(tl.float32)
+    bias_vals = tl.load(bias_ptr + c_offsets * sbc, mask=mask_c,
+                        other=0.0).to(tl.float32)
+    out_ptrs = y_ptr + pid_n * syn + c_offsets[:, None] * syc + w_offsets[
+        None, :] * syw
     out_tile = tmp_vals[None, :] + bias_vals[:, None]
     tl.store(out_ptrs, out_tile, mask=mask_c[:, None] & mask_w[None, :])
 
 
 class ModelNew(nn.Module):
+
     def __init__(
-        self,
-        in_channels=64,
-        out_channels=128,
-        kernel_size=3,
-        stride=2,
-        padding=1,
-        output_padding=1,
-        bias_shape=(128, 1, 1),
+            self,
+            in_channels=64,
+            out_channels=128,
+            kernel_size=3,
+            stride=2,
+            padding=1,
+            output_padding=1,
+            bias_shape=(128, 1, 1),
     ):
         super().__init__()
-        self.conv_transpose = nn.ConvTranspose2d(
-            in_channels, out_channels, kernel_size, stride, padding, output_padding
-        )
+        self.conv_transpose = nn.ConvTranspose2d(in_channels, out_channels,
+                                                 kernel_size, stride, padding,
+                                                 output_padding)
         self.bias = nn.Parameter(torch.randn(bias_shape))
 
     def forward(self, x):
         x = self.conv_transpose(x)
         n_dim, c_dim, h_dim, w_dim = x.shape
-        y = torch.empty((n_dim, c_dim, 1, w_dim), device=x.device, dtype=x.dtype)
-        reduced = torch.empty((n_dim, w_dim), device=x.device, dtype=torch.float32)
+        y = torch.empty((n_dim, c_dim, 1, w_dim),
+                        device=x.device,
+                        dtype=x.dtype)
+        reduced = torch.empty((n_dim, w_dim),
+                              device=x.device,
+                              dtype=torch.float32)
 
         x_c = x.contiguous()
         b_c = self.bias.contiguous()
@@ -169,7 +180,8 @@ class ModelNew(nn.Module):
         block_w = 128
         block_c = 32
         reduce_grid = (n_dim, triton.cdiv(w_dim, block_w))
-        store_grid = (n_dim, triton.cdiv(w_dim, block_w), triton.cdiv(c_dim, block_c))
+        store_grid = (n_dim, triton.cdiv(w_dim,
+                                         block_w), triton.cdiv(c_dim, block_c))
 
         _reduce_min_sum_gelu[reduce_grid](
             x_c,
@@ -227,4 +239,7 @@ def get_inputs():
 
 
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, bias_shape]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding,
+        output_padding, bias_shape
+    ]

@@ -1,0 +1,27 @@
+TEST baseline1 direct_small PASS
+TEST baseline2 direct_small PASS
+TEST optimized direct_small PASS
+TEST baseline1 persistent_mid SKIP RuntimeError: coreDim_guard: baseline pooling launch would exceed 65535 programs
+TEST baseline2 persistent_mid SKIP RuntimeError: coreDim_guard: baseline pooling launch would exceed 65535 programs
+TEST optimized persistent_mid PASS
+UNIT_TEST PASS
+INFO baseline1 persistent_mid coreDim_guard -> inf
+INFO baseline2 persistent_mid coreDim_guard -> inf
+avg_pool2d_kernelbench_l1_45:
+            label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    direct_small       0.003810          0.091915          0.092013          0.089917
+1  persistent_mid       0.050742               inf               inf         13.082745
+
+TEST baseline1 direct_small PASS
+TEST baseline2 direct_small PASS
+TEST optimized direct_small PASS
+TEST baseline1 persistent_mid SKIP RuntimeError: coreDim_guard: baseline pooling launch would exceed 65535 programs
+TEST baseline2 persistent_mid SKIP RuntimeError: coreDim_guard: baseline pooling launch would exceed 65535 programs
+TEST optimized persistent_mid PASS
+UNIT_TEST PASS
+INFO baseline1 persistent_mid coreDim_guard -> inf
+INFO baseline2 persistent_mid coreDim_guard -> inf
+avg_pool2d_kernelbench_l1_45:
+            label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    direct_small       0.003766          0.091941          0.091965          0.090108
+1  persistent_mid       0.050682               inf               inf         13.072899

@@ -16,13 +16,27 @@ def _fill_const_kernel(out_ptr, value, n_elements, BLOCK_SIZE: tl.constexpr):
 
 
 class ModelNew(nn.Module):
-    def __init__(self, in_channels=8, out_channels=16, kernel_size=3, stride=2, padding=1, bias_shape=(1, 1, 1, 1, 1), scaling_factor=2.0):
+
+    def __init__(self,
+                 in_channels=8,
+                 out_channels=16,
+                 kernel_size=3,
+                 stride=2,
+                 padding=1,
+                 bias_shape=(1, 1, 1, 1, 1),
+                 scaling_factor=2.0):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding)
         self.bias = nn.Parameter(torch.randn(bias_shape))
         self.scaling_factor = scaling_factor
+
         def _to3(x):
             return (x, x, x) if isinstance(x, int) else x
+
         self._k = _to3(self.conv_transpose.kernel_size)
         self._s = _to3(self.conv_transpose.stride)
         self._p = _to3(self.conv_transpose.padding)
@@ -40,9 +54,16 @@ class ModelNew(nn.Module):
         wo = (wi - 1) * s[2] - 2 * p[2] + d[2] * (k[2] - 1) + op[2] + 1
         out = torch.empty((n, 1, do, ho, wo), device=x.device, dtype=x.dtype)
         n_elements = out.numel()
-        grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
-        _fill_const_kernel[grid](out, self._const_val, n_elements, BLOCK_SIZE=26880)
+
+        def grid(meta):
+            return (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
+
+        _fill_const_kernel[grid](out,
+                                 self._const_val,
+                                 n_elements,
+                                 BLOCK_SIZE=26880)
         return out
+
 
 batch_size = 16
 in_channels = 16
@@ -56,8 +77,12 @@ stride = 1
 padding = 1
 scaling_factor = 2.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, depth, height, width)]
 
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, scaling_factor]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding, scaling_factor
+    ]

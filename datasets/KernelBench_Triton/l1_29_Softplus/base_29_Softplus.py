@@ -30,6 +30,7 @@ def _softplus_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -40,7 +41,8 @@ class ModelNew(nn.Module):
         if x.dtype not in supported_dtypes:
             raise RuntimeError(f"Unsupported dtype for ModelNew: {x.dtype}")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked inputs")
 
         x_contig = x.contiguous()
         n_elements = x_contig.numel()
@@ -51,7 +53,7 @@ class ModelNew(nn.Module):
         block_size = 4096
 
         def grid(meta):
-            return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]), )
 
         _softplus_kernel[grid](
             x_contig.view(-1),

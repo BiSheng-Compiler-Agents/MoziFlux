@@ -8,10 +8,10 @@ import triton.language as tl
 
 @triton.jit
 def _bias_sub_tanh_kernel(
-    x_ptr,         # *T: input/output tensor (N, C, H, W) flattened
-    b_ptr,         # *T: bias tensor (C)
-    y_ptr,         # *T: output tensor (same as x)
-    HW: tl.constexpr,   # H * W
+    x_ptr,  # *T: input/output tensor (N, C, H, W) flattened
+    b_ptr,  # *T: bias tensor (C)
+    y_ptr,  # *T: output tensor (same as x)
+    HW: tl.constexpr,  # H * W
     channels_per_batch: tl.constexpr,
     batch_elements: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
@@ -40,7 +40,8 @@ def _bias_sub_tanh_kernel(
 
 def _bias_sub_tanh_fused(x: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
     if x.device.type != "npu":
-        raise RuntimeError("The fused Triton kernel only supports Ascend NPU tensors.")
+        raise RuntimeError(
+            "The fused Triton kernel only supports Ascend NPU tensors.")
 
     x = x.contiguous()
     b = bias.reshape(-1).to(device=x.device, dtype=x.dtype)
@@ -54,10 +55,13 @@ def _bias_sub_tanh_fused(x: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
     # Launch configuration
     BLOCK_SIZE = 8192
     BLOCKS_PER_PROGRAM = 5
-    grid = (triton.cdiv(batch_elements, BLOCK_SIZE * BLOCKS_PER_PROGRAM), N * C)
+    grid = (triton.cdiv(batch_elements,
+                        BLOCK_SIZE * BLOCKS_PER_PROGRAM), N * C)
 
     _bias_sub_tanh_kernel[grid](
-        x, b, y,
+        x,
+        b,
+        y,
         HW,
         channels_per_batch=channels_per_batch,
         batch_elements=batch_elements,
@@ -81,13 +85,18 @@ def conv_transpose2d_subtract_tanh(
     groups: int = 1,
 ) -> torch.Tensor:
     if x.device.type != "npu":
-        raise RuntimeError("conv_transpose2d_subtract_tanh expects input on Ascend NPU.")
+        raise RuntimeError(
+            "conv_transpose2d_subtract_tanh expects input on Ascend NPU.")
     if weight.device.type != "npu":
-        raise RuntimeError("conv_transpose2d_subtract_tanh expects weight on Ascend NPU.")
+        raise RuntimeError(
+            "conv_transpose2d_subtract_tanh expects weight on Ascend NPU.")
     if subtract_bias.device.type != "npu":
-        raise RuntimeError("conv_transpose2d_subtract_tanh expects subtract_bias on Ascend NPU.")
+        raise RuntimeError(
+            "conv_transpose2d_subtract_tanh expects subtract_bias on Ascend NPU."
+        )
     if conv_bias is not None and conv_bias.device.type != "npu":
-        raise RuntimeError("conv_transpose2d_subtract_tanh expects conv_bias on Ascend NPU.")
+        raise RuntimeError(
+            "conv_transpose2d_subtract_tanh expects conv_bias on Ascend NPU.")
 
     x = F.conv_transpose2d(
         x,
@@ -106,16 +115,22 @@ class ModelNew(nn.Module):
     """
     Model that performs a transposed convolution, subtracts a bias term, and applies tanh activation.
     """
-    def __init__(self, in_channels, out_channels, kernel_size, bias_shape, stride=2, padding=1, output_padding=1):
+
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size,
+                 bias_shape,
+                 stride=2,
+                 padding=1,
+                 output_padding=1):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose2d(
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride=stride,
-            padding=padding,
-            output_padding=output_padding
-        )
+        self.conv_transpose = nn.ConvTranspose2d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding,
+                                                 output_padding=output_padding)
         self.bias = nn.Parameter(torch.randn(bias_shape))
 
     def forward(self, x):
@@ -130,14 +145,19 @@ class ModelNew(nn.Module):
             dilation=self.conv_transpose.dilation,
             groups=self.conv_transpose.groups,
         )
+
+
 batch_size = 32
-in_channels  = 64  
-out_channels = 64  
-height = width = 256 
+in_channels = 64
+out_channels = 64
+height = width = 256
 kernel_size = 4
 bias_shape = (out_channels, 1, 1)
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, bias_shape]

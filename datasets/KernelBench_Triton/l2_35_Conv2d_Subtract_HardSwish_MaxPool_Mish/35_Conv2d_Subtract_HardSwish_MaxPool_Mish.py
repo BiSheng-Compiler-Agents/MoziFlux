@@ -14,7 +14,8 @@ DEFAULT_POOL_KERNEL_SIZE = 2
 
 
 @triton.jit
-def _sub_hswish_kernel(x_ptr, out_ptr, N, subtract_value, BLOCK_SIZE: tl.constexpr):
+def _sub_hswish_kernel(x_ptr, out_ptr, N, subtract_value,
+                       BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     mask = offs < N
@@ -47,13 +48,17 @@ def _mish_kernel(x_ptr, out_ptr, N, BLOCK_SIZE: tl.constexpr):
 
 @triton.jit
 def _fused_hswish_maxpool_mish_kernel(
-    x_ptr,                  # *flat* input pointer (N*C*H*W)
-    y_ptr,                  # *flat* output pointer (N*C*H_out*W_out)
-    N_OUT,                  # total number of output elements
-    N, C, H, W,             # input dims
-    H_OUT, W_OUT,           # output spatial dims
-    subtract_value,         # scalar
-    K: tl.constexpr,        # pooling kernel size (square), stride = K
+    x_ptr,  # *flat* input pointer (N*C*H*W)
+    y_ptr,  # *flat* output pointer (N*C*H_out*W_out)
+    N_OUT,  # total number of output elements
+    N,
+    C,
+    H,
+    W,  # input dims
+    H_OUT,
+    W_OUT,  # output spatial dims
+    subtract_value,  # scalar
+    K: tl.constexpr,  # pooling kernel size (square), stride = K
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(0)
@@ -81,7 +86,8 @@ def _fused_hswish_maxpool_mish_kernel(
     for kh in tl.static_range(K):
         row_base = base + kh * W
         for kw in tl.static_range(K):
-            v = tl.load(x_ptr + row_base + kw, mask=mask, other=0).to(tl.float32) - subtract_value
+            v = tl.load(x_ptr + row_base + kw, mask=mask, other=0).to(
+                tl.float32) - subtract_value
             vp3 = v + 3.0
             vp3 = tl.minimum(tl.maximum(vp3, 0.0), 6.0)
             hs = v * (vp3 * inv6)
@@ -102,6 +108,7 @@ class ModelNew(nn.Module):
     """
     Model that performs a convolution, subtracts a value, applies HardSwish, MaxPool, and Mish activation functions.
     """
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -116,7 +123,8 @@ class ModelNew(nn.Module):
         self.pool = nn.MaxPool2d(pool_kernel_size)
         # cache pooling kernel size (assume square for fused path)
         if isinstance(pool_kernel_size, (tuple, list)):
-            assert pool_kernel_size[0] == pool_kernel_size[1], "Fused path requires square pooling"
+            assert pool_kernel_size[0] == pool_kernel_size[
+                1], "Fused path requires square pooling"
             self.pool_k = int(pool_kernel_size[0])
         else:
             self.pool_k = int(pool_kernel_size)
@@ -127,9 +135,10 @@ class ModelNew(nn.Module):
         if N == 0:
             return y
         BLOCK = 4096
-        grid = (triton.cdiv(N, BLOCK),)
+        grid = (triton.cdiv(N, BLOCK), )
         _sub_hswish_kernel[grid](
-            x.view(-1), y.view(-1),
+            x.view(-1),
+            y.view(-1),
             N,
             self.subtract_value,
             BLOCK_SIZE=BLOCK,
@@ -144,9 +153,10 @@ class ModelNew(nn.Module):
         if N == 0:
             return y
         BLOCK = 4096
-        grid = (triton.cdiv(N, BLOCK),)
+        grid = (triton.cdiv(N, BLOCK), )
         _mish_kernel[grid](
-            x.view(-1), y.view(-1),
+            x.view(-1),
+            y.view(-1),
             N,
             BLOCK_SIZE=BLOCK,
             num_warps=8,
@@ -165,11 +175,17 @@ class ModelNew(nn.Module):
         if N_OUT == 0:
             return y
         BLOCK = 4096
-        grid = (triton.cdiv(N_OUT, BLOCK),)
+        grid = (triton.cdiv(N_OUT, BLOCK), )
         _fused_hswish_maxpool_mish_kernel[grid](
             x.view(-1),
             y.view(-1),
-            N_OUT, N, C, H, W, H_OUT, W_OUT,
+            N_OUT,
+            N,
+            C,
+            H,
+            W,
+            H_OUT,
+            W_OUT,
             self.subtract_value,
             K=K,
             BLOCK_SIZE=BLOCK,
@@ -183,6 +199,8 @@ class ModelNew(nn.Module):
             raise RuntimeError("ModelNew requires Ascend NPU inputs.")
         x = self.conv(x)
         return self._fused_hs_pool_mish(x.contiguous())
+
+
 batch_size = 128
 in_channels = 64
 out_channels = 128
@@ -191,7 +209,13 @@ kernel_size = 3
 subtract_value = 0.5
 pool_kernel_size = 2
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, subtract_value, pool_kernel_size]
+    return [
+        in_channels, out_channels, kernel_size, subtract_value,
+        pool_kernel_size
+    ]

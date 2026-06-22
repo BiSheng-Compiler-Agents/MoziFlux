@@ -1,0 +1,19 @@
+TEST baseline1 direct_small PASS max_abs=8.941e-08 max_rel=1.788e-05
+TEST baseline2 direct_small SKIP read_only_optional_provider_preskip
+TEST optimized direct_small PASS max_abs=8.941e-08 max_rel=4.500e-06
+TEST baseline1 direct_medium PASS max_abs=1.192e-07 max_rel=1.109e-05
+TEST baseline2 direct_medium SKIP read_only_optional_provider_preskip
+TEST optimized direct_medium PASS max_abs=0.000e+00 max_rel=0.000e+00
+TEST baseline1 target_persistent SKIP baseline_huge_block_preskip
+TEST baseline2 target_persistent SKIP read_only_optional_provider_preskip
+TEST optimized target_persistent PASS max_abs=0.000e+00 max_rel=0.000e+00
+UNIT_TEST PASS
+INFO baseline2 direct_small INF read_only_optional_provider_preskip
+INFO baseline2 direct_medium INF read_only_optional_provider_preskip
+INFO baseline1 target_persistent INF baseline_huge_block_preskip
+INFO baseline2 target_persistent INF read_only_optional_provider_preskip
+convtranspose_maxpool_hardtanh_mean_tanh:
+               label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0       direct_small       0.073383          0.067202               inf          0.066515
+1      direct_medium       0.109743          0.620610               inf          0.109971
+2  target_persistent      12.613186               inf               inf         12.589623

@@ -1,0 +1,17 @@
+TEST baseline1 small_4x128 PASS max_diff=0
+TEST baseline2 small_4x128 PASS max_diff=0
+TEST optimized small_4x128 PASS max_diff=0
+TEST baseline1 irregular_129x1000 PASS max_diff=0
+TEST baseline2 irregular_129x1000 PASS max_diff=0
+TEST optimized irregular_129x1000 PASS max_diff=0
+TEST baseline1 exact_128x4096 PASS max_diff=0
+TEST baseline2 exact_128x4096 PASS max_diff=0
+TEST optimized exact_128x4096 PASS max_diff=0
+TEST optimized_fallback persistent_fallback_65536x1 PASS max_diff=0
+UNIT_TEST PASS
+
+cosine_similarity_loss:
+                label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0         small_4x128       0.022747          0.004150          0.004110          0.004162
+1  irregular_129x1000       0.036510          0.009404          0.006385          0.009424
+2      exact_128x4096       0.044070          0.012052          0.010857          0.012005

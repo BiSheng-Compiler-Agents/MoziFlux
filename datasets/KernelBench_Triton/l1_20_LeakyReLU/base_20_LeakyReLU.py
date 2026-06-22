@@ -29,6 +29,7 @@ def _leaky_relu_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self, negative_slope: float = 0.01):
         super(ModelNew, self).__init__()
         self.negative_slope = negative_slope
@@ -47,7 +48,7 @@ class ModelNew(nn.Module):
         n_elements = x.numel()
         block_size = 7168
         blocks_per_program = 5
-        grid = (triton.cdiv(n_elements, block_size * blocks_per_program),)
+        grid = (triton.cdiv(n_elements, block_size * blocks_per_program), )
         y = torch.empty_like(x_contig)
         _leaky_relu_kernel[grid](
             x_contig.view(-1),

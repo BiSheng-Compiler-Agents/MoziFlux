@@ -70,6 +70,7 @@ def _instance_norm2d_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self, num_features: int):
         super(ModelNew, self).__init__()
         self.num_features = num_features
@@ -84,7 +85,9 @@ class ModelNew(nn.Module):
 
 def instance_norm_2d(x: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
     assert x.dim() == 4, "Expected input of shape (N, C, H, W)"
-    assert x.device.type in {"cuda", "npu"}, "InstanceNorm Triton kernel requires an accelerator tensor"
+    assert x.device.type in {
+        "cuda", "npu"
+    }, "InstanceNorm Triton kernel requires an accelerator tensor"
 
     x = x.contiguous()
     y = torch.empty_like(x)
@@ -92,7 +95,7 @@ def instance_norm_2d(x: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
     N, C, H, W = x.shape
     HW = H * W
     NC = N * C
-    grid = (NC,)
+    grid = (NC, )
 
     _instance_norm2d_kernel[grid](
         x,

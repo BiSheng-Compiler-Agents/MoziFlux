@@ -100,19 +100,19 @@ def _matmul_2d_kernel(
         a_mask = (offs_m[:, None] < M) & (k_range[None, :] < K)
         b_mask = (k_range[:, None] < K) & (offs_n[None, :] < N)
 
-        # Load tiles and upcast to fp32 for robust numerical agreement across dtypes
-        a = tl.load(a_ptrs, mask=a_mask, other=0.0).to(tl.float32)
-        b = tl.load(b_ptrs, mask=b_mask, other=0.0).to(tl.float32)
+        # Keep fp16/bf16 operands native for Ascend tl.dot; accumulator is fp32.
+        a = tl.load(a_ptrs, mask=a_mask, other=0.0)
+        b = tl.load(b_ptrs, mask=b_mask, other=0.0)
 
-        # Blocked matmul accumulate with strict FP32 math (disable TF32)
-        acc += tl.dot(a, b, allow_tf32=False)
+        acc += tl.dot(a, b)
 
     # Write back results with boundary mask; pointer dtype of C determines cast
     c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
     tl.store(c_ptrs, acc, mask=c_mask)
 
 
-def _matmul_triton(A2d: torch.Tensor, B: torch.Tensor, out_dtype: torch.dtype) -> torch.Tensor:
+def _matmul_triton(A2d: torch.Tensor, B: torch.Tensor,
+                   out_dtype: torch.dtype) -> torch.Tensor:
     """
     Computes C = A2d @ B using a Triton kernel.
     A2d: (M, K)
@@ -143,11 +143,18 @@ def _matmul_triton(A2d: torch.Tensor, B: torch.Tensor, out_dtype: torch.dtype) -
         )
 
     _matmul_2d_kernel[grid](
-        A_ptr, B_ptr, C,
-        M, N, K,
-        stride_am, stride_ak,
-        stride_bk, stride_bn,
-        stride_cm, stride_cn,
+        A_ptr,
+        B_ptr,
+        C,
+        M,
+        N,
+        K,
+        stride_am,
+        stride_ak,
+        stride_bk,
+        stride_bn,
+        stride_cm,
+        stride_cn,
     )
     return C
 
@@ -164,7 +171,8 @@ def _require_supported_runtime(tensor: torch.Tensor) -> None:
     )
 
 
-def _validate_inputs(A: torch.Tensor, B: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def _validate_inputs(A: torch.Tensor,
+                     B: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     if A.dim() != 4 or B.dim() != 2:
         raise ValueError("ModelNew expects a 4D tensor and a 2D matrix.")
     if A.shape[-1] != B.shape[0]:
@@ -176,16 +184,18 @@ def _validate_inputs(A: torch.Tensor, B: torch.Tensor) -> tuple[torch.Tensor, to
     if A.dtype != B.dtype:
         raise ValueError("Inputs must have the same dtype.")
     if A.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-        raise TypeError(f"Unsupported dtype for Triton tensor-matrix multiplication: {A.dtype}.")
+        raise TypeError(
+            f"Unsupported dtype for Triton tensor-matrix multiplication: {A.dtype}."
+        )
     _require_supported_runtime(A)
     return A.contiguous(), B.contiguous()
 
 
 def _tensor_matrix_multiply(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     A, B = _validate_inputs(A, B)
-    b, i, j, l = A.shape
+    b, i, j, length = A.shape
     _, k = B.shape
-    A2d = A.reshape(-1, l)
+    A2d = A.reshape(-1, length)
     out_dtype = torch.result_type(A, B)
     C2d = _matmul_triton(A2d, B, out_dtype)
     return C2d.view(b, i, j, k)
@@ -196,21 +206,28 @@ class ModelNew(nn.Module):
     Performs 4D tensor-matrix multiplication:
         C[b, i, j, k] = sum_l A[b, i, j, l] * B[l, k]
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
     def forward(self, A, B):
         return _tensor_matrix_multiply(A, B)
+
+
 b = 8
 i = 256
 j = 512
-l = 256
+length = 256
 k = 768
 
+
 def get_inputs():
-    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
-    A = torch.rand(b, i, j, l, device=device)
-    B = torch.rand(l, k, device=device)
+    device = "npu" if hasattr(torch,
+                              "npu") and torch.npu.is_available() else "cpu"
+    A = torch.rand(b, i, j, length, device=device)
+    B = torch.rand(length, k, device=device)
     return [A, B]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

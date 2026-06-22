@@ -42,7 +42,7 @@ def _pool_sigmoid_channel_tile_kernel(
     inv_area = 1.0 / (K * K)
 
     base = x_ptr + b * STRIDE_B + c_idx[:, None] * STRIDE_C
-    total = tl.zeros((BLOCK_C,), dtype=tl.float32)
+    total = tl.zeros((BLOCK_C, ), dtype=tl.float32)
     lane_w = tl.arange(0, BLOCK_W)
 
     for h_out in range(0, H_OUT):
@@ -61,7 +61,9 @@ def _pool_sigmoid_channel_tile_kernel(
                     acc += vals
             avg = acc * inv_area
             sig = 1.0 / (1.0 + tl.exp(-avg))
-            total += tl.sum(tl.where(c_mask[:, None] & w_mask[None, :], sig, 0.0), axis=1)
+            total += tl.sum(tl.where(c_mask[:, None] & w_mask[None, :], sig,
+                                     0.0),
+                            axis=1)
 
     out_ptrs = out_ptr + b * OUT_STRIDE_B + c_idx * OUT_STRIDE_C
     tl.store(out_ptrs, total, mask=c_mask)
@@ -79,20 +81,24 @@ def _sum_channels_kernel(
     pid = tl.program_id(0)
     offs = tl.arange(0, BLOCK_C)
     mask = offs < C
-    vals = tl.load(x_ptr + pid * STRIDE_B + offs * STRIDE_C, mask=mask, other=0.0)
+    vals = tl.load(x_ptr + pid * STRIDE_B + offs * STRIDE_C,
+                   mask=mask,
+                   other=0.0)
     total = tl.sum(vals, axis=0)
     tl.store(out_ptr + pid, total)
 
 
 class ModelNew(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, pool_kernel_size):
+
+    def __init__(self, in_channels, out_channels, kernel_size,
+                 pool_kernel_size):
         super(ModelNew, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
         self.avg_pool = nn.AvgPool2d(pool_kernel_size)
         if isinstance(pool_kernel_size, tuple):
-            assert len(pool_kernel_size) == 2 and pool_kernel_size[0] == pool_kernel_size[1], (
-                "Fused Triton path supports only square pooling kernels."
-            )
+            assert len(pool_kernel_size) == 2 and pool_kernel_size[
+                0] == pool_kernel_size[1], (
+                    "Fused Triton path supports only square pooling kernels.")
             self.pool_kernel_size = int(pool_kernel_size[0])
         else:
             self.pool_kernel_size = int(pool_kernel_size)
@@ -109,13 +115,15 @@ class ModelNew(nn.Module):
         B, C, H, W = y.shape
         K = self.pool_kernel_size
         if H < K or W < K:
-            raise ValueError("Pooling kernel size must not exceed the convolution output size.")
+            raise ValueError(
+                "Pooling kernel size must not exceed the convolution output size."
+            )
 
         partial = torch.empty((B, C), device=y.device, dtype=torch.float32)
-        out = torch.empty((B,), device=y.device, dtype=torch.float32)
+        out = torch.empty((B, ), device=y.device, dtype=torch.float32)
         num_c_tiles = triton.cdiv(C, 16)
 
-        _pool_sigmoid_channel_tile_kernel[(B * num_c_tiles,)](
+        _pool_sigmoid_channel_tile_kernel[(B * num_c_tiles, )](
             y,
             partial,
             B,
@@ -136,7 +144,7 @@ class ModelNew(nn.Module):
             num_stages=1,
         )
 
-        _sum_channels_kernel[(B,)](
+        _sum_channels_kernel[(B, )](
             partial,
             out,
             C,

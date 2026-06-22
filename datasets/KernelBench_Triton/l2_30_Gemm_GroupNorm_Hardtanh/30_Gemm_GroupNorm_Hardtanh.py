@@ -63,6 +63,7 @@ class ModelNew(nn.Module):
     Simple model that performs a GEMM, applies Group Normalization, and then HardTanh.
     GroupNorm + HardTanh are fused into a single Triton kernel for NPU execution.
     """
+
     def __init__(
         self,
         in_features=1024,
@@ -87,7 +88,9 @@ class ModelNew(nn.Module):
         y = self.gemm(x)
 
         if y.device.type != "npu":
-            raise RuntimeError("ModelNew expects NPU tensors and does not provide a non-NPU fallback.")
+            raise RuntimeError(
+                "ModelNew expects NPU tensors and does not provide a non-NPU fallback."
+            )
 
         # Triton fused GroupNorm + HardTanh
         y = y.contiguous()
@@ -107,6 +110,7 @@ class ModelNew(nn.Module):
         # Tile size: next power-of-two of Cg for efficient reduction
         def next_power_of_two(v: int) -> int:
             return 1 if v <= 1 else 1 << ((v - 1).bit_length())
+
         BLOCK_SIZE = next_power_of_two(Cg)
 
         # Heuristic tuning for Hopper: small pipeline depth helps latency hiding
@@ -123,16 +127,26 @@ class ModelNew(nn.Module):
             num_warps = 1
             num_stages = 1
 
-        grid = (N * G,)
+        grid = (N * G, )
         _groupnorm_hardtanh_kernel[grid](
-            y, gamma, beta, out,
-            N, C, G, Cg,
-            eps, minv, maxv,
+            y,
+            gamma,
+            beta,
+            out,
+            N,
+            C,
+            G,
+            Cg,
+            eps,
+            minv,
+            maxv,
             BLOCK_SIZE=BLOCK_SIZE,
             num_warps=num_warps,
             num_stages=num_stages,
         )
         return out
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
@@ -140,7 +154,10 @@ num_groups = 16
 hardtanh_min = -2.0
 hardtanh_max = 2.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features, num_groups, hardtanh_min, hardtanh_max]

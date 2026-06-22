@@ -8,7 +8,15 @@ import torch_npu  # noqa: F401
 
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 64, "GROUP_M": 8}, num_stages=3, num_warps=8),
+        triton.Config(
+            {
+                "BLOCK_M": 128,
+                "BLOCK_N": 256,
+                "BLOCK_K": 64,
+                "GROUP_M": 8
+            },
+            num_stages=3,
+            num_warps=8),
     ],
     key=["M", "N", "K"],
 )
@@ -63,11 +71,14 @@ def _matmul_kernel(
     tl.store(c_ptrs, acc, mask=c_mask)
 
 
-def _validate_inputs(a: torch.Tensor, b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def _validate_inputs(a: torch.Tensor,
+                     b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     if a.ndim != 2 or b.ndim != 2:
         raise ValueError("A and B must be 2D tensors.")
     if a.shape[1] != b.shape[0]:
-        raise ValueError(f"Incompatible shapes for matmul: {tuple(a.shape)} @ {tuple(b.shape)}.")
+        raise ValueError(
+            f"Incompatible shapes for matmul: {tuple(a.shape)} @ {tuple(b.shape)}."
+        )
     if a.device.type != "npu" or b.device.type != "npu":
         raise ValueError("ModelNew expects Ascend NPU tensors.")
     if a.device != b.device:
@@ -77,7 +88,8 @@ def _validate_inputs(a: torch.Tensor, b: torch.Tensor) -> tuple[torch.Tensor, to
     if a.dtype not in (torch.float16, torch.bfloat16, torch.float32):
         raise TypeError(f"Unsupported dtype for Triton matmul: {a.dtype}.")
     if a.requires_grad or b.requires_grad:
-        raise RuntimeError("ModelNew does not support autograd-tracked inputs.")
+        raise RuntimeError(
+            "ModelNew does not support autograd-tracked inputs.")
     return a.contiguous(), b.contiguous()
 
 
@@ -86,7 +98,11 @@ def _matmul_triton(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     m, k = a.shape
     _, n = b.shape
     c = torch.empty((m, n), device=a.device, dtype=torch.float32)
-    grid = lambda meta: (triton.cdiv(m, meta["BLOCK_M"]) * triton.cdiv(n, meta["BLOCK_N"]),)
+
+    def grid(meta):
+        return (triton.cdiv(m, meta["BLOCK_M"]) *
+                triton.cdiv(n, meta["BLOCK_N"]), )
+
     _matmul_kernel[grid](
         a,
         b,
@@ -114,14 +130,20 @@ class ModelNew(nn.Module):
 
     def forward(self, A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
         return _matmul_triton(A, B)
+
+
 M = 1024 * 2
 K = 4096 * 2
 N = 2048 * 2
 
+
 def get_inputs():
-    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    device = "npu" if hasattr(torch,
+                              "npu") and torch.npu.is_available() else "cpu"
     A = torch.rand(M, K, device=device)
     B = torch.rand(K, N, device=device)
     return [A, B]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

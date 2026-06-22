@@ -61,13 +61,17 @@ def _triplet_margin_loss_triton(anchor: torch.Tensor,
                                 margin: float = 1.0,
                                 eps: float = 1e-6) -> torch.Tensor:
     if anchor.ndim != 2 or positive.ndim != 2 or negative.ndim != 2:
-        raise ValueError("triplet margin loss expects 2D tensors shaped [batch, features]")
+        raise ValueError(
+            "triplet margin loss expects 2D tensors shaped [batch, features]")
     if anchor.shape != positive.shape or anchor.shape != negative.shape:
-        raise ValueError("anchor, positive, and negative must have the same shape")
+        raise ValueError(
+            "anchor, positive, and negative must have the same shape")
     if anchor.device != positive.device or anchor.device != negative.device:
-        raise ValueError("anchor, positive, and negative must be on the same device")
+        raise ValueError(
+            "anchor, positive, and negative must be on the same device")
     if anchor.device.type != "npu":
-        raise RuntimeError("triplet margin loss Triton kernel requires Ascend NPU tensors")
+        raise RuntimeError(
+            "triplet margin loss Triton kernel requires Ascend NPU tensors")
 
     a = anchor.contiguous()
     p = positive.contiguous()
@@ -94,14 +98,22 @@ def _triplet_margin_loss_triton(anchor: torch.Tensor,
 
     N_ITERS = triton.cdiv(D, BLOCK_SIZE)
 
-    grid = (B,)
+    grid = (B, )
     _triplet_margin_row_kernel[grid](
-        a, p, n, out,
-        B, D,
-        a.stride(0), a.stride(1),
-        p.stride(0), p.stride(1),
-        n.stride(0), n.stride(1),
-        eps, float(margin),
+        a,
+        p,
+        n,
+        out,
+        B,
+        D,
+        a.stride(0),
+        a.stride(1),
+        p.stride(0),
+        p.stride(1),
+        n.stride(0),
+        n.stride(1),
+        eps,
+        float(margin),
         BLOCK_SIZE=BLOCK_SIZE,
         N_ITERS=N_ITERS,
     )
@@ -115,19 +127,30 @@ class ModelNew(nn.Module):
     Parameters:
         margin (float): The margin between the positive and negative samples.
     """
+
     def __init__(self, margin=1.0):
         super(ModelNew, self).__init__()
         self.margin = float(margin)
         self.eps = 1e-6
 
     def forward(self, anchor, positive, negative):
-        return _triplet_margin_loss_triton(anchor, positive, negative, self.margin, self.eps)
+        return _triplet_margin_loss_triton(anchor, positive, negative,
+                                           self.margin, self.eps)
+
+
 batch_size = 32768
-input_shape = (8192,)
+input_shape = (8192, )
 dim = 1
+
 
 def get_inputs():
     scale = torch.rand(())
-    return [torch.rand(batch_size, *input_shape)*scale, torch.rand(batch_size, *input_shape), torch.rand(batch_size, *input_shape)]
+    return [
+        torch.rand(batch_size, *input_shape) * scale,
+        torch.rand(batch_size, *input_shape),
+        torch.rand(batch_size, *input_shape)
+    ]
+
+
 def get_init_inputs():
     return [1.0]  # Default margin

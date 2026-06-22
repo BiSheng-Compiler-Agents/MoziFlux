@@ -35,8 +35,10 @@ def _linear_scale_kernel(
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
     offs_k = tl.arange(0, BLOCK_K)
 
-    a_ptrs = A_ptr + (offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak)
-    b_ptrs = B_ptr + (offs_k[:, None] * stride_bk + offs_n[None, :] * stride_bn)
+    a_ptrs = A_ptr + (offs_m[:, None] * stride_am +
+                      offs_k[None, :] * stride_ak)
+    b_ptrs = B_ptr + (offs_k[:, None] * stride_bk +
+                      offs_n[None, :] * stride_bn)
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 
@@ -57,7 +59,8 @@ def _linear_scale_kernel(
     bias = tl.load(Bias_ptr + offs_n, mask=offs_n < N, other=0.0)
     acc = acc + bias[None, :]
 
-    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm +
+                      offs_n[None, :] * stride_cn)
     c_mask = mask_m[:, None] & mask_n[None, :]
     tl.store(c_ptrs, acc, mask=c_mask)
 
@@ -67,6 +70,7 @@ class ModelNew(nn.Module):
     Simple model that performs a GEMM (general matrix multiplication), applies scaling,
     and then batch normalization.
     """
+
     def __init__(
         self,
         in_features=1024,
@@ -79,10 +83,18 @@ class ModelNew(nn.Module):
     ):
         super(ModelNew, self).__init__()
         if scale_shape is None:
-            scale_shape = (out_features,)
-        self.gemm = nn.Linear(in_features, out_features, device=device, dtype=dtype)
-        self.scale = nn.Parameter(torch.randn(scale_shape, device=device, dtype=dtype))
-        self.bn = nn.BatchNorm1d(out_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
+            scale_shape = (out_features, )
+        self.gemm = nn.Linear(in_features,
+                              out_features,
+                              device=device,
+                              dtype=dtype)
+        self.scale = nn.Parameter(
+            torch.randn(scale_shape, device=device, dtype=dtype))
+        self.bn = nn.BatchNorm1d(out_features,
+                                 eps=eps,
+                                 momentum=momentum,
+                                 device=device,
+                                 dtype=dtype)
 
     def _ensure_device_dtype(self, x: torch.Tensor) -> None:
         param = next(self.parameters())
@@ -97,9 +109,11 @@ class ModelNew(nn.Module):
 
         A = x
         weight = self.gemm.weight
-        bias = self.gemm.bias if self.gemm.bias is not None else torch.zeros(N, device=x.device, dtype=weight.dtype)
+        bias = self.gemm.bias if self.gemm.bias is not None else torch.zeros(
+            N, device=x.device, dtype=weight.dtype)
         scale = self.scale
-        scaled_weight_t = (weight * scale[:, None]).transpose(0, 1).contiguous()
+        scaled_weight_t = (weight * scale[:, None]).transpose(0,
+                                                              1).contiguous()
         scaled_bias = (bias * scale).contiguous()
 
         # Ensure dtypes and contiguous layout
@@ -107,13 +121,24 @@ class ModelNew(nn.Module):
         scaled_weight_t = scaled_weight_t.contiguous()
         scaled_bias = scaled_bias.contiguous()
 
-        grid = lambda META: (triton.cdiv(M, META["BLOCK_M"]), triton.cdiv(N, META["BLOCK_N"]))
+        def grid(META):
+            return (triton.cdiv(M, META["BLOCK_M"]),
+                    triton.cdiv(N, META["BLOCK_N"]))
+
         _linear_scale_kernel[grid](
-            A, scaled_weight_t, scaled_bias, y,
-            M, N, K,
-            A.stride(0), A.stride(1),
-            scaled_weight_t.stride(0), scaled_weight_t.stride(1),
-            y.stride(0), y.stride(1),
+            A,
+            scaled_weight_t,
+            scaled_bias,
+            y,
+            M,
+            N,
+            K,
+            A.stride(0),
+            A.stride(1),
+            scaled_weight_t.stride(0),
+            scaled_weight_t.stride(1),
+            y.stride(0),
+            y.stride(1),
             BLOCK_M=128,
             BLOCK_N=128,
             BLOCK_K=128,
@@ -127,13 +152,18 @@ class ModelNew(nn.Module):
         y = self._fused_linear_scale(x)
         y = self.bn(y)
         return y
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
-scale_shape = (out_features,)
+scale_shape = (out_features, )
+
 
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features, scale_shape]
 
@@ -150,7 +180,8 @@ def get_model_for_input(x: torch.Tensor) -> ModelNew:
     model = _MODEL_CACHE.get(key)
     if model is None:
         init_inputs = get_init_inputs()
-        model = ModelNew(*init_inputs, device=x.device.type, dtype=x.dtype).eval()
+        model = ModelNew(*init_inputs, device=x.device.type,
+                         dtype=x.dtype).eval()
         _MODEL_CACHE[key] = model
     return model
 

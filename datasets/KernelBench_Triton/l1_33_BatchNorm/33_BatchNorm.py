@@ -173,6 +173,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs Batch Normalization using Triton-optimized kernels.
     """
+
     def __init__(self, num_features: int = 64):
         super(ModelNew, self).__init__()
         self.bn = nn.BatchNorm2d(num_features=num_features)
@@ -199,7 +200,8 @@ class ModelNew(nn.Module):
             if bn.num_batches_tracked is not None:
                 bn.num_batches_tracked.add_(1)
                 if bn.momentum is None:
-                    exponential_average_factor = 1.0 / float(bn.num_batches_tracked.item())
+                    exponential_average_factor = 1.0 / float(
+                        bn.num_batches_tracked.item())
             else:
                 exponential_average_factor = 1.0
 
@@ -224,7 +226,9 @@ class ModelNew(nn.Module):
         shift = torch.empty(C, device=x.device, dtype=torch.float32)
 
         # Running stats pointers (may be dummy if not tracked)
-        if bn.track_running_stats and (bn.running_mean is not None) and (bn.running_var is not None):
+        if bn.track_running_stats and (bn.running_mean
+                                       is not None) and (bn.running_var
+                                                         is not None):
             running_mean = bn.running_mean
             running_var = bn.running_var
         else:
@@ -232,7 +236,8 @@ class ModelNew(nn.Module):
             running_mean = torch.zeros(C, device=x.device, dtype=torch.float32)
             running_var = torch.ones(C, device=x.device, dtype=torch.float32)
 
-        affine_flag = int(bn.affine and (bn.weight is not None) and (bn.bias is not None))
+        affine_flag = int(bn.affine and (bn.weight is not None)
+                          and (bn.bias is not None))
         if affine_flag:
             weight = bn.weight.to(dtype=torch.float32)
             bias = bn.bias.to(dtype=torch.float32)
@@ -243,14 +248,24 @@ class ModelNew(nn.Module):
 
         # If we use batch stats, first compute per-(c, nh) partial reductions without atomics
         if use_batch_stats:
-            partial_sum = torch.empty((C, NH), device=x.device, dtype=torch.float32)
-            partial_sumsq = torch.empty((C, NH), device=x.device, dtype=torch.float32)
+            partial_sum = torch.empty((C, NH),
+                                      device=x.device,
+                                      dtype=torch.float32)
+            partial_sumsq = torch.empty((C, NH),
+                                        device=x.device,
+                                        dtype=torch.float32)
             grid_rows = (C, NH)
             _bn_row_reduce_nhw_store[grid_rows](
                 x_fp32,
-                partial_sum, partial_sumsq,
-                N, H, W,
-                stride_n, stride_c, stride_h, stride_w,
+                partial_sum,
+                partial_sumsq,
+                N,
+                H,
+                W,
+                stride_n,
+                stride_c,
+                stride_h,
+                stride_w,
                 NH,
                 BLOCK_W=BLOCK_W,
                 NUM_W_CHUNKS=NUM_W_CHUNKS,
@@ -260,16 +275,27 @@ class ModelNew(nn.Module):
         else:
             # allocate dummy to satisfy kernel signature
             partial_sum = torch.empty(1, device=x.device, dtype=torch.float32)
-            partial_sumsq = torch.empty(1, device=x.device, dtype=torch.float32)
+            partial_sumsq = torch.empty(1,
+                                        device=x.device,
+                                        dtype=torch.float32)
 
         # Finalize params (mean/var/scale/shift), and optionally update running stats
-        _bn_finalize_params[(C,)](
-            partial_sum, partial_sumsq,
-            scale, shift,
-            running_mean, running_var,
-            weight, bias,
-            NH, M, eps, exponential_average_factor,
-            int(use_batch_stats), int(update_stats), affine_flag,
+        _bn_finalize_params[(C, )](
+            partial_sum,
+            partial_sumsq,
+            scale,
+            shift,
+            running_mean,
+            running_var,
+            weight,
+            bias,
+            NH,
+            M,
+            eps,
+            exponential_average_factor,
+            int(use_batch_stats),
+            int(update_stats),
+            affine_flag,
             BLOCK_NH=BLOCK_NH,
             NUM_NH_CHUNKS=NUM_NH_CHUNKS,
             num_warps=4,
@@ -280,11 +306,21 @@ class ModelNew(nn.Module):
         y = torch.empty_like(x_fp32)
         grid_apply = (C, NH)
         _bn_apply_nhw[grid_apply](
-            x_fp32, y,
-            scale, shift,
-            N, H, W,
-            stride_n, stride_c, stride_h, stride_w,
-            stride_n, stride_c, stride_h, stride_w,
+            x_fp32,
+            y,
+            scale,
+            shift,
+            N,
+            H,
+            W,
+            stride_n,
+            stride_c,
+            stride_h,
+            stride_w,
+            stride_n,
+            stride_c,
+            stride_h,
+            stride_w,
             BLOCK_W=BLOCK_W,
             NUM_W_CHUNKS=NUM_W_CHUNKS,
             num_warps=4,
@@ -292,13 +328,18 @@ class ModelNew(nn.Module):
         )
 
         return y
+
+
 batch_size = 64
 features = 64
 dim1 = 512
 dim2 = 512
 
+
 def get_inputs():
     x = torch.rand(batch_size, features, dim1, dim2)
     return [x]
+
+
 def get_init_inputs():
     return [features]

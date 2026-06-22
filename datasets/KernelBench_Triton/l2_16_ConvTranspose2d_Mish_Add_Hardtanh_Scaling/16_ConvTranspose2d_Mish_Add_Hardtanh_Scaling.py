@@ -8,7 +8,6 @@ try:
 except ImportError:
     torch_npu = None
 
-
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_CHANNELS = 64
 DEFAULT_OUT_CHANNELS = 64
@@ -28,9 +27,11 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 @triton.jit
 def _fused_mish_add_hardtanh_scale_kernel(
-    x_ptr, y_ptr,
+    x_ptr,
+    y_ptr,
     n_elements,
-    add_value, scale_value,
+    add_value,
+    scale_value,
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(0)
@@ -41,7 +42,10 @@ def _fused_mish_add_hardtanh_scale_kernel(
     mask = offs < n_elements
 
     # Load; values are single-use so prefer evict_last
-    x = tl.load(x_ptr + offs, mask=mask, other=0.0, eviction_policy="evict_last")
+    x = tl.load(x_ptr + offs,
+                mask=mask,
+                other=0.0,
+                eviction_policy="evict_last")
     x_f32 = x.to(tl.float32)
 
     # Mish: x * tanh(softplus(x))
@@ -62,9 +66,12 @@ def _fused_mish_add_hardtanh_scale_kernel(
     tl.store(y_ptr + offs, out, mask=mask)
 
 
-def _fused_mish_add_hardtanh_scale(x: torch.Tensor, add_value: float, scale: float) -> torch.Tensor:
+def _fused_mish_add_hardtanh_scale(x: torch.Tensor, add_value: float,
+                                   scale: float) -> torch.Tensor:
     if not _is_npu_tensor(x):
-        raise RuntimeError("_fused_mish_add_hardtanh_scale expects input tensors on Ascend NPU")
+        raise RuntimeError(
+            "_fused_mish_add_hardtanh_scale expects input tensors on Ascend NPU"
+        )
     if x.numel() == 0:
         return x.clone()
 
@@ -72,13 +79,15 @@ def _fused_mish_add_hardtanh_scale(x: torch.Tensor, add_value: float, scale: flo
     x_contig = x.contiguous()
     n_elements = x_contig.numel()
     BLOCK_SIZE = 4096
-    grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
+    grid = (triton.cdiv(n_elements, BLOCK_SIZE), )
 
     # Alias output to input for in-place epilogue
     _fused_mish_add_hardtanh_scale_kernel[grid](
-        x_contig, x_contig,
+        x_contig,
+        x_contig,
         n_elements,
-        float(add_value), float(scale),
+        float(add_value),
+        float(scale),
         BLOCK_SIZE=BLOCK_SIZE,
         num_warps=8,
         num_stages=3,
@@ -88,9 +97,10 @@ def _fused_mish_add_hardtanh_scale(x: torch.Tensor, add_value: float, scale: flo
 
 class ModelNew(nn.Module):
     """
-    Model that performs a transposed convolution, applies Mish activation, adds a value, 
+    Model that performs a transposed convolution, applies Mish activation, adds a value,
     applies Hardtanh activation, and scales the output.
     """
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -103,7 +113,9 @@ class ModelNew(nn.Module):
         scale=DEFAULT_SCALE,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride, padding, output_padding)
+        self.conv_transpose = nn.ConvTranspose2d(in_channels, out_channels,
+                                                 kernel_size, stride, padding,
+                                                 output_padding)
         self.add_value = add_value
         self.scale = scale
 
@@ -127,18 +139,26 @@ def run_operator(x: torch.Tensor) -> torch.Tensor:
         model.eval()
         _MODEL_CACHE[key] = model
     return model(x)
+
+
 batch_size = 128
-in_channels  = 64  
-out_channels = 64  
-height = width = 128  
-kernel_size  = 3
-stride       = 2  
-padding      = 1
+in_channels = 64
+out_channels = 64
+height = width = 128
+kernel_size = 3
+stride = 2
+padding = 1
 output_padding = 1
 add_value = 0.5
 scale = 2
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width, device='npu')]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, add_value, scale]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding,
+        output_padding, add_value, scale
+    ]

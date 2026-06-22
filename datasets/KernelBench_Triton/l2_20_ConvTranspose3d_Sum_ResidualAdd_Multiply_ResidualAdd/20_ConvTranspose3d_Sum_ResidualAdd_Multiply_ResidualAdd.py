@@ -4,7 +4,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 16
 DEFAULT_IN_CHANNELS = 32
 DEFAULT_OUT_CHANNELS = 64
@@ -20,16 +19,16 @@ DEFAULT_BIAS_SHAPE = None
 
 @triton.jit
 def _fused_bias_residual_mul_add_3d(
-    x_ptr,         # pointer to conv_transpose output, shape [N, C, D, H, W] flattened
-    bias_ptr,      # pointer to bias per channel, shape [C]
-    out_ptr,       # pointer to output tensor, same shape as x_ptr
-    DHW,           # int: D*H*W
-    C,             # int: number of channels
+    x_ptr,  # pointer to conv_transpose output, shape [N, C, D, H, W] flattened
+    bias_ptr,  # pointer to bias per channel, shape [C]
+    out_ptr,  # pointer to output tensor, same shape as x_ptr
+    DHW,  # int: D*H*W
+    C,  # int: number of channels
     BLOCK_K: tl.constexpr,
 ):
     # Program IDs
     pid_nc = tl.program_id(axis=0)  # over N*C groups
-    pid_k = tl.program_id(axis=1)   # tiles along DHW
+    pid_k = tl.program_id(axis=1)  # tiles along DHW
 
     # Offsets within DHW
     offs_k = pid_k * BLOCK_K + tl.arange(0, BLOCK_K)
@@ -62,9 +61,10 @@ def _fused_bias_residual_mul_add_3d(
 
 class ModelNew(nn.Module):
     """
-    Model that performs a 3D transposed convolution, followed by a sum, 
+    Model that performs a 3D transposed convolution, followed by a sum,
     a residual add, a multiplication, and another residual add.
     """
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -92,7 +92,8 @@ class ModelNew(nn.Module):
         # Compute conv transpose first
         x = self.conv_transpose(x)
         if not x.is_npu:
-            raise RuntimeError("ModelNew requires Ascend NPU tensors for the Triton path")
+            raise RuntimeError(
+                "ModelNew requires Ascend NPU tensors for the Triton path")
 
         # Triton fused pass for: +bias, +original_x, *original_x, +original_x
         # Shapes
@@ -123,6 +124,8 @@ class ModelNew(nn.Module):
             num_stages=2,
         )
         return out
+
+
 batch_size = 16
 in_channels = 32
 out_channels = 64
@@ -133,7 +136,13 @@ padding = 1
 output_padding = 1
 bias_shape = (out_channels, 1, 1, 1)
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, depth, height, width)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, bias_shape]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding,
+        output_padding, bias_shape
+    ]

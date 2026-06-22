@@ -50,7 +50,10 @@ def _run_fused_epilogue(x: torch.Tensor) -> torch.Tensor:
     n_elements = x.numel()
     if n_elements == 0:
         return out
-    grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK"]),)
+
+    def grid(meta):
+        return (triton.cdiv(n_elements, meta["BLOCK"]), )
+
     _fused_epilogue_swish_div_clamp_tanh[grid](
         x,
         out,
@@ -63,10 +66,12 @@ def _run_fused_epilogue(x: torch.Tensor) -> torch.Tensor:
 
 
 def gemm_swish_divide_clamp_tanh_clamp(
-    x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None = None
-) -> torch.Tensor:
+        x: torch.Tensor,
+        weight: torch.Tensor,
+        bias: torch.Tensor | None = None) -> torch.Tensor:
     if x.device.type != "npu" or weight.device.type != "npu":
-        raise RuntimeError("gemm_swish_divide_clamp_tanh_clamp requires NPU tensors")
+        raise RuntimeError(
+            "gemm_swish_divide_clamp_tanh_clamp requires NPU tensors")
     if bias is not None and bias.device.type != "npu":
         raise RuntimeError("bias must be an NPU tensor when provided")
     if x.dim() != 2 or weight.dim() != 2:
@@ -85,6 +90,7 @@ class ModelNew(nn.Module):
     Simple model that performs a gemm, swish, divide, clamp, tanh, and clamp operations.
     Uses a Triton kernel to fuse the elementwise epilogue for improved performance.
     """
+
     def __init__(self, in_features, out_features, bias=True):
         super(ModelNew, self).__init__()
         self.gemm = nn.Linear(in_features, out_features, bias=bias)
@@ -96,14 +102,18 @@ class ModelNew(nn.Module):
         Returns:
             torch.Tensor: Output tensor of shape (batch_size, out_features).
         """
-        return gemm_swish_divide_clamp_tanh_clamp(
-            x, self.gemm.weight, self.gemm.bias
-        )
+        return gemm_swish_divide_clamp_tanh_clamp(x, self.gemm.weight,
+                                                  self.gemm.bias)
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features]

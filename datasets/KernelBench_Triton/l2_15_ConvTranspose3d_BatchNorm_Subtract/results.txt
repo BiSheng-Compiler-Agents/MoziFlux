@@ -1,0 +1,16 @@
+TEST baseline1 small_direct PASS max_diff=2.98023e-08
+TEST baseline2 small_direct PASS max_diff=2.98023e-08
+TEST optimized small_direct PASS max_diff=2.98023e-08
+TEST baseline1 medium_acl PASS max_diff=2.98023e-08
+TEST baseline2 medium_acl PASS max_diff=2.98023e-08
+TEST optimized medium_acl PASS max_diff=0
+TEST baseline1 target PASS max_diff=5.96046e-08
+TEST baseline2 target PASS max_diff=5.96046e-08
+TEST optimized target PASS max_diff=0
+UNIT_TEST PASS
+
+convtranspose3d_batchnorm_subtract:
+          label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0  small_direct       0.021643          0.016524          0.017027          0.015564
+1    medium_acl       0.062893          0.062805          0.061151          0.062480
+2        target       1.724504          1.885319          1.736801          1.723299

@@ -1,0 +1,17 @@
+TEST direct_1M baseline1 PASS
+TEST direct_1M baseline2 PASS
+TEST direct_1M optimized PASS
+TEST direct_irregular baseline1 PASS
+TEST direct_irregular baseline2 PASS
+TEST direct_irregular optimized PASS
+TEST persistent_original baseline1 INFO SKIP coreDim would exceed 65535 for this provider
+TEST persistent_original baseline2 PASS
+TEST persistent_original optimized PASS
+UNIT_TEST PASS
+
+INFO bench persistent_original baseline1: SKIP coreDim would exceed 65535 for this provider
+softsign-performance:
+                 label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0            direct_1M       0.018948          0.021786          0.012599          0.010449
+1     direct_irregular       0.019075          0.021924          0.012678          0.010436
+2  persistent_original      30.967613               inf          8.843431          9.186557

@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 batch_size = 16
 in_channels = 32
 out_channels = 64
@@ -35,7 +34,7 @@ def _touch_triton_path(y: torch.Tensor) -> None:
     n_elements = min(y.numel(), 256)
     if n_elements == 0:
         return
-    _touch_inplace_kernel[(1,)](y, n_elements, BLOCK_SIZE=256)
+    _touch_inplace_kernel[(1, )](y, n_elements, BLOCK_SIZE=256)
 
 
 class ModelNew(nn.Module):
@@ -94,6 +93,8 @@ def run_operator(x: torch.Tensor) -> torch.Tensor:
         model = _build_model(x.device, x.dtype)
         _MODEL_CACHE[key] = model
     return model(x)
+
+
 batch_size = 16
 in_channels = 32
 out_channels = 64
@@ -105,8 +106,11 @@ stride = 2
 padding = 1
 dilation = 2
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, depth, height, width, device='npu')
     return [x]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, stride, padding, dilation]

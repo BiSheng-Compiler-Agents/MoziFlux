@@ -37,15 +37,25 @@ def _act_softplus_tanh_mul_kernel(x_ptr, y_ptr, n_elements,
 
 def fused_softplus_tanh_mul(x: torch.Tensor) -> torch.Tensor:
     if not x.is_npu:
-        raise RuntimeError("fused_softplus_tanh_mul expects an Ascend NPU tensor")
+        raise RuntimeError(
+            "fused_softplus_tanh_mul expects an Ascend NPU tensor")
     xi = x.contiguous()
     if xi.numel() == 0:
         return torch.empty_like(xi)
     y = torch.empty_like(xi)
     n = xi.numel()
     BLOCK_SIZE = 4096
-    grid = lambda meta: (triton.cdiv(n, meta["BLOCK_SIZE"]),)
-    _act_softplus_tanh_mul_kernel[grid](xi, y, n, THRESHOLD=20.0, BLOCK_SIZE=BLOCK_SIZE, num_warps=4, num_stages=2)
+
+    def grid(meta):
+        return (triton.cdiv(n, meta["BLOCK_SIZE"]), )
+
+    _act_softplus_tanh_mul_kernel[grid](xi,
+                                        y,
+                                        n,
+                                        THRESHOLD=20.0,
+                                        BLOCK_SIZE=BLOCK_SIZE,
+                                        num_warps=4,
+                                        num_stages=2)
     return y
 
 
@@ -53,7 +63,13 @@ class ModelNew(nn.Module):
     """
     Simple model that performs a convolution, applies activation, and then applies Batch Normalization.
     """
-    def __init__(self, in_channels, out_channels, kernel_size, eps=1e-5, momentum=0.1):
+
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size,
+                 eps=1e-5,
+                 momentum=0.1):
         super(ModelNew, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
         self.bn = nn.BatchNorm2d(out_channels, eps=eps, momentum=momentum)
@@ -64,13 +80,18 @@ class ModelNew(nn.Module):
         x = fused_softplus_tanh_mul(x)
         x = self.bn(x)
         return x
+
+
 batch_size = 64
 in_channels = 64
 out_channels = 128
 height, width = 128, 128
 kernel_size = 3
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size]

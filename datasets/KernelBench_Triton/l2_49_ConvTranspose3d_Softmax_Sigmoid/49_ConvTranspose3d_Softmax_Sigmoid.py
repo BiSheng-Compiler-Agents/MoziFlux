@@ -76,6 +76,7 @@ class ModelNew(nn.Module):
     """
     Model that performs a 3D transposed convolution, applies Softmax and Sigmoid.
     """
+
     def __init__(
         self,
         in_channels=32,
@@ -109,7 +110,8 @@ class ModelNew(nn.Module):
         if x.device.type != "npu":
             raise RuntimeError("ModelNew requires execution on Ascend NPU.")
         if x.dtype not in (torch.float16, torch.float32):
-            raise RuntimeError(f"Unsupported dtype for fused Triton path: {x.dtype}")
+            raise RuntimeError(
+                f"Unsupported dtype for fused Triton path: {x.dtype}")
 
         N, C, D, H, W = x.shape
         y = torch.empty_like(x)
@@ -117,15 +119,26 @@ class ModelNew(nn.Module):
         total_rows = N * D * H * W
 
         def grid(meta):
-            return (total_rows,)
+            return (total_rows, )
 
         _softmax_sigmoid_fused_5d[grid](
-            x, y,
-            N, C, D, H, W,
-            sN, sC, sD, sH, sW,
+            x,
+            y,
+            N,
+            C,
+            D,
+            H,
+            W,
+            sN,
+            sC,
+            sD,
+            sH,
+            sW,
             BLOCK_C=64,
         )
         return y
+
+
 batch_size = 16
 in_channels = 32
 out_channels = 64
@@ -135,7 +148,12 @@ stride = 2
 padding = 1
 output_padding = 1
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, D, H, W)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, output_padding]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding, output_padding
+    ]

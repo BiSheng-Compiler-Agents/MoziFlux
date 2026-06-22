@@ -1,0 +1,43 @@
+TEST baseline1 direct_small SKIP comparison_provider_not_executed
+TEST baseline2 direct_small SKIP comparison_provider_not_executed
+TEST optimized direct_small PASS max_err=0
+TEST baseline1 nonpow_medium SKIP comparison_provider_not_executed
+TEST baseline2 nonpow_medium SKIP comparison_provider_not_executed
+TEST optimized nonpow_medium PASS max_err=0
+TEST baseline1 persistent_synthetic SKIP comparison_provider_not_executed
+TEST baseline2 persistent_synthetic SKIP comparison_provider_not_executed
+TEST optimized persistent_synthetic PASS max_err=0
+UNIT_TEST PASS
+INFO baseline1 direct_small INF comparison_provider_not_executed
+INFO baseline2 direct_small INF comparison_provider_not_executed
+INFO baseline1 nonpow_medium INF comparison_provider_not_executed
+INFO baseline2 nonpow_medium INF comparison_provider_not_executed
+INFO baseline1 persistent_synthetic INF comparison_provider_not_executed
+INFO baseline2 persistent_synthetic INF comparison_provider_not_executed
+maxpool3d-performance:
+                  label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0          direct_small       0.007721               inf               inf          0.012076
+1         nonpow_medium       0.013908               inf               inf          0.056338
+2  persistent_synthetic       0.050179               inf               inf          2.336075
+
+TEST baseline1 direct_small SKIP comparison_provider_not_executed
+TEST baseline2 direct_small SKIP comparison_provider_not_executed
+TEST optimized direct_small PASS max_err=0
+TEST baseline1 nonpow_medium SKIP comparison_provider_not_executed
+TEST baseline2 nonpow_medium SKIP comparison_provider_not_executed
+TEST optimized nonpow_medium PASS max_err=0
+TEST baseline1 persistent_synthetic SKIP comparison_provider_not_executed
+TEST baseline2 persistent_synthetic SKIP comparison_provider_not_executed
+TEST optimized persistent_synthetic PASS max_err=0
+UNIT_TEST PASS
+INFO baseline1 direct_small INF comparison_provider_not_executed
+INFO baseline2 direct_small INF comparison_provider_not_executed
+INFO baseline1 nonpow_medium INF comparison_provider_not_executed
+INFO baseline2 nonpow_medium INF comparison_provider_not_executed
+INFO baseline1 persistent_synthetic INF comparison_provider_not_executed
+INFO baseline2 persistent_synthetic INF comparison_provider_not_executed
+maxpool3d-performance:
+                  label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0          direct_small       0.007699               inf               inf          0.012074
+1         nonpow_medium       0.013871               inf               inf          0.056284
+2  persistent_synthetic       0.050119               inf               inf          2.333691

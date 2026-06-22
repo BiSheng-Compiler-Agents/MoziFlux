@@ -63,7 +63,9 @@ class ModelNew(nn.Module):
     """
     A model implementing the pattern "Matmul_AvgPool_GELU_Scale_Max".
     """
-    def __init__(self, in_features, out_features, pool_kernel_size, scale_factor):
+
+    def __init__(self, in_features, out_features, pool_kernel_size,
+                 scale_factor):
         super(ModelNew, self).__init__()
         self.matmul = nn.Linear(in_features, out_features)
         self.scale_factor = scale_factor
@@ -84,7 +86,8 @@ class ModelNew(nn.Module):
 
 def _apply_pool_gelu_scale_max(x, pool_kernel_size, scale_factor):
     if x.device.type != "npu":
-        raise RuntimeError("Matmul_AvgPool_GELU_Scale_Max requires NPU input tensors.")
+        raise RuntimeError(
+            "Matmul_AvgPool_GELU_Scale_Max requires NPU input tensors.")
 
     x = x.contiguous()
     batch_size, features = x.shape
@@ -96,8 +99,8 @@ def _apply_pool_gelu_scale_max(x, pool_kernel_size, scale_factor):
         )
 
     block_g = 1 << (groups - 1).bit_length()
-    out = torch.empty((batch_size,), device=x.device, dtype=x.dtype)
-    _pool_gelu_scale_max_kernel[(batch_size,)](
+    out = torch.empty((batch_size, ), device=x.device, dtype=x.dtype)
+    _pool_gelu_scale_max_kernel[(batch_size, )](
         x,
         out,
         x.stride(0),
@@ -120,8 +123,12 @@ def _get_default_linear_params(x, out_dim=256):
     if key not in _PARAM_CACHE:
         generator = torch.Generator(device="cpu")
         generator.manual_seed(_PARAM_SEED)
-        weight = torch.randn((out_dim, x.shape[1]), generator=generator, dtype=torch.float32)
-        bias = torch.randn((out_dim,), generator=generator, dtype=torch.float32)
+        weight = torch.randn((out_dim, x.shape[1]),
+                             generator=generator,
+                             dtype=torch.float32)
+        bias = torch.randn((out_dim, ),
+                           generator=generator,
+                           dtype=torch.float32)
         _PARAM_CACHE[key] = (
             weight.to(device=x.device, dtype=x.dtype),
             bias.to(device=x.device, dtype=x.dtype),
@@ -132,14 +139,20 @@ def _get_default_linear_params(x, out_dim=256):
 def matmul_avgpool_gelu_scale_max(x):
     weight, bias = _get_default_linear_params(x, out_dim=out_features)
     projected = F.linear(x, weight, bias)
-    return _apply_pool_gelu_scale_max(projected, pool_kernel_size, scale_factor)
+    return _apply_pool_gelu_scale_max(projected, pool_kernel_size,
+                                      scale_factor)
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
 pool_kernel_size = 16
 scale_factor = 2.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features, pool_kernel_size, scale_factor]

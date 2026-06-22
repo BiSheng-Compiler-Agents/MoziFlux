@@ -4,14 +4,13 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 64
 DEFAULT_IN_CHANNELS = 64
 DEFAULT_OUT_CHANNELS = 64
 DEFAULT_HEIGHT = 256
 DEFAULT_WIDTH = 256
 DEFAULT_KERNEL_SIZE = 3
-DEFAULT_MULTIPLIER_SHAPE = (out_channels, 1, 1)
+DEFAULT_MULTIPLIER_SHAPE = (DEFAULT_OUT_CHANNELS, 1, 1)
 
 
 def _is_npu_tensor(x: torch.Tensor) -> bool:
@@ -20,14 +19,14 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 @triton.jit
 def _fused_scale_lrelu_gelu(
-    x_ptr,          # *float32, input tensor (NCHW) contiguous
-    m_ptr,          # *float32, multiplier tensor flattened with shape (C,)
-    y_ptr,          # *float32, output tensor (same shape as x)
-    n_elements,     # int32, total elements B*C*H*W
-    C,              # int32, number of channels
-    HW,             # int32, product H*W
-    negative_slope: tl.constexpr,  # float constant
-    BLOCK_SIZE: tl.constexpr,      # tile size
+        x_ptr,  # *float32, input tensor (NCHW) contiguous
+        m_ptr,  # *float32, multiplier tensor flattened with shape (C,)
+        y_ptr,  # *float32, output tensor (same shape as x)
+        n_elements,  # int32, total elements B*C*H*W
+        C,  # int32, number of channels
+        HW,  # int32, product H*W
+        negative_slope: tl.constexpr,  # float constant
+        BLOCK_SIZE: tl.constexpr,  # tile size
 ):
     pid = tl.program_id(axis=0)
     arange = tl.arange(0, BLOCK_SIZE)
@@ -66,6 +65,7 @@ class ModelNew(nn.Module):
     Model that performs a convolution, multiplies by a learnable scalar, applies LeakyReLU, and then GELU.
     Fused Triton kernel is used to apply: y = GELU(LeakyReLU(conv(x) * multiplier))
     """
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -82,7 +82,8 @@ class ModelNew(nn.Module):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
 
         x = self.conv(x)
         x = x.contiguous()
@@ -93,7 +94,8 @@ class ModelNew(nn.Module):
             )
 
         out = torch.empty_like(x)
-        m = self.multiplier.contiguous().reshape(-1).to(device=x.device, dtype=x.dtype)
+        m = self.multiplier.contiguous().reshape(-1).to(device=x.device,
+                                                        dtype=x.dtype)
         n_elements = x.numel()
         if n_elements >= 8192 and (n_elements % 8192 == 0):
             block_size = 8192
@@ -116,7 +118,9 @@ class ModelNew(nn.Module):
             num_warps = 4
             num_stages = 2
 
-        grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+        def grid(meta):
+            return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]), )
+
         _fused_scale_lrelu_gelu[grid](
             x,
             m,
@@ -143,6 +147,8 @@ def run_operator(x: torch.Tensor) -> torch.Tensor:
         model.eval()
         _MODEL_CACHE[key] = model
     return model(x)
+
+
 batch_size = 64
 in_channels = 64
 out_channels = 64
@@ -150,7 +156,10 @@ height, width = 256, 256
 kernel_size = 3
 multiplier_shape = (out_channels, 1, 1)
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width, device='npu')]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, multiplier_shape]

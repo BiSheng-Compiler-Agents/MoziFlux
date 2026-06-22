@@ -223,8 +223,9 @@ def _groupnorm_apply_kernel(
         start += BLOCK_HW
 
 
-def _group_norm_scale_triton(x: torch.Tensor, gamma_scaled: torch.Tensor, beta_scaled: torch.Tensor,
-                             num_groups: int, eps: float) -> torch.Tensor:
+def _group_norm_scale_triton(x: torch.Tensor, gamma_scaled: torch.Tensor,
+                             beta_scaled: torch.Tensor, num_groups: int,
+                             eps: float) -> torch.Tensor:
     # x: (B, C, H, W) contiguous float32 on Ascend NPU
     B, C, H, W = x.shape
     device = x.device
@@ -234,29 +235,44 @@ def _group_norm_scale_triton(x: torch.Tensor, gamma_scaled: torch.Tensor, beta_s
     rstd = torch.empty((B, num_groups), device=device, dtype=torch.float32)
 
     # Compute per-(n,g) statistics
-    grid_stats = (B * num_groups,)
-    _groupnorm_stats_kernel[grid_stats](
-        x, mean, rstd,
-        B, C, H, W, num_groups, float(eps),
-        BLOCK_SIZE=1024,
-        num_warps=8, num_stages=2
-    )
+    grid_stats = (B * num_groups, )
+    _groupnorm_stats_kernel[grid_stats](x,
+                                        mean,
+                                        rstd,
+                                        B,
+                                        C,
+                                        H,
+                                        W,
+                                        num_groups,
+                                        float(eps),
+                                        BLOCK_SIZE=1024,
+                                        num_warps=8,
+                                        num_stages=2)
 
     # Apply normalization and affine (with scale fused)
-    grid_apply = (B * C,)
-    _groupnorm_apply_kernel[grid_apply](
-        x, y, mean, rstd, gamma_scaled, beta_scaled,
-        B, C, H, W, num_groups,
-        BLOCK_HW=256,
-        num_warps=4, num_stages=2
-    )
+    grid_apply = (B * C, )
+    _groupnorm_apply_kernel[grid_apply](x,
+                                        y,
+                                        mean,
+                                        rstd,
+                                        gamma_scaled,
+                                        beta_scaled,
+                                        B,
+                                        C,
+                                        H,
+                                        W,
+                                        num_groups,
+                                        BLOCK_HW=256,
+                                        num_warps=4,
+                                        num_stages=2)
     return y
 
 
-def _group_norm_pool_clamp_triton(x: torch.Tensor, gamma_scaled: torch.Tensor, beta_scaled: torch.Tensor,
-                                  num_groups: int, eps: float,
-                                  K: int, STRIDE: int, clamp_min: float, clamp_max: float,
-                                  Ho: int, Wo: int) -> torch.Tensor:
+def _group_norm_pool_clamp_triton(x: torch.Tensor, gamma_scaled: torch.Tensor,
+                                  beta_scaled: torch.Tensor, num_groups: int,
+                                  eps: float, K: int, STRIDE: int,
+                                  clamp_min: float, clamp_max: float, Ho: int,
+                                  Wo: int) -> torch.Tensor:
     # x: (B, C, H, W)
     B, C, H, W = x.shape
     device = x.device
@@ -268,25 +284,43 @@ def _group_norm_pool_clamp_triton(x: torch.Tensor, gamma_scaled: torch.Tensor, b
     rstd = torch.empty((B, num_groups), device=device, dtype=torch.float32)
 
     # Stats across groups
-    grid_stats = (B * num_groups,)
-    _groupnorm_stats_kernel[grid_stats](
-        x, mean, rstd,
-        B, C, H, W, num_groups, float(eps),
-        BLOCK_SIZE=1024,
-        num_warps=8, num_stages=2
-    )
+    grid_stats = (B * num_groups, )
+    _groupnorm_stats_kernel[grid_stats](x,
+                                        mean,
+                                        rstd,
+                                        B,
+                                        C,
+                                        H,
+                                        W,
+                                        num_groups,
+                                        float(eps),
+                                        BLOCK_SIZE=1024,
+                                        num_warps=8,
+                                        num_stages=2)
 
     # Apply + pool + clamp
     BLOCK_W = 128
     grid_apply = (B * C, Ho, triton.cdiv(Wo, BLOCK_W))
-    _groupnorm_apply_pool_clamp_kernel[grid_apply](
-        x, y, mean, rstd, gamma_scaled, beta_scaled,
-        B, C, H, W, num_groups,
-        Ho, Wo,
-        float(clamp_min), float(clamp_max),
-        K=K, STRIDE=STRIDE, BLOCK_W=BLOCK_W,
-        num_warps=8, num_stages=3
-    )
+    _groupnorm_apply_pool_clamp_kernel[grid_apply](x,
+                                                   y,
+                                                   mean,
+                                                   rstd,
+                                                   gamma_scaled,
+                                                   beta_scaled,
+                                                   B,
+                                                   C,
+                                                   H,
+                                                   W,
+                                                   num_groups,
+                                                   Ho,
+                                                   Wo,
+                                                   float(clamp_min),
+                                                   float(clamp_max),
+                                                   K=K,
+                                                   STRIDE=STRIDE,
+                                                   BLOCK_W=BLOCK_W,
+                                                   num_warps=8,
+                                                   num_stages=3)
     return y
 
 
@@ -295,19 +329,34 @@ class ModelNew(nn.Module):
     Model that performs convolution, group normalization, scaling, max pooling, and clamping.
     Fuses GroupNorm + Scale + MaxPool + Clamp via Triton on Ascend NPU.
     """
-    def __init__(self, in_channels=None, out_channels=None, kernel_size=None, num_groups=None,
-                 scale_shape=None, maxpool_kernel_size=None, clamp_min=None, clamp_max=None):
+
+    def __init__(self,
+                 in_channels=None,
+                 out_channels=None,
+                 kernel_size=None,
+                 num_groups=None,
+                 scale_shape=None,
+                 maxpool_kernel_size=None,
+                 clamp_min=None,
+                 clamp_max=None):
         super(ModelNew, self).__init__()
-        in_channels = in_channels if in_channels is not None else globals()["in_channels"]
-        out_channels = out_channels if out_channels is not None else globals()["out_channels"]
-        kernel_size = kernel_size if kernel_size is not None else globals()["kernel_size"]
-        num_groups = num_groups if num_groups is not None else globals()["num_groups"]
-        scale_shape = scale_shape if scale_shape is not None else globals()["scale_shape"]
-        maxpool_kernel_size = (
-            maxpool_kernel_size if maxpool_kernel_size is not None else globals()["maxpool_kernel_size"]
-        )
-        clamp_min = clamp_min if clamp_min is not None else globals()["clamp_min"]
-        clamp_max = clamp_max if clamp_max is not None else globals()["clamp_max"]
+        in_channels = in_channels if in_channels is not None else globals(
+        )["in_channels"]
+        out_channels = out_channels if out_channels is not None else globals(
+        )["out_channels"]
+        kernel_size = kernel_size if kernel_size is not None else globals(
+        )["kernel_size"]
+        num_groups = num_groups if num_groups is not None else globals(
+        )["num_groups"]
+        scale_shape = scale_shape if scale_shape is not None else globals(
+        )["scale_shape"]
+        maxpool_kernel_size = (maxpool_kernel_size
+                               if maxpool_kernel_size is not None else
+                               globals()["maxpool_kernel_size"])
+        clamp_min = clamp_min if clamp_min is not None else globals(
+        )["clamp_min"]
+        clamp_max = clamp_max if clamp_max is not None else globals(
+        )["clamp_max"]
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
         self.group_norm = nn.GroupNorm(num_groups, out_channels)
         self.scale = nn.Parameter(torch.ones(scale_shape))
@@ -323,9 +372,13 @@ class ModelNew(nn.Module):
             Output tensor of shape (batch_size, out_channels, height', width').
         """
         if x.device.type != "npu":
-            raise RuntimeError("ModelNew requires Ascend NPU inputs for the Triton execution path.")
+            raise RuntimeError(
+                "ModelNew requires Ascend NPU inputs for the Triton execution path."
+            )
         if self.training or x.requires_grad:
-            raise RuntimeError("ModelNew Triton path supports inference-only execution without autograd.")
+            raise RuntimeError(
+                "ModelNew Triton path supports inference-only execution without autograd."
+            )
 
         x = self.conv(x)
 
@@ -340,22 +393,25 @@ class ModelNew(nn.Module):
         else:
             gamma = torch.ones(C, device=x.device, dtype=x.dtype)
             beta = torch.zeros(C, device=x.device, dtype=x.dtype)
-        gamma_scaled = (gamma * scale_flat).to(dtype=torch.float32, device=x.device).contiguous()
-        beta_scaled = (beta * scale_flat).to(dtype=torch.float32, device=x.device).contiguous()
+        gamma_scaled = (gamma * scale_flat).to(dtype=torch.float32,
+                                               device=x.device).contiguous()
+        beta_scaled = (beta * scale_flat).to(dtype=torch.float32,
+                                             device=x.device).contiguous()
 
-        x = _group_norm_scale_triton(
-            x.to(torch.float32), gamma_scaled, beta_scaled,
-            self.group_norm.num_groups, self.group_norm.eps
-        )
+        x = _group_norm_scale_triton(x.to(torch.float32), gamma_scaled,
+                                     beta_scaled, self.group_norm.num_groups,
+                                     self.group_norm.eps)
 
         # Remaining ops (pool + clamp) when not fully fused
         x = self.maxpool(x)
         x = torch.clamp(x, self.clamp_min, self.clamp_max)
         return x
+
+
 batch_size = 128
 in_channels = 8
 out_channels = 64
-height, width = 128, 128 
+height, width = 128, 128
 kernel_size = 3
 num_groups = 16
 scale_shape = (out_channels, 1, 1)
@@ -363,7 +419,13 @@ maxpool_kernel_size = 4
 clamp_min = 0.0
 clamp_max = 1.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, num_groups, scale_shape, maxpool_kernel_size, clamp_min, clamp_max]
+    return [
+        in_channels, out_channels, kernel_size, num_groups, scale_shape,
+        maxpool_kernel_size, clamp_min, clamp_max
+    ]

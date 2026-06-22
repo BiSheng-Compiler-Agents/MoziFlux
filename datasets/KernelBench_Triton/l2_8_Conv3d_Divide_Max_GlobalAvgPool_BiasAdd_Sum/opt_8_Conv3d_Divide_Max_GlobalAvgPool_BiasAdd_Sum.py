@@ -32,18 +32,20 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 # Fast path: constexpr BLOCK_SIZE, no mask (caller ensures C == BLOCK_SIZE)
 # ────────────────────────────────────────────────────────────────────────────
 
+
 @triton.jit
 def _reduce_channels_fast_kernel(
-    x_ptr,
-    out_ptr,
-    bias_sum,     # scalar fp32
-    B,
-    stride_b,
-    NUM_PROGS: tl.constexpr,
-    BLOCK_SIZE: tl.constexpr,   # == C, power-of-2
+        x_ptr,
+        out_ptr,
+        bias_sum,  # scalar fp32
+        B,
+        stride_b,
+        NUM_PROGS: tl.constexpr,
+        BLOCK_SIZE: tl.constexpr,  # == C, power-of-2
 ):
     pid = tl.program_id(0)
-    cols = tl.max_contiguous(tl.multiple_of(tl.arange(0, BLOCK_SIZE), BLOCK_SIZE), BLOCK_SIZE)
+    cols = tl.max_contiguous(
+        tl.multiple_of(tl.arange(0, BLOCK_SIZE), BLOCK_SIZE), BLOCK_SIZE)
     for row in tl.range(pid, B, NUM_PROGS, num_stages=1):
         vals = tl.load(x_ptr + row * stride_b + cols)
         total = tl.sum(vals.to(tl.float32), axis=0) + bias_sum
@@ -54,19 +56,21 @@ def _reduce_channels_fast_kernel(
 # Generic path: masked load, handles any C
 # ────────────────────────────────────────────────────────────────────────────
 
+
 @triton.jit
 def _reduce_channels_masked_kernel(
-    x_ptr,
-    out_ptr,
-    bias_sum,     # scalar fp32
-    B,
-    C,
-    stride_b,
-    NUM_PROGS: tl.constexpr,
-    BLOCK_SIZE: tl.constexpr,   # >= C, power-of-2
+        x_ptr,
+        out_ptr,
+        bias_sum,  # scalar fp32
+        B,
+        C,
+        stride_b,
+        NUM_PROGS: tl.constexpr,
+        BLOCK_SIZE: tl.constexpr,  # >= C, power-of-2
 ):
     pid = tl.program_id(0)
-    cols = tl.max_contiguous(tl.multiple_of(tl.arange(0, BLOCK_SIZE), BLOCK_SIZE), BLOCK_SIZE)
+    cols = tl.max_contiguous(
+        tl.multiple_of(tl.arange(0, BLOCK_SIZE), BLOCK_SIZE), BLOCK_SIZE)
     mask = cols < C
     for row in tl.range(pid, B, NUM_PROGS, num_stages=1):
         vals = tl.load(x_ptr + row * stride_b + cols, mask=mask, other=0.0)
@@ -78,10 +82,12 @@ def _reduce_channels_masked_kernel(
 # Host helpers
 # ────────────────────────────────────────────────────────────────────────────
 
+
 def _get_num_vectorcore(device_idx):
     try:
         import triton.runtime.driver as driver
-        return driver.active.utils.get_device_properties(device_idx)["num_vectorcore"]
+        return driver.active.utils.get_device_properties(
+            device_idx)["num_vectorcore"]
     except Exception:
         return 32
 
@@ -93,6 +99,7 @@ def _is_power_of_2(n: int) -> bool:
 # ────────────────────────────────────────────────────────────────────────────
 # Host interface
 # ────────────────────────────────────────────────────────────────────────────
+
 
 class ModelNew(nn.Module):
     """
@@ -108,8 +115,8 @@ class ModelNew(nn.Module):
     Both paths use persistent grid and bias_sum scalar optimization.
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, divisor, pool_size,
-                 bias_shape, sum_dim):
+    def __init__(self, in_channels, out_channels, kernel_size, divisor,
+                 pool_size, bias_shape, sum_dim):
         super().__init__()
         self.conv = nn.Conv3d(in_channels, out_channels, kernel_size)
         self.divisor = divisor
@@ -120,7 +127,8 @@ class ModelNew(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if not _is_npu_tensor(x):
-            raise RuntimeError(f"ModelNew expects NPU input, got {x.device.type}")
+            raise RuntimeError(
+                f"ModelNew expects NPU input, got {x.device.type}")
 
         # ── conv + fold division ──────────────────────────────────────────
         w = self.conv.weight
@@ -136,8 +144,8 @@ class ModelNew(nn.Module):
         )
 
         # ── pooling ───────────────────────────────────────────────────────
-        x = self.max_pool(x)           # [B, C, D', H', W']
-        x = self.global_avg_pool(x)    # [B, C, 1, 1, 1]
+        x = self.max_pool(x)  # [B, C, D', H', W']
+        x = self.global_avg_pool(x)  # [B, C, 1, 1, 1]
 
         # ── reshape to [B, C] contiguous (sum along dim 1) ────────────────
         # For the general case we move sum_dim to the last axis, flatten.
@@ -146,16 +154,17 @@ class ModelNew(nn.Module):
         perm = list(range(n_dims))
         perm.remove(sum_dim)
         perm.append(sum_dim)
-        x = x.permute(*perm).contiguous()   # [..., C_sum]
+        x = x.permute(*perm).contiguous()  # [..., C_sum]
         C = x.shape[-1]
         B = x.numel() // C
-        x = x.reshape(B, C)                 # [B_outer, C_inner], contiguous, stride_c=1
+        x = x.reshape(B, C)  # [B_outer, C_inner], contiguous, stride_c=1
 
         # ── bias_sum scalar (works for any bias_shape) ────────────────────
         # sum(x[b,:] + bias[:]) = sum(x[b,:]) + sum(bias[:])
-        bias_sum_scalar = self.bias.reshape(-1).to(dtype=torch.float32).sum().item()
+        bias_sum_scalar = self.bias.reshape(-1).to(
+            dtype=torch.float32).sum().item()
 
-        out = torch.empty((B,), device=x.device, dtype=x.dtype)
+        out = torch.empty((B, ), device=x.device, dtype=x.dtype)
 
         device_idx = x.device.index if x.device.index is not None else 0
         NUM_PROGS = min(B, _get_num_vectorcore(device_idx))
@@ -163,8 +172,12 @@ class ModelNew(nn.Module):
 
         if _is_power_of_2(C) and C <= 256:
             # Fast path: no mask, constexpr BLOCK_SIZE == C
-            _reduce_channels_fast_kernel[(NUM_PROGS,)](
-                x, out, bias_sum_scalar, B, x.stride(0),
+            _reduce_channels_fast_kernel[(NUM_PROGS, )](
+                x,
+                out,
+                bias_sum_scalar,
+                B,
+                x.stride(0),
                 NUM_PROGS=NUM_PROGS,
                 BLOCK_SIZE=C,
                 num_warps=4,
@@ -172,8 +185,13 @@ class ModelNew(nn.Module):
             )
         else:
             # Generic path: masked, BLOCK_SIZE = next_power_of_2(C)
-            _reduce_channels_masked_kernel[(NUM_PROGS,)](
-                x, out, bias_sum_scalar, B, C, x.stride(0),
+            _reduce_channels_masked_kernel[(NUM_PROGS, )](
+                x,
+                out,
+                bias_sum_scalar,
+                B,
+                C,
+                x.stride(0),
                 NUM_PROGS=NUM_PROGS,
                 BLOCK_SIZE=BLOCK_SIZE,
                 num_warps=4,
@@ -192,7 +210,8 @@ class ModelNew(nn.Module):
 _MODEL_CACHE: dict[tuple, ModelNew] = {}
 
 
-def conv3d_divide_max_globalavgpool_biasadd_sum(x: torch.Tensor) -> torch.Tensor:
+def conv3d_divide_max_globalavgpool_biasadd_sum(
+        x: torch.Tensor) -> torch.Tensor:
     if not _is_npu_tensor(x):
         raise RuntimeError(
             f"conv3d_divide_max_globalavgpool_biasadd_sum expects NPU input, got {x.device.type}"
@@ -201,7 +220,8 @@ def conv3d_divide_max_globalavgpool_biasadd_sum(x: torch.Tensor) -> torch.Tensor
     model = _MODEL_CACHE.get(key)
     if model is None:
         torch.manual_seed(0)
-        model = ModelNew(*get_init_inputs()).to(device=x.device, dtype=torch.float32).eval()
+        model = ModelNew(*get_init_inputs()).to(device=x.device,
+                                                dtype=torch.float32).eval()
         _MODEL_CACHE[key] = model
     with torch.no_grad():
         return model(x.to(dtype=torch.float32))
@@ -211,17 +231,17 @@ def conv3d_divide_max_globalavgpool_biasadd_sum(x: torch.Tensor) -> torch.Tensor
 # Shape constants (benchmark / test harness)
 # ────────────────────────────────────────────────────────────────────────────
 
-batch_size   = 128
-in_channels  = 8
+batch_size = 128
+in_channels = 8
 out_channels = 16
-depth        = 16
-height       = 64
-width        = 64
-kernel_size  = (3, 3, 3)
-divisor      = 2.0
-pool_size    = (2, 2, 2)
-bias_shape   = (out_channels, 1, 1, 1)
-sum_dim      = 1
+depth = 16
+height = 64
+width = 64
+kernel_size = (3, 3, 3)
+divisor = 2.0
+pool_size = (2, 2, 2)
+bias_shape = (out_channels, 1, 1, 1)
+sum_dim = 1
 
 
 def get_inputs():
@@ -229,4 +249,7 @@ def get_inputs():
 
 
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, divisor, pool_size, bias_shape, sum_dim]
+    return [
+        in_channels, out_channels, kernel_size, divisor, pool_size, bias_shape,
+        sum_dim
+    ]

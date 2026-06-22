@@ -34,9 +34,10 @@ class ModelNew(nn.Module):
     """
     Simple model that performs a HardSigmoid activation.
     """
+
     def __init__(self):
         super().__init__()
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Applies HardSigmoid activation to the input tensor.
@@ -48,7 +49,9 @@ class ModelNew(nn.Module):
             torch.Tensor: Output tensor with HardSigmoid applied, same shape as input.
         """
         if x.device.type != "npu":
-            raise ValueError(f"ModelNew expects an Ascend NPU tensor, got device={x.device!s}")
+            raise ValueError(
+                f"ModelNew expects an Ascend NPU tensor, got device={x.device!s}"
+            )
         if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
             raise TypeError(f"Unsupported dtype for ModelNew: {x.dtype}")
 
@@ -57,15 +60,28 @@ class ModelNew(nn.Module):
 
         n_elements = x_contig.numel()
         BLOCK_SIZE = 2048
-        grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-        _hardsigmoid_kernel[grid](x_contig, y, n_elements, BLOCK_SIZE=BLOCK_SIZE, num_warps=8, num_stages=2)
+
+        def grid(meta):
+            return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]), )
+
+        _hardsigmoid_kernel[grid](x_contig,
+                                  y,
+                                  n_elements,
+                                  BLOCK_SIZE=BLOCK_SIZE,
+                                  num_warps=8,
+                                  num_stages=2)
 
         return y
+
+
 batch_size = 4096
 dim = 393216
+
 
 def get_inputs():
     x = torch.rand(batch_size, dim)
     return [x]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed
