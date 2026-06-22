@@ -11,17 +11,19 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 @triton.jit
 def _reduce_bcdhw_to_b_kernel(
-    x_ptr,       # *float32/float16/bfloat16, contiguous tensor [B, C]
-    out_ptr,     # *float32/float16/bfloat16, tensor [B]
-    stride_b,    # int, stride for batch dim of x in elements
-    stride_c,    # int, stride for channel dim of x in elements
-    C,           # int, channels
+    x_ptr,  # *float32/float16/bfloat16, contiguous tensor [B, C]
+    out_ptr,  # *float32/float16/bfloat16, tensor [B]
+    stride_b,  # int, stride for batch dim of x in elements
+    stride_c,  # int, stride for channel dim of x in elements
+    C,  # int, channels
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(0)
     offs = tl.arange(0, BLOCK_SIZE)
     mask = offs < C
-    vals = tl.load(x_ptr + pid * stride_b + offs * stride_c, mask=mask, other=0.0)
+    vals = tl.load(x_ptr + pid * stride_b + offs * stride_c,
+                   mask=mask,
+                   other=0.0)
     total = tl.sum(vals.to(tl.float32), axis=0)
     tl.store(out_ptr + pid, total)
 
@@ -33,7 +35,9 @@ class ModelNew(nn.Module):
     Optimized: folds division into convolution weights/bias, and fuses
     global average pooling + bias add + channel-sum into a single Triton reduction.
     """
-    def __init__(self, in_channels, out_channels, kernel_size, divisor, pool_size, bias_shape, sum_dim):
+
+    def __init__(self, in_channels, out_channels, kernel_size, divisor,
+                 pool_size, bias_shape, sum_dim):
         super(ModelNew, self).__init__()
         self.conv = nn.Conv3d(in_channels, out_channels, kernel_size)
         self.divisor = divisor
@@ -44,9 +48,12 @@ class ModelNew(nn.Module):
 
     def forward(self, x):
         if not _is_npu_tensor(x):
-            raise RuntimeError(f"ModelNew expects NPU input, got {x.device.type}")
+            raise RuntimeError(
+                f"ModelNew expects NPU input, got {x.device.type}")
         if self.sum_dim != 1:
-            raise RuntimeError(f"ModelNew only supports sum_dim == 1 for the Triton path, got {self.sum_dim}")
+            raise RuntimeError(
+                f"ModelNew only supports sum_dim == 1 for the Triton path, got {self.sum_dim}"
+            )
 
         # Fold division by constant into convolution weights/bias for fewer global memory ops
         w = self.conv.weight
@@ -66,9 +73,10 @@ class ModelNew(nn.Module):
         B, C = x.shape
         out = torch.empty((B, 1, 1, 1), device=x.device, dtype=x.dtype)
 
-        grid = (B,)
+        grid = (B, )
         if C > 256:
-            raise RuntimeError(f"ModelNew only supports up to 256 output channels, got {C}")
+            raise RuntimeError(
+                f"ModelNew only supports up to 256 output channels, got {C}")
         _reduce_bcdhw_to_b_kernel[grid](
             x,
             out.view(B),
@@ -95,23 +103,34 @@ def conv3d_divide_max_globalavgpool_biasadd_sum(x):
     model = _MODEL_CACHE.get(key)
     if model is None:
         torch.manual_seed(0)
-        model = ModelNew(*get_init_inputs()).to(device=x.device, dtype=torch.float32).eval()
+        model = ModelNew(*get_init_inputs()).to(device=x.device,
+                                                dtype=torch.float32).eval()
         _MODEL_CACHE[key] = model
 
     with torch.no_grad():
         return model(x.to(dtype=torch.float32))
-batch_size   = 128  
-in_channels  = 8            
-out_channels = 16  
-depth = 16; height = width = 64 
-depth = 16; height = width = 64 
+
+
+batch_size = 128
+in_channels = 8
+out_channels = 16
+depth = 16
+height = width = 64
+depth = 16
+height = width = 64
 kernel_size = (3, 3, 3)
 divisor = 2.0
 pool_size = (2, 2, 2)
 bias_shape = (out_channels, 1, 1, 1)
 sum_dim = 1
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, depth, height, width)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, divisor, pool_size, bias_shape, sum_dim]
+    return [
+        in_channels, out_channels, kernel_size, divisor, pool_size, bias_shape,
+        sum_dim
+    ]

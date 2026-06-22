@@ -7,14 +7,14 @@ import triton.language as tl
 
 @triton.jit
 def _fused_gelu_groupnorm_mean_relu(
-    x_ptr,               # [N, C]
-    weight_ptr,          # [C]
-    bias_ptr,            # [C]
-    out_ptr,             # [N, 1]
-    N,                   # int: batch size
-    C,                   # int: number of features (channels)
-    GROUP_SIZE,          # int: channels per group = C // NUM_GROUPS
-    EPS: tl.constexpr,   # groupnorm eps (compile-time)
+    x_ptr,  # [N, C]
+    weight_ptr,  # [C]
+    bias_ptr,  # [C]
+    out_ptr,  # [N, 1]
+    N,  # int: batch size
+    C,  # int: number of features (channels)
+    GROUP_SIZE,  # int: channels per group = C // NUM_GROUPS
+    EPS: tl.constexpr,  # groupnorm eps (compile-time)
     NUM_GROUPS: tl.constexpr,  # number of groups (compile-time)
     BLOCK_SIZE: tl.constexpr,  # equals GROUP_SIZE (compile-time)
     BLOCK_M: tl.constexpr,
@@ -23,7 +23,7 @@ def _fused_gelu_groupnorm_mean_relu(
     rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
     row_mask = rows < N
     row_ptrs = x_ptr + rows[:, None] * C
-    total = tl.zeros((BLOCK_M,), dtype=tl.float32)
+    total = tl.zeros((BLOCK_M, ), dtype=tl.float32)
     offs = tl.arange(0, BLOCK_SIZE)
     inv_sqrt2 = 0.7071067811865476  # 1/sqrt(2)
     gs = tl.full((), GROUP_SIZE, tl.float32)
@@ -36,7 +36,10 @@ def _fused_gelu_groupnorm_mean_relu(
         cols = c_start + offs
         mask = row_mask[:, None]
 
-        x = tl.load(row_ptrs + cols[None, :], mask=mask, other=0.0, cache_modifier=".cg").to(tl.float32)
+        x = tl.load(row_ptrs + cols[None, :],
+                    mask=mask,
+                    other=0.0,
+                    cache_modifier=".cg").to(tl.float32)
         xg = 0.5 * x * (1.0 + tl.erf(x * inv_sqrt2))
 
         sum_x = tl.sum(xg, axis=1)
@@ -64,6 +67,7 @@ class ModelNew(nn.Module):
     Model that performs a GEMM, BatchNorm, GELU, GroupNorm, Mean, and ReLU operations in sequence.
     Fuses GELU+GroupNorm+Mean+ReLU with a Triton kernel for improved performance.
     """
+
     def __init__(self, in_features=None, out_features=None, num_groups=None):
         super(ModelNew, self).__init__()
         in_features = in_features_default if in_features is None else in_features
@@ -88,7 +92,8 @@ class ModelNew(nn.Module):
         if x.device.type != "npu":
             raise RuntimeError("ModelNew expects inputs on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked inputs")
 
         N, C = x.shape
         G = self.group_norm.num_groups
@@ -102,7 +107,7 @@ class ModelNew(nn.Module):
 
         out = torch.empty((N, 1), device=x.device, dtype=x.dtype)
 
-        grid = (triton.cdiv(N, 8),)
+        grid = (triton.cdiv(N, 8), )
         _fused_gelu_groupnorm_mean_relu[grid](
             x_contig,
             weight,
@@ -126,8 +131,10 @@ in_features_default = 512
 out_features_default = 1024
 num_groups_default = 8
 
+
 def get_inputs():
     return [torch.randn(batch_size, in_features_default, device="npu")]
+
 
 def get_init_inputs():
     return [in_features_default, out_features_default, num_groups_default]

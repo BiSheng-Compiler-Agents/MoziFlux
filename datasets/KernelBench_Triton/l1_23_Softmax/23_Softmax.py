@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 import torch_npu  # noqa: F401
@@ -51,12 +50,14 @@ class ModelNew(nn.Module):
     """
     Simple model that performs a row-wise Softmax activation using a Triton Ascend kernel.
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.dim() != 2:
-            raise ValueError("ModelNew expects a 2D tensor shaped [batch, columns]")
+            raise ValueError(
+                "ModelNew expects a 2D tensor shaped [batch, columns]")
         if not getattr(x, "is_npu", False):
             raise RuntimeError("ModelNew requires input tensors on Ascend NPU")
 
@@ -66,10 +67,11 @@ class ModelNew(nn.Module):
         y_out = torch.empty_like(x_in)
 
         BLOCK_SIZE, num_warps, num_stages = _select_kernel_config(D)
-        grid = (B,)
+        grid = (B, )
 
         _softmax_row_fwd_db_kernel[grid](
-            x_in, y_out,
+            x_in,
+            y_out,
             D,
             x_in.stride(0),
             BLOCK_SIZE=BLOCK_SIZE,
@@ -77,11 +79,16 @@ class ModelNew(nn.Module):
             num_stages=num_stages,
         )
         return y_out
+
+
 batch_size = 4096
 dim = 393216
+
 
 def get_inputs():
     x = torch.rand(batch_size, dim)
     return [x]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

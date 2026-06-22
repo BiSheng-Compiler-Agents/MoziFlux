@@ -67,7 +67,7 @@ def _run_fused_epilogue(x: torch.Tensor) -> torch.Tensor:
     if n_elements == 0:
         return out
     if x.ndim == 2 and x.shape == (1024, 8192):
-        _fused_epilogue_swish_div_clamp_tanh_nomask[(n_elements // 4096,)](
+        _fused_epilogue_swish_div_clamp_tanh_nomask[(n_elements // 4096, )](
             x,
             out,
             BLOCK=4096,
@@ -75,7 +75,10 @@ def _run_fused_epilogue(x: torch.Tensor) -> torch.Tensor:
             num_stages=3,
         )
         return out
-    grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK"]),)
+
+    def grid(meta):
+        return (triton.cdiv(n_elements, meta["BLOCK"]), )
+
     _fused_epilogue_swish_div_clamp_tanh[grid](
         x,
         out,
@@ -88,10 +91,12 @@ def _run_fused_epilogue(x: torch.Tensor) -> torch.Tensor:
 
 
 def gemm_swish_divide_clamp_tanh_clamp(
-    x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None = None
-) -> torch.Tensor:
+        x: torch.Tensor,
+        weight: torch.Tensor,
+        bias: torch.Tensor | None = None) -> torch.Tensor:
     if x.device.type != "npu" or weight.device.type != "npu":
-        raise RuntimeError("gemm_swish_divide_clamp_tanh_clamp requires NPU tensors")
+        raise RuntimeError(
+            "gemm_swish_divide_clamp_tanh_clamp requires NPU tensors")
     if bias is not None and bias.device.type != "npu":
         raise RuntimeError("bias must be an NPU tensor when provided")
     if x.dim() != 2 or weight.dim() != 2:
@@ -106,14 +111,14 @@ def gemm_swish_divide_clamp_tanh_clamp(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self, in_features, out_features, bias=True):
         super(ModelNew, self).__init__()
         self.gemm = nn.Linear(in_features, out_features, bias=bias)
 
     def forward(self, x):
-        return gemm_swish_divide_clamp_tanh_clamp(
-            x, self.gemm.weight, self.gemm.bias
-        )
+        return gemm_swish_divide_clamp_tanh_clamp(x, self.gemm.weight,
+                                                  self.gemm.bias)
 
 
 batch_size = 1024

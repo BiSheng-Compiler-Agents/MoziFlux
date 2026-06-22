@@ -1,0 +1,28 @@
+TEST torch_ref tiny_16 PASS
+TEST baseline1 tiny_16 PASS
+TEST baseline2 tiny_16 PASS
+TEST optimized tiny_16 PASS
+TEST torch_ref small_32 PASS
+TEST baseline1 small_32 PASS
+TEST baseline2 small_32 PASS
+TEST optimized small_32 PASS
+TEST torch_ref medium_64 PASS
+TEST baseline1 medium_64 PASS
+TEST baseline2 medium_64 PASS
+TEST optimized medium_64 PASS
+TEST torch_ref exact_128 PASS
+TEST baseline1 exact_128 PASS
+TEST baseline2 exact_128 PASS
+TEST optimized exact_128 PASS
+TEST torch_ref persistent_rows PASS
+TEST baseline1 persistent_rows SKIP grid_guard
+TEST baseline2 persistent_rows SKIP grid_guard
+TEST optimized persistent_rows PASS
+UNIT_TEST PASS
+
+conv2d_instancenorm_divide:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    tiny_16       0.043774          0.075459          0.075713          0.075720
+1   small_32       0.106094          0.173408          0.173227          0.173053
+2  medium_64       0.758092          0.698614          0.699718          0.699217
+3  exact_128       6.382802          4.285429          4.296395          4.290766

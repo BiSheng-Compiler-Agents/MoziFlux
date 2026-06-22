@@ -106,6 +106,7 @@ class ModelNew(nn.Module):
     """
     Instance Normalization implemented via a Triton kernel (affine=False, track_running_stats=False).
     """
+
     def __init__(self, num_features: int):
         super(ModelNew, self).__init__()
         self.num_features = num_features
@@ -117,9 +118,12 @@ class ModelNew(nn.Module):
         assert C == self.num_features, f"Expected C == num_features ({self.num_features}), got {C}"
         return instance_norm_2d(x, eps=self.eps)
 
+
 def instance_norm_2d(x: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
     assert x.dim() == 4, "Expected input of shape (N, C, H, W)"
-    assert x.device.type in {"cuda", "npu"}, "InstanceNorm Triton kernel requires an accelerator tensor"
+    assert x.device.type in {
+        "cuda", "npu"
+    }, "InstanceNorm Triton kernel requires an accelerator tensor"
 
     x = x.contiguous()
     y = torch.empty_like(x)
@@ -127,23 +131,35 @@ def instance_norm_2d(x: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
     N, C, H, W = x.shape
     stride_n, stride_c, stride_h, stride_w = x.stride()
     HW = H * W
-    grid = (N * C,)
+    grid = (N * C, )
 
     _instance_norm2d_kernel[grid](
-        x, y,
-        N, C, H, W,
-        stride_n, stride_c, stride_h, stride_w,
+        x,
+        y,
+        N,
+        C,
+        H,
+        W,
+        stride_n,
+        stride_c,
+        stride_h,
+        stride_w,
         eps,
         HW=HW,
     )
     return y
+
+
 batch_size = 112  # heavier workload
 features = 64
 dim1 = 512
 dim2 = 512
 
+
 def get_inputs():
     x = torch.rand(batch_size, features, dim1, dim2)
     return [x]
+
+
 def get_init_inputs():
     return [features]

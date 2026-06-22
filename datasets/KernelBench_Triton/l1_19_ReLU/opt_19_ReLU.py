@@ -8,8 +8,8 @@ import triton.language as tl
 # ── Direct kernel (one program per tile, no persistent loop) ────────────────────
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_SIZE": 256},  num_warps=4, num_stages=2),
-        triton.Config({"BLOCK_SIZE": 512},  num_warps=4, num_stages=2),
+        triton.Config({"BLOCK_SIZE": 256}, num_warps=4, num_stages=2),
+        triton.Config({"BLOCK_SIZE": 512}, num_warps=4, num_stages=2),
         triton.Config({"BLOCK_SIZE": 1024}, num_warps=4, num_stages=2),
         triton.Config({"BLOCK_SIZE": 2048}, num_warps=8, num_stages=2),
         triton.Config({"BLOCK_SIZE": 4096}, num_warps=8, num_stages=2),
@@ -21,26 +21,27 @@ def _relu_kernel_direct(
     x_ptr,
     y_ptr,
     n_elements,
-    n_elements_pow2: tl.constexpr,  # constexpr: autotune key, zero runtime load
+    n_elements_pow2: tl.
+    constexpr,  # constexpr: autotune key, zero runtime load
     BLOCK_SIZE: tl.constexpr,
 ):
-    pid     = tl.program_id(axis=0)
+    pid = tl.program_id(axis=0)
     offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     tl.multiple_of(offsets, 16)
     tl.max_contiguous(offsets, 16)
     mask = offsets < n_elements
-    x      = tl.load(x_ptr + offsets, mask=mask, other=0.0, care_padding=False)
+    x = tl.load(x_ptr + offsets, mask=mask, other=0.0, care_padding=False)
     x_fp32 = x.to(tl.float32)
     y_fp32 = tl.maximum(x_fp32, 0.0, propagate_nan=tl.PropagateNan.ALL)
-    y      = y_fp32.to(x.dtype)
+    y = y_fp32.to(x.dtype)
     tl.store(y_ptr + offsets, y, mask=mask)
 
 
 # ── Persistent kernel (work-stealing loop) ──────────────────────────────────────
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_SIZE": 256},  num_warps=4, num_stages=2),
-        triton.Config({"BLOCK_SIZE": 512},  num_warps=4, num_stages=2),
+        triton.Config({"BLOCK_SIZE": 256}, num_warps=4, num_stages=2),
+        triton.Config({"BLOCK_SIZE": 512}, num_warps=4, num_stages=2),
         triton.Config({"BLOCK_SIZE": 1024}, num_warps=4, num_stages=2),
         triton.Config({"BLOCK_SIZE": 2048}, num_warps=8, num_stages=2),
         triton.Config({"BLOCK_SIZE": 4096}, num_warps=8, num_stages=2),
@@ -52,21 +53,22 @@ def _relu_kernel_persistent(
     x_ptr,
     y_ptr,
     n_elements,
-    n_elements_pow2: tl.constexpr,  # constexpr: autotune key, zero runtime load
+    n_elements_pow2: tl.
+    constexpr,  # constexpr: autotune key, zero runtime load
     BLOCK_SIZE: tl.constexpr,
 ):
-    pid        = tl.program_id(axis=0)
+    pid = tl.program_id(axis=0)
     n_programs = tl.num_programs(0)
-    tile_id    = pid
+    tile_id = pid
     while tile_id * BLOCK_SIZE < n_elements:
         offsets = tile_id * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
         tl.multiple_of(offsets, 16)
         tl.max_contiguous(offsets, 16)
         mask = offsets < n_elements
-        x      = tl.load(x_ptr + offsets, mask=mask, other=0.0, care_padding=False)
+        x = tl.load(x_ptr + offsets, mask=mask, other=0.0, care_padding=False)
         x_fp32 = x.to(tl.float32)
         y_fp32 = tl.maximum(x_fp32, 0.0, propagate_nan=tl.PropagateNan.ALL)
-        y      = y_fp32.to(x.dtype)
+        y = y_fp32.to(x.dtype)
         tl.store(y_ptr + offsets, y, mask=mask)
         tile_id += n_programs
 
@@ -106,23 +108,28 @@ class ModelNew(nn.Module):
             return torch.empty_like(x)
 
         x_contig = x.contiguous()
-        y        = torch.empty_like(x_contig)
-        x_flat   = x_contig.view(-1)
-        y_flat   = y.view(-1)
-        n        = x_flat.numel()
-        n_pow2   = _next_pow2(n)
+        y = torch.empty_like(x_contig)
+        x_flat = x_contig.view(-1)
+        y_flat = y.view(-1)
+        n = x_flat.numel()
+        n_pow2 = _next_pow2(n)
 
         # Threshold: largest n where cdiv(n, 256) <= 65535
         # => n <= 256 * 65535 = 16,776,960
         # Guarantees every autotune BLOCK_SIZE config stays within FFTS limit
         # on the direct path.
         if triton.cdiv(n, 256) > self.MAX_PROGRAMS:
+
             def grid(meta):
-                return (min(triton.cdiv(n, meta["BLOCK_SIZE"]), self.MAX_PROGRAMS),)
+                return (min(triton.cdiv(n, meta["BLOCK_SIZE"]),
+                            self.MAX_PROGRAMS), )
+
             _relu_kernel_persistent[grid](x_flat, y_flat, n, n_pow2)
         else:
+
             def direct_grid(meta):
-                return (triton.cdiv(n, meta["BLOCK_SIZE"]),)
+                return (triton.cdiv(n, meta["BLOCK_SIZE"]), )
+
             _relu_kernel_direct[direct_grid](x_flat, y_flat, n, n_pow2)
 
         return y.view_as(x)

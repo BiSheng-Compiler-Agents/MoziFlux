@@ -1,0 +1,39 @@
+TEST M128_N256_K192 baseline1: PASS max_abs=0
+TEST M128_N256_K192 baseline2: PASS max_abs=0
+TEST M128_N256_K192 optimized: PASS max_abs=0
+TEST M256_N128_K64 baseline1: PASS max_abs=0
+TEST M256_N128_K64 baseline2: PASS max_abs=0
+TEST M256_N128_K64 optimized: PASS max_abs=0
+TEST M512_N512_K256 baseline1: PASS max_abs=0
+TEST M512_N512_K256 baseline2: PASS max_abs=0
+TEST M512_N512_K256 optimized: PASS max_abs=0
+TEST M1024_N1024_K512 baseline1: PASS max_abs=0
+TEST M1024_N1024_K512 baseline2: PASS max_abs=0
+TEST M1024_N1024_K512 optimized: PASS max_abs=0
+TEST M2048_N2048_K2048 baseline1: PASS max_abs=0
+TEST M2048_N2048_K2048 baseline2: PASS max_abs=0
+TEST M2048_N2048_K2048 optimized: PASS max_abs=0
+TEST benchmark baseline1: PASS max_abs=0
+TEST benchmark baseline2: PASS max_abs=0
+TEST benchmark optimized: PASS max_abs=0
+TEST M127_N255_K191 baseline1: PASS max_abs=0
+TEST M127_N255_K191 baseline2: PASS max_abs=0
+TEST M127_N255_K191 optimized: PASS max_abs=0
+TEST M33_N67_K128 baseline1: PASS max_abs=0
+TEST M33_N67_K128 baseline2: PASS max_abs=0
+TEST M33_N67_K128 optimized: PASS max_abs=0
+TEST M64_N1024_K768 baseline1: PASS max_abs=0
+TEST M64_N1024_K768 baseline2: PASS max_abs=0
+TEST M64_N1024_K768 optimized: PASS max_abs=0
+UNIT_TEST PASS
+matmul_transposed_B_performance:
+               label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0     M128_N256_K192       0.003195          0.008007          0.007740          0.005495
+1      M256_N128_K64       0.002974          0.007015          0.006993          0.004200
+2     M512_N512_K256       0.004757          0.011281          0.010701          0.009965
+3   M1024_N1024_K512       0.010353          0.032369          0.026976          0.028635
+4  M2048_N2048_K2048       0.057947          0.206756          0.121324          0.240337
+5          benchmark       0.419392          1.615683          0.873008          1.763025
+6     M127_N255_K191       0.003784          0.008504          0.008247          0.006075
+7       M33_N67_K128       0.003132          0.006067          0.005748          0.004362
+8     M64_N1024_K768       0.005852          0.026837          0.026089          0.013697

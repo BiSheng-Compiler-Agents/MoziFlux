@@ -1,0 +1,23 @@
+TEST baseline1 small_dim1 PASS max_abs=2.98023e-07
+TEST baseline2 small_dim1 PASS max_abs=2.98023e-07
+TEST optimized small_dim1 PASS max_abs=1.78814e-07
+TEST baseline1 dim0_boundary SKIP baseline_dim_skip
+TEST baseline2 dim0_boundary SKIP baseline_dim_skip
+TEST optimized dim0_boundary PASS max_abs=0
+TEST baseline1 dim2_small SKIP baseline_dim_skip
+TEST baseline2 dim2_small SKIP baseline_dim_skip
+TEST optimized dim2_small PASS max_abs=0
+TEST baseline1 target_dim1 PASS max_abs=0
+TEST baseline2 target_dim1 PASS max_abs=0
+TEST optimized target_dim1 PASS max_abs=0
+TEST baseline1 dim2_gridcap SKIP baseline_dim_skip
+TEST baseline2 dim2_gridcap SKIP baseline_dim_skip
+TEST optimized dim2_gridcap PASS max_abs=0
+UNIT_TEST PASS
+
+mean_reduction_over_dimension:
+           label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0     small_dim1       0.004785          0.046067          0.066714          0.010843
+1  dim0_boundary       0.003955               inf               inf          0.003995
+2     dim2_small       0.004509               inf               inf          0.004516
+3    target_dim1       6.668901         20.419056          6.845290          7.951386

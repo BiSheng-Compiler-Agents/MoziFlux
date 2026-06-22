@@ -8,10 +8,14 @@ import triton.language as tl
 
 @triton.jit
 def _rcumsum_lastdim_kernel(
-    x_ptr, y_ptr,
-    rows, N,
-    stride_x_row, stride_x_col,
-    stride_y_row, stride_y_col,
+    x_ptr,
+    y_ptr,
+    rows,
+    N,
+    stride_x_row,
+    stride_x_col,
+    stride_y_row,
+    stride_y_col,
     NUM_BLOCKS: tl.constexpr,
     BLOCK_N: tl.constexpr,
 ):
@@ -35,7 +39,8 @@ def _rcumsum_lastdim_kernel(
     base = last_block * BLOCK_N
     rev_cols = base + (BLOCK_N - 1 - i)
     m_rev = rev_cols < N
-    x_rev = tl.load(row_x_ptr + rev_cols * stride_x_col, mask=m_rev, other=0.0).to(tl.float32)
+    x_rev = tl.load(row_x_ptr + rev_cols * stride_x_col, mask=m_rev,
+                    other=0.0).to(tl.float32)
 
     # Process tiles from rightmost to leftmost with simple software pipelining
     for b in range(NUM_BLOCKS):
@@ -48,7 +53,9 @@ def _rcumsum_lastdim_kernel(
         # Inclusive scan within the reversed tile -> reverse-cumsum on original
         scan_rev = tl.cumsum(x_rev, axis=0)
         out_rev = scan_rev + carry
-        tl.store(row_y_ptr + rev_cols_cur * stride_y_col, out_rev.to(tl.float32), mask=m_rev_cur)
+        tl.store(row_y_ptr + rev_cols_cur * stride_y_col,
+                 out_rev.to(tl.float32),
+                 mask=m_rev_cur)
 
         # Update carry with sum of this tile
         carry += tl.sum(x_rev, axis=0)
@@ -59,14 +66,18 @@ def _rcumsum_lastdim_kernel(
             base_next = next_block_idx * BLOCK_N
             rev_cols_next = base_next + (BLOCK_N - 1 - i)
             m_rev_next = rev_cols_next < N
-            x_rev = tl.load(row_x_ptr + rev_cols_next * stride_x_col, mask=m_rev_next, other=0.0).to(tl.float32)
+            x_rev = tl.load(row_x_ptr + rev_cols_next * stride_x_col,
+                            mask=m_rev_next,
+                            other=0.0).to(tl.float32)
 
 
 def cumsum_reverse_npu(x: torch.Tensor, dim: int = 1) -> torch.Tensor:
     if not hasattr(torch, "npu") or not x.is_npu:
-        raise ValueError("cumsum_reverse_npu requires an Ascend NPU tensor input")
+        raise ValueError(
+            "cumsum_reverse_npu requires an Ascend NPU tensor input")
     if x.dtype not in (torch.float16, torch.float32):
-        raise TypeError("cumsum_reverse_npu supports float16 and float32 inputs only")
+        raise TypeError(
+            "cumsum_reverse_npu supports float16 and float32 inputs only")
     if x.ndim == 0:
         raise ValueError("cumsum_reverse_npu requires at least one dimension")
 
@@ -85,7 +96,7 @@ def cumsum_reverse_npu(x: torch.Tensor, dim: int = 1) -> torch.Tensor:
 
     BLOCK_N = 512
     NUM_BLOCKS = triton.cdiv(N, BLOCK_N)
-    _rcumsum_lastdim_kernel[(rows,)](
+    _rcumsum_lastdim_kernel[(rows, )](
         x2,
         y2,
         rows,
@@ -116,11 +127,16 @@ class ModelNew(nn.Module):
 
     def forward(self, x: torch.Tensor):
         return cumsum_reverse_npu(x, dim=self.dim)
+
+
 batch_size = 32768
-input_shape = (32768,)
+input_shape = (32768, )
 dim = 1
+
 
 def get_inputs():
     return [torch.rand(batch_size, *input_shape)]
+
+
 def get_init_inputs():
     return [dim]

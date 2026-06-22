@@ -4,7 +4,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 # ── Optimization summary ──────────────────────────────────────────────────────
 #
 # 1. TWO-PATH DISPATCH (mandatory for this kernel)
@@ -49,13 +48,12 @@ import triton.language as tl
 #    path caps explicitly; the direct path is gated by the routing check.
 # ──────────────────────────────────────────────────────────────────────────────
 
-
 # Ascend FFTS hard grid cap (coredim > UINT16_MAX crashes the scheduler).
 _MAX_PROGRAMS = 65535
 
-
 # ── Direct kernel ─────────────────────────────────────────────────────────────
 # One program per tile. Faster than persistent for n_tiles ≤ MAX_PROGRAMS.
+
 
 @triton.jit
 def _scale_kernel_direct(
@@ -79,6 +77,7 @@ def _scale_kernel_direct(
 
 # ── Persistent kernel ─────────────────────────────────────────────────────────
 # Used only when n_tiles > MAX_PROGRAMS. Amortises FFTS per-program cost.
+
 
 @triton.jit
 def _scale_kernel_persistent(
@@ -110,6 +109,7 @@ def _scale_kernel_persistent(
 
 # ── Host interface ────────────────────────────────────────────────────────────
 
+
 class ModelNew(nn.Module):
     """Ascend NPU-optimised matrix × scalar multiplication.
 
@@ -132,8 +132,7 @@ class ModelNew(nn.Module):
             raise ValueError("ModelNew expects an Ascend NPU tensor input")
         if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
             raise TypeError(
-                "ModelNew supports float16, bfloat16, and float32 tensors"
-            )
+                "ModelNew supports float16, bfloat16, and float32 tensors")
         if x.numel() == 0:
             return torch.empty_like(x)
 
@@ -145,15 +144,20 @@ class ModelNew(nn.Module):
         if n_tiles > _MAX_PROGRAMS:
             # Persistent path — cap grid to 65535, each program strides.
             n_programs = _MAX_PROGRAMS
-            _scale_kernel_persistent[(n_programs,)](
-                x_flat, y_flat, self.scalar,
-                n_elements, n_programs,
+            _scale_kernel_persistent[(n_programs, )](
+                x_flat,
+                y_flat,
+                self.scalar,
+                n_elements,
+                n_programs,
                 BLOCK_SIZE=self.BLOCK_SIZE,
             )
         else:
             # Direct path — one program per tile.
-            _scale_kernel_direct[(n_tiles,)](
-                x_flat, y_flat, self.scalar,
+            _scale_kernel_direct[(n_tiles, )](
+                x_flat,
+                y_flat,
+                self.scalar,
                 n_elements,
                 BLOCK_SIZE=self.BLOCK_SIZE,
             )

@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 
-
 DEFAULT_IN_CHANNELS = 3
 DEFAULT_OUT_CHANNELS = 64
 DEFAULT_KERNEL_SIZE = (3, 5, 7)
@@ -61,7 +60,8 @@ def _conv3d_implicit_gemm_kernel(
     out_h_idx = rem_hw // out_w_size
     out_w_idx = rem_hw % out_w_size
     batch_base = batch_idx * (IN_C * in_d_size * in_h_size * in_w_size)
-    spatial_base = out_d_idx * (in_h_size * in_w_size) + out_h_idx * in_w_size + out_w_idx
+    spatial_base = out_d_idx * (in_h_size *
+                                in_w_size) + out_h_idx * in_w_size + out_w_idx
     x_mask_base = m_mask[:, None]
     w_mask_base = n_mask[None, :]
 
@@ -72,11 +72,8 @@ def _conv3d_implicit_gemm_kernel(
         k_mask = offs_k < (KERNEL_VOL * IN_C)
         x_delta = tl.load(x_delta_ptr + offs_k, mask=k_mask, other=0)
 
-        x_offsets = (
-            batch_base[:, None]
-            + spatial_base[:, None]
-            + x_delta[None, :]
-        )
+        x_offsets = (batch_base[:, None] + spatial_base[:, None] +
+                     x_delta[None, :])
         x_mask = x_mask_base & k_mask[None, :]
         x_tile = tl.load(x_ptr + x_offsets, mask=x_mask, other=0.0)
         tl.compile_hint(x_tile, "dot_pad_only_k")
@@ -88,23 +85,23 @@ def _conv3d_implicit_gemm_kernel(
 
         acc = tl.dot(x_tile, w_tile, acc)
 
-    out_offsets = (
-        batch_idx[:, None] * batch_out_stride
-        + offs_n[None, :] * out_dhw
-        + out_d_idx[:, None] * out_hw
-        + out_h_idx[:, None] * out_w_size
-        + out_w_idx[:, None]
-    )
+    out_offsets = (batch_idx[:, None] * batch_out_stride +
+                   offs_n[None, :] * out_dhw + out_d_idx[:, None] * out_hw +
+                   out_h_idx[:, None] * out_w_size + out_w_idx[:, None])
     out_mask = m_mask[:, None] & n_mask[None, :]
     tl.store(out_ptr + out_offsets, acc.to(tl.float16), mask=out_mask)
 
 
 def _pack_weight(weight: torch.Tensor) -> torch.Tensor:
-    return weight.permute(1, 2, 3, 4, 0).contiguous().view(KERNEL_VOLUME * DEFAULT_IN_CHANNELS, DEFAULT_OUT_CHANNELS)
+    return weight.permute(1, 2, 3, 4, 0).contiguous().view(
+        KERNEL_VOLUME * DEFAULT_IN_CHANNELS, DEFAULT_OUT_CHANNELS)
 
 
-def _build_x_delta_table(in_d_size: int, in_h_size: int, in_w_size: int, device: torch.device) -> torch.Tensor:
-    kernel_idx = torch.arange(KERNEL_VOLUME * DEFAULT_IN_CHANNELS, device=device, dtype=torch.int32)
+def _build_x_delta_table(in_d_size: int, in_h_size: int, in_w_size: int,
+                         device: torch.device) -> torch.Tensor:
+    kernel_idx = torch.arange(KERNEL_VOLUME * DEFAULT_IN_CHANNELS,
+                              device=device,
+                              dtype=torch.int32)
     c_idx = torch.div(kernel_idx, KERNEL_VOLUME, rounding_mode="floor")
     kernel_only = torch.remainder(kernel_idx, KERNEL_VOLUME)
     kd_idx = torch.div(kernel_only, KERNEL_H * KERNEL_W, rounding_mode="floor")
@@ -113,26 +110,22 @@ def _build_x_delta_table(in_d_size: int, in_h_size: int, in_w_size: int, device:
     kw_idx = torch.remainder(kh_kw_idx, KERNEL_W)
     channel_stride = in_d_size * in_h_size * in_w_size
     depth_stride = in_h_size * in_w_size
-    return (c_idx * channel_stride + kd_idx * depth_stride + kh_idx * in_w_size + kw_idx).to(torch.int32)
+    return (c_idx * channel_stride + kd_idx * depth_stride +
+            kh_idx * in_w_size + kw_idx).to(torch.int32)
 
 
 def _can_use_triton_path(x: torch.Tensor, weight: torch.Tensor) -> bool:
-    return (
-        x.device.type == "npu"
-        and x.dtype == torch.float16
-        and x.is_contiguous()
-        and weight.dtype == torch.float16
-        and weight.is_contiguous()
-        and x.ndim == 5
-        and tuple(weight.shape) == (DEFAULT_OUT_CHANNELS, DEFAULT_IN_CHANNELS, KERNEL_D, KERNEL_H, KERNEL_W)
-        and x.shape[1] == DEFAULT_IN_CHANNELS
-        and x.shape[2] >= KERNEL_D
-        and x.shape[3] >= KERNEL_H
-        and x.shape[4] >= KERNEL_W
-    )
+    return (x.device.type == "npu" and x.dtype == torch.float16
+            and x.is_contiguous() and weight.dtype == torch.float16
+            and weight.is_contiguous() and x.ndim == 5 and tuple(
+                weight.shape) == (DEFAULT_OUT_CHANNELS, DEFAULT_IN_CHANNELS,
+                                  KERNEL_D, KERNEL_H, KERNEL_W)
+            and x.shape[1] == DEFAULT_IN_CHANNELS and x.shape[2] >= KERNEL_D
+            and x.shape[3] >= KERNEL_H and x.shape[4] >= KERNEL_W)
 
 
-def _conv3d_triton_forward(x: torch.Tensor, packed_weight: torch.Tensor, x_delta: torch.Tensor) -> torch.Tensor:
+def _conv3d_triton_forward(x: torch.Tensor, packed_weight: torch.Tensor,
+                           x_delta: torch.Tensor) -> torch.Tensor:
     batch_size, _, in_d_size, in_h_size, in_w_size = x.shape
     out_d_size = in_d_size - KERNEL_D + 1
     out_h_size = in_h_size - KERNEL_H + 1
@@ -232,7 +225,8 @@ class ModelNew(nn.Module):
         x_delta_key = (x.device, tuple(x.shape[2:]))
         if self._x_delta_key != x_delta_key:
             in_d_size, in_h_size, in_w_size = x.shape[2:]
-            self._x_delta = _build_x_delta_table(in_d_size, in_h_size, in_w_size, x.device)
+            self._x_delta = _build_x_delta_table(in_d_size, in_h_size,
+                                                 in_w_size, x.device)
             self._x_delta_key = x_delta_key
         return self._x_delta
 
@@ -247,16 +241,16 @@ class ModelNew(nn.Module):
             self._x_delta = None
             self._x_delta_key = None
 
-        if (
-            self.conv3d.bias is None
-            and self.conv3d.groups == 1
-            and self.conv3d.stride == (1, 1, 1)
-            and self.conv3d.padding == (0, 0, 0)
-            and self.conv3d.dilation == (1, 1, 1)
-            and tuple(self.conv3d.weight.shape) == (DEFAULT_OUT_CHANNELS, DEFAULT_IN_CHANNELS, KERNEL_D, KERNEL_H, KERNEL_W)
-            and _can_use_triton_path(x, self.conv3d.weight)
-        ):
-            return _conv3d_triton_forward(x, self._get_packed_weight(), self._get_x_delta(x))
+        if (self.conv3d.bias is None and self.conv3d.groups == 1
+                and self.conv3d.stride == (1, 1, 1)
+                and self.conv3d.padding == (0, 0, 0)
+                and self.conv3d.dilation == (1, 1, 1)
+                and tuple(self.conv3d.weight.shape)
+                == (DEFAULT_OUT_CHANNELS, DEFAULT_IN_CHANNELS, KERNEL_D,
+                    KERNEL_H, KERNEL_W)
+                and _can_use_triton_path(x, self.conv3d.weight)):
+            return _conv3d_triton_forward(x, self._get_packed_weight(),
+                                          self._get_x_delta(x))
 
         return F.conv3d(
             x,

@@ -59,6 +59,7 @@ class ModelNew(nn.Module):
     Simple model that performs a convolution, divides by a constant, and applies LeakyReLU.
     Fuses division and LeakyReLU into a single Triton kernel on Ascend NPU.
     """
+
     def __init__(
         self,
         in_channels=3,
@@ -83,15 +84,16 @@ class ModelNew(nn.Module):
             return out
 
         def grid(meta):
-            return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]), )
 
         inv_div = float(1.0 / float(self.divisor))
         neg_slope = 0.01
 
-        _div_leakyrelu_kernel[grid](
-            x_contig, out, n_elements, inv_div, neg_slope
-        )
+        _div_leakyrelu_kernel[grid](x_contig, out, n_elements, inv_div,
+                                    neg_slope)
         return out
+
+
 batch_size = 128
 in_channels = 8
 out_channels = 64
@@ -99,7 +101,10 @@ height, width = 128, 128
 kernel_size = 3
 divisor = 2
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, divisor]

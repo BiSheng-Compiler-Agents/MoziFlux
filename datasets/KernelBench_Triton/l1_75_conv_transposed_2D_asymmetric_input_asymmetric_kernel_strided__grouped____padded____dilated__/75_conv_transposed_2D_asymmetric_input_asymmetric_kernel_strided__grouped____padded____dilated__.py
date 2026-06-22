@@ -15,11 +15,24 @@ DEFAULT_GROUPS = 4
 
 @triton.jit
 def _upsample_insert_zeros_kernel(
-    x_ptr, y_ptr,
-    N, C, H, W, H_UP, W_UP,
-    STRIDE_H, STRIDE_W,
-    in_strideN, in_strideC, in_strideH, in_strideW,
-    out_strideN, out_strideC, out_strideH, out_strideW,
+    x_ptr,
+    y_ptr,
+    N,
+    C,
+    H,
+    W,
+    H_UP,
+    W_UP,
+    STRIDE_H,
+    STRIDE_W,
+    in_strideN,
+    in_strideC,
+    in_strideH,
+    in_strideW,
+    out_strideN,
+    out_strideC,
+    out_strideH,
+    out_strideW,
     BLOCK_HW: tl.constexpr,
 ):
     pid_nc = tl.program_id(0)
@@ -38,7 +51,9 @@ def _upsample_insert_zeros_kernel(
     x_base = x_ptr + n * in_strideN + c * in_strideC
     y_base = y_ptr + n * out_strideN + c * out_strideC
 
-    vals = tl.load(x_base + h_idx * in_strideH + w_idx * in_strideW, mask=mask, other=0)
+    vals = tl.load(x_base + h_idx * in_strideH + w_idx * in_strideW,
+                   mask=mask,
+                   other=0)
 
     ho = h_idx * STRIDE_H
     wo = w_idx * STRIDE_W
@@ -60,6 +75,7 @@ class ModelNew(nn.Module):
     The delivered implementation is NPU-only and requires the transformed conv2d path
     to be valid for the configured parameters.
     """
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -87,7 +103,8 @@ class ModelNew(nn.Module):
         except Exception:
             pass
 
-    def _upsample_insert_zeros(self, x: torch.Tensor, stride_hw: tuple[int, int]) -> torch.Tensor:
+    def _upsample_insert_zeros(self, x: torch.Tensor,
+                               stride_hw: tuple[int, int]) -> torch.Tensor:
         # x: [N, C, H, W], upsample by stride_hw inserting zeros between elements.
         N, C, H, W = x.shape
         sH, sW = stride_hw
@@ -108,11 +125,24 @@ class ModelNew(nn.Module):
         BLOCK = 512
         grid = (N * C, triton.cdiv(H * W, BLOCK))
         _upsample_insert_zeros_kernel[grid](
-            x_contig, y_contig,
-            N, C, H, W, H_up, W_up,
-            sH, sW,
-            in_strides[0], in_strides[1], in_strides[2], in_strides[3],
-            out_strides[0], out_strides[1], out_strides[2], out_strides[3],
+            x_contig,
+            y_contig,
+            N,
+            C,
+            H,
+            W,
+            H_up,
+            W_up,
+            sH,
+            sW,
+            in_strides[0],
+            in_strides[1],
+            in_strides[2],
+            in_strides[3],
+            out_strides[0],
+            out_strides[1],
+            out_strides[2],
+            out_strides[3],
             BLOCK_HW=BLOCK,
             num_warps=8,
             num_stages=2,
@@ -137,7 +167,8 @@ class ModelNew(nn.Module):
         pH, pW = self.conv_transpose2d.padding
         dH, dW = self.conv_transpose2d.dilation
         groups = self.conv_transpose2d.groups
-        w = self.conv_transpose2d.weight.to(dtype=x.dtype)  # [Cin, Cout/groups, kH, kW]
+        w = self.conv_transpose2d.weight.to(
+            dtype=x.dtype)  # [Cin, Cout/groups, kH, kW]
         bias = self.conv_transpose2d.bias
         if bias is not None:
             bias = bias.to(dtype=x.dtype)
@@ -149,7 +180,9 @@ class ModelNew(nn.Module):
         pad_w2 = dW * (kW - 1) - pW
 
         if pad_h2 < 0 or pad_w2 < 0:
-            raise RuntimeError("Equivalent conv2d padding must be non-negative for this operator.")
+            raise RuntimeError(
+                "Equivalent conv2d padding must be non-negative for this operator."
+            )
 
         # Triton upsample (insert zeros)
         x_up = self._upsample_insert_zeros(x, (sH, sW))
@@ -164,13 +197,10 @@ class ModelNew(nn.Module):
         Cout = Cout_per_g * G
 
         w_flip = w.flip(dims=(2, 3)).contiguous()
-        w_conv = (
-            w_flip
-            .view(G, Cin_per_g, Cout_per_g, kH, kW)
-            .permute(0, 2, 1, 3, 4)
-            .reshape(Cout, Cin_per_g, kH, kW)
-            .contiguous()
-        )
+        w_conv = (w_flip.view(G, Cin_per_g, Cout_per_g, kH,
+                              kW).permute(0, 2, 1, 3,
+                                          4).reshape(Cout, Cin_per_g, kH,
+                                                     kW).contiguous())
 
         return F.conv2d(
             x_up,
@@ -181,6 +211,8 @@ class ModelNew(nn.Module):
             dilation=(dH, dW),
             groups=groups,
         )
+
+
 batch_size = 16
 in_channels = 32
 out_channels = 64
@@ -192,8 +224,14 @@ padding = (1, 2)
 dilation = (2, 1)
 groups = 4
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, height, width)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, dilation, groups]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding, dilation,
+        groups
+    ]

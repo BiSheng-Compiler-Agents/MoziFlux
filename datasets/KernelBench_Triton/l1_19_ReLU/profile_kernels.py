@@ -19,7 +19,6 @@ from pathlib import Path
 import torch
 import torch_npu  # noqa: F401
 import triton
-import triton.language as tl
 
 _DIR = Path(__file__).parent
 
@@ -31,12 +30,12 @@ def _load(fname):
     return m
 
 
-_baseline_mod1  = _load(_DIR / "19_ReLU.py")
-_baseline_mod2  = _load(_DIR / "base_19_ReLU.py")
+_baseline_mod1 = _load(_DIR / "19_ReLU.py")
+_baseline_mod2 = _load(_DIR / "base_19_ReLU.py")
 _optimized_mod = _load(_DIR / "opt_19_ReLU.py")
 
-
 # ── runner functions ────────────────────────────────────────────────────────────
+
 
 def _run_torch_ref(x: torch.Tensor) -> torch.Tensor:
     """PyTorch built-in ReLU -- routes to Huawei ACL path on Ascend."""
@@ -44,6 +43,7 @@ def _run_torch_ref(x: torch.Tensor) -> torch.Tensor:
 
 
 _baseline_model1 = _baseline_mod1.ModelNew()
+
 
 def _run_baseline1(x: torch.Tensor) -> torch.Tensor:
     """Original Triton kernel: autotune + 1-program-per-tile grid.
@@ -68,9 +68,11 @@ def _run_baseline1(x: torch.Tensor) -> torch.Tensor:
 
 _baseline_model2 = _baseline_mod2.ModelNew()
 
+
 def _run_baseline2(x: torch.Tensor) -> torch.Tensor:
 
     return _baseline_model2(x)
+
 
 # Instantiate once — avoids __init__ overhead on every benchmark call.
 _optimized_model = _optimized_mod.ModelNew()
@@ -88,16 +90,16 @@ def _run_optimized(x: torch.Tensor) -> torch.Tensor:
 
 _BENCH_SHAPES = [
     # (label,             n_elements)
-    ("N=1024",             1024),           # tiny -- tests startup amortization
-    ("N=65536",           65536),           # medium
-    ("N=524288",         524288),           # large non-pow2 (4096*128)
-    ("N=4M",           4194304),            # 4M elements
-    ("N=16M",         16777216),            # 16M elements
-    ("N=bench-4096x393216", 4096 * 393216), # KernelBench shape (4096, 393216)
+    ("N=1024", 1024),  # tiny -- tests startup amortization
+    ("N=65536", 65536),  # medium
+    ("N=524288", 524288),  # large non-pow2 (4096*128)
+    ("N=4M", 4194304),  # 4M elements
+    ("N=16M", 16777216),  # 16M elements
+    ("N=bench-4096x393216", 4096 * 393216),  # KernelBench shape (4096, 393216)
 ]
 
-
 # ── perf_report benchmark ───────────────────────────────────────────────────────
+
 
 @triton.testing.perf_report(
     triton.testing.Benchmark(
@@ -105,25 +107,35 @@ _BENCH_SHAPES = [
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="mode",
         line_vals=["torch_ref", "baseline1", "baseline2", "optimized"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("blue", "-"), ("red", "-"), ("black", "-"), ("green", "-")],
         ylabel="Latency (ms)",
         plot_name="relu_perf",
         args={},
-    )
-)
+    ))
 def benchmark(label, mode):
     n = next(s[1] for s in _BENCH_SHAPES if s[0] == label)
     x = torch.rand(n, device="npu", dtype=torch.float16) * 4 - 2
 
     if mode == "torch_ref":
-        fn = lambda: _run_torch_ref(x)
+
+        def fn():
+            return _run_torch_ref(x)
     elif mode == "baseline1":
-        fn = lambda: _run_baseline1(x)
+
+        def fn():
+            return _run_baseline1(x)
     elif mode == "baseline2":
-        fn = lambda: _run_baseline2(x)
+
+        def fn():
+            return _run_baseline2(x)
     else:
-        fn = lambda: _run_optimized(x)
+
+        def fn():
+            return _run_optimized(x)
 
     # do_bench returns seconds; perf_report handles ylabel labelling
     return triton.testing.do_bench(fn, warmup=25, rep=200, return_mode="mean")
@@ -131,39 +143,42 @@ def benchmark(label, mode):
 
 # ── unit test ───────────────────────────────────────────────────────────────────
 
+
 def unit_test():
     """Verify baseline and optimized match torch.nn.functional.relu across shapes."""
     torch.manual_seed(42)
     any_fail = False
 
     test_shapes = [
-        ("N=1024",      1024),
-        ("N=65536",    65536),
-        ("N=524288",  524288),    # non-power-of-2 * tiles
-        ("N=4M",     4194304),
-        ("N=100",        100),    # edge: small, non-aligned
-        ("N=4097",      4097),    # edge: BLOCK_SIZE+1
+        ("N=1024", 1024),
+        ("N=65536", 65536),
+        ("N=524288", 524288),  # non-power-of-2 * tiles
+        ("N=4M", 4194304),
+        ("N=100", 100),  # edge: small, non-aligned
+        ("N=4097", 4097),  # edge: BLOCK_SIZE+1
     ]
 
     print("=== Unit Test: l1_19_ReLU ===")
     for label, n in test_shapes:
         x = torch.rand(n, device="npu", dtype=torch.float16) * 4 - 2
-        ref  = _run_torch_ref(x.clone())
+        ref = _run_torch_ref(x.clone())
         base1 = _run_baseline1(x.clone())
         base2 = _run_baseline2(x.clone())
-        opt  = _run_optimized(x.clone())
+        opt = _run_optimized(x.clone())
 
         ok_b1 = torch.allclose(ref, base1, atol=1e-2, rtol=1e-2)
         ok_b2 = torch.allclose(ref, base2, atol=1e-2, rtol=1e-2)
-        ok_o = torch.allclose(ref, opt,  atol=1e-2, rtol=1e-2)
+        ok_o = torch.allclose(ref, opt, atol=1e-2, rtol=1e-2)
         max_b1 = (ref - base1).abs().max().item()
         max_b2 = (ref - base2).abs().max().item()
         max_o = (ref - opt).abs().max().item()
 
-        print(f"  {label:<28}  baseline1 [{'PASS' if ok_b1 else 'FAIL'}]  "
-              f"baseline2 [{'PASS' if ok_b2 else 'FAIL'}]  "
-              f"optimized [{'PASS' if ok_o else 'FAIL'}]  "
-              f"maxDelta_base1={max_b1:.2e} maxDelta_base2={max_b2:.2e}  maxDelta_opt={max_o:.2e}")
+        print(
+            f"  {label:<28}  baseline1 [{'PASS' if ok_b1 else 'FAIL'}]  "
+            f"baseline2 [{'PASS' if ok_b2 else 'FAIL'}]  "
+            f"optimized [{'PASS' if ok_o else 'FAIL'}]  "
+            f"maxDelta_base1={max_b1:.2e} maxDelta_base2={max_b2:.2e}  maxDelta_opt={max_o:.2e}"
+        )
 
         if not ok_b1 or not ok_b2 or not ok_o:
             any_fail = True
@@ -176,13 +191,16 @@ def unit_test():
 
 # ── entry point ─────────────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(description="Profile l1_19_ReLU kernels")
-    parser.add_argument("--test",  action="store_true", help="Correctness check only")
+    parser.add_argument("--test",
+                        action="store_true",
+                        help="Correctness check only")
     parser.add_argument("--bench", action="store_true", help="Benchmark only")
     args = parser.parse_args()
 
-    run_test  = args.test  or not args.bench
+    run_test = args.test or not args.bench
     run_bench = args.bench or not args.test
 
     if run_test:

@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 DEFAULT_IN_CHANNELS = 3
 DEFAULT_OUT_CHANNELS = 16
 DEFAULT_DEPTH = 32
@@ -77,29 +76,26 @@ def _avg_pool3d_k4s4_kernel(
     w_mask = w_out < OW
     mask = od_mask & oh_mask & w_mask
 
-    x_base = (
-        n_idx * stride_n
-        + c_idx * stride_c
-        + (od_idx * 4) * stride_d
-        + (oh_idx * 4) * stride_h
-    )
-    y_base = (
-        n_idx * out_stride_n
-        + c_idx * out_stride_c
-        + od_idx * out_stride_d
-        + oh_idx * out_stride_h
-    )
+    x_base = (n_idx * stride_n + c_idx * stride_c + (od_idx * 4) * stride_d +
+              (oh_idx * 4) * stride_h)
+    y_base = (n_idx * out_stride_n + c_idx * out_stride_c +
+              od_idx * out_stride_d + oh_idx * out_stride_h)
     w_in_base = w_out * 4
     if COMPILE_HINTS:
-        w_in_base = tl.max_contiguous(tl.multiple_of(w_in_base, (1, 1, 4)), (1, 1, BLOCK_W))
+        w_in_base = tl.max_contiguous(tl.multiple_of(w_in_base, (1, 1, 4)),
+                                      (1, 1, BLOCK_W))
 
     acc = tl.zeros([BLOCK_D, BLOCK_H, BLOCK_W], dtype=tl.float32)
     if VECTORIZE_KW:
         kw = tl.arange(0, 4)[None, None, None, :]
         for kd in range(4):
             for kh in range(4):
-                ptrs = x_ptr + x_base[:, :, :, None] + kd * stride_d + kh * stride_h + (w_in_base[:, :, :, None] + kw) * stride_w
-                vals = tl.load(ptrs, mask=mask[:, :, :, None], other=0.0).to(tl.float32)
+                ptrs = x_ptr + x_base[:, :, :,
+                                      None] + kd * stride_d + kh * stride_h + (
+                                          w_in_base[:, :, :, None] +
+                                          kw) * stride_w
+                vals = tl.load(ptrs, mask=mask[:, :, :, None],
+                               other=0.0).to(tl.float32)
                 acc += tl.sum(vals, axis=3)
     else:
         for kd in range(4):
@@ -117,7 +113,8 @@ def _avg_pool3d_k4s4_kernel(
 
 def _avg_pool3d_k4s4_triton(x: torch.Tensor) -> torch.Tensor:
     if not _is_npu_tensor(x):
-        raise RuntimeError("The fused AvgPool3d Triton wrapper expects an Ascend NPU tensor.")
+        raise RuntimeError(
+            "The fused AvgPool3d Triton wrapper expects an Ascend NPU tensor.")
     x = x.contiguous()
     N, C, D, H, W = x.shape
     OD, OH, OW = D // 4, H // 4, W // 4
@@ -127,10 +124,14 @@ def _avg_pool3d_k4s4_triton(x: torch.Tensor) -> torch.Tensor:
 
     sN, sC, sD, sH, sW = x.stride()
     osN, osC, osD, osH, osW = y.stride()
-    grid = lambda META: (
-        N * C * triton.cdiv(OD, META["BLOCK_D"]) * triton.cdiv(OH, META["BLOCK_H"]),
-        triton.cdiv(OW, META["BLOCK_W"]),
-    )
+
+    def grid(META):
+        return (
+            N * C * triton.cdiv(OD, META["BLOCK_D"]) *
+            triton.cdiv(OH, META["BLOCK_H"]),
+            triton.cdiv(OW, META["BLOCK_W"]),
+        )
+
     _avg_pool3d_k4s4_kernel[grid](
         x,
         y,
@@ -164,6 +165,7 @@ def _avg_pool3d_k4s4_triton(x: torch.Tensor) -> torch.Tensor:
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -174,9 +176,11 @@ class ModelNew(nn.Module):
         bias_shape=DEFAULT_BIAS_SHAPE,
     ):
         super().__init__()
-        self.conv_transpose = nn.ConvTranspose3d(
-            in_channels, out_channels, kernel_size, stride=stride, padding=padding
-        )
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding)
         self.batch_norm = nn.BatchNorm3d(out_channels)
         self.bias_shape = bias_shape
 
@@ -186,13 +190,21 @@ class ModelNew(nn.Module):
                 "ModelNew expects Ascend NPU inputs; the Triton kernel path is the only supported runtime."
             )
         if not _is_npu_tensor(self.conv_transpose.weight):
-            raise RuntimeError("ModelNew weights must be moved to Ascend NPU before execution.")
-        if self.conv_transpose.bias is not None and not _is_npu_tensor(self.conv_transpose.bias):
-            raise RuntimeError("ModelNew bias must be moved to Ascend NPU before execution.")
+            raise RuntimeError(
+                "ModelNew weights must be moved to Ascend NPU before execution."
+            )
+        if self.conv_transpose.bias is not None and not _is_npu_tensor(
+                self.conv_transpose.bias):
+            raise RuntimeError(
+                "ModelNew bias must be moved to Ascend NPU before execution.")
         if not _is_npu_tensor(self.batch_norm.weight):
-            raise RuntimeError("ModelNew batch-norm weights must be moved to Ascend NPU before execution.")
+            raise RuntimeError(
+                "ModelNew batch-norm weights must be moved to Ascend NPU before execution."
+            )
         if not _is_npu_tensor(self.batch_norm.bias):
-            raise RuntimeError("ModelNew batch-norm bias must be moved to Ascend NPU before execution.")
+            raise RuntimeError(
+                "ModelNew batch-norm bias must be moved to Ascend NPU before execution."
+            )
 
         x = self.conv_transpose(x)
         x = self.batch_norm(x)
@@ -214,4 +226,6 @@ def get_inputs():
 
 
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, bias_shape]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding, bias_shape
+    ]

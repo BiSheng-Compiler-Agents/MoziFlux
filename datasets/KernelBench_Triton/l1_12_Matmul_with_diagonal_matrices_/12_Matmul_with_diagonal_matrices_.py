@@ -64,9 +64,10 @@ class ModelNew(nn.Module):
     Simple model that performs a matrix multiplication of a diagonal matrix with another matrix.
     C = diag(A) * B
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
-    
+
     def forward(self, A, B):
         """
         Performs the matrix multiplication.
@@ -96,23 +97,36 @@ class ModelNew(nn.Module):
 
         # Use a wider column tile for better bandwidth utilization
         BLOCK_N = 512
-        grid = lambda meta: (N, triton.cdiv(M, meta['BLOCK_N']))
+
+        def grid(meta):
+            return (N, triton.cdiv(M, meta['BLOCK_N']))
+
         _row_scale_kernel[grid](
-            A_cast, B_cast, C,
-            N, M,
-            B_cast.stride(0), B_cast.stride(1),
-            C.stride(0), C.stride(1),
+            A_cast,
+            B_cast,
+            C,
+            N,
+            M,
+            B_cast.stride(0),
+            B_cast.stride(1),
+            C.stride(0),
+            C.stride(1),
             BLOCK_N=BLOCK_N,
             num_warps=8,
             num_stages=1,
         )
         return C
+
+
 M = 4096
 N = 4096
+
 
 def get_inputs():
     A = torch.rand(N)
     B = torch.rand(N, M)
     return [A, B]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

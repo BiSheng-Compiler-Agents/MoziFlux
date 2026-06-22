@@ -38,7 +38,8 @@ def _relu_hswish_inplace_kernel(
     tl.store(x_ptr + offsets, y, mask=mask)
 
 
-def _resolve_launch_config(_n_elements: int) -> tuple[int, int, int, bool, bool, bool, int]:
+def _resolve_launch_config(
+        _n_elements: int) -> tuple[int, int, int, bool, bool, bool, int]:
     return (8192, 4, 1, True, False, False, 0)
 
 
@@ -51,8 +52,9 @@ def fused_relu_hardswish(x: torch.Tensor) -> torch.Tensor:
     if n_elements == 0:
         return x
 
-    block_size, num_warps, num_stages, assign_contig, use_contig_hint, use_multiple_of, math_mode = _resolve_launch_config(n_elements)
-    grid = (triton.cdiv(n_elements, block_size),)
+    block_size, num_warps, num_stages, assign_contig, use_contig_hint, use_multiple_of, math_mode = _resolve_launch_config(
+        n_elements)
+    grid = (triton.cdiv(n_elements, block_size), )
     _relu_hswish_inplace_kernel[grid](
         x,
         n_elements,
@@ -68,6 +70,7 @@ def fused_relu_hardswish(x: torch.Tensor) -> torch.Tensor:
 
 
 class ModelNew(nn.Module):
+
     def __init__(self, in_channels, out_channels, kernel_size):
         super(ModelNew, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
@@ -92,13 +95,15 @@ def _set_deterministic_seed(seed: int) -> None:
 
 def conv2d_relu_hardswish(x: torch.Tensor) -> torch.Tensor:
     if x.device.type != "npu":
-        raise RuntimeError("conv2d_relu_hardswish expects an Ascend NPU tensor")
+        raise RuntimeError(
+            "conv2d_relu_hardswish expects an Ascend NPU tensor")
 
     key = (str(x.device), x.dtype)
     model = _MODEL_CACHE.get(key)
     if model is None:
         _set_deterministic_seed(0)
-        model = ModelNew(*get_init_inputs()).eval().to(device=x.device, dtype=x.dtype)
+        model = ModelNew(*get_init_inputs()).eval().to(device=x.device,
+                                                       dtype=x.dtype)
         _MODEL_CACHE[key] = model
 
     with torch.no_grad():

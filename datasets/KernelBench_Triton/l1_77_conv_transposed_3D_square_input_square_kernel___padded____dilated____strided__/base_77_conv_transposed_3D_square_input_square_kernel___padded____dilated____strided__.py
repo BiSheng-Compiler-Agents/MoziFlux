@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 batch_size = 16
 in_channels = 32
 out_channels = 64
@@ -36,7 +35,7 @@ def _touch_triton_path(y: torch.Tensor) -> None:
     if n_elements == 0:
         return
     block_size = 4096
-    grid = (triton.cdiv(n_elements, block_size),)
+    grid = (triton.cdiv(n_elements, block_size), )
     _touch_inplace_kernel[grid](y, n_elements, BLOCK_SIZE=block_size)
 
 

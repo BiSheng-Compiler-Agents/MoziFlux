@@ -2,22 +2,40 @@ import torch
 import torch.nn as nn
 import triton
 import triton.language as tl
+import triton.language.extra.cann.extension as al
 
 
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 128, "GROUP_M": 16}, num_warps=8, num_stages=3),
+        triton.Config(
+            {
+                "BLOCK_M": 256,
+                "BLOCK_N": 128,
+                "BLOCK_K": 128,
+                "GROUP_M": 16
+            },
+            num_warps=8,
+            num_stages=3),
     ],
     key=["M", "N", "K"],
 )
 @triton.jit
 def _a_bt_matmul_kernel(
-    A_ptr, B_ptr, C_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_cm, stride_cn,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
+    A_ptr,
+    B_ptr,
+    C_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_cm,
+    stride_cn,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
     GROUP_M: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -41,21 +59,30 @@ def _a_bt_matmul_kernel(
     m_mask = offs_m < M
     n_mask = offs_n < N
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
-    a_ptrs = A_ptr + (offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak)
-    b_ptrs = B_ptr + (offs_k[:, None] * stride_bk + offs_n[None, :] * stride_bn)
+    a_ptrs = A_ptr + (offs_m[:, None] * stride_am +
+                      offs_k[None, :] * stride_ak)
+    b_ptrs = B_ptr + (offs_k[:, None] * stride_bk +
+                      offs_n[None, :] * stride_bn)
 
     for _ in range(0, K, BLOCK_K):
         k_mask = offs_k < K
-        a = tl.load(a_ptrs, mask=m_mask[:, None] & k_mask[None, :], other=0.0, cache_modifier=".cg")
-        b = tl.load(b_ptrs, mask=k_mask[:, None] & n_mask[None, :], other=0.0, cache_modifier=".cg")
-        tl.compile_hint(a, "dot_pad_only_k")
-        tl.compile_hint(b, "dot_pad_only_k")
+        a = tl.load(a_ptrs,
+                    mask=m_mask[:, None] & k_mask[None, :],
+                    other=0.0,
+                    cache_modifier=".cg")
+        b = tl.load(b_ptrs,
+                    mask=k_mask[:, None] & n_mask[None, :],
+                    other=0.0,
+                    cache_modifier=".cg")
+        al.compile_hint(a, "dot_pad_only_k")
+        al.compile_hint(b, "dot_pad_only_k")
         acc += tl.dot(a, b, out_dtype=tl.float32)
         a_ptrs += BLOCK_K * stride_ak
         b_ptrs += BLOCK_K * stride_bk
         offs_k += BLOCK_K
 
-    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm +
+                      offs_n[None, :] * stride_cn)
     tl.store(c_ptrs, acc, mask=m_mask[:, None] & n_mask[None, :])
 
 
@@ -67,19 +94,29 @@ def _matmul_a_bt_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     Bt_ = B.transpose(0, 1).contiguous()
     C = torch.empty((M, N), device=A_.device, dtype=A_.dtype)
 
-    grid = lambda META: (triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),)
+    def grid(META):
+        return (triton.cdiv(M, META["BLOCK_M"]) *
+                triton.cdiv(N, META["BLOCK_N"]), )
 
     _a_bt_matmul_kernel[grid](
-        A_, Bt_, C,
-        M, N, K,
-        A_.stride(0), A_.stride(1),
-        Bt_.stride(0), Bt_.stride(1),
-        C.stride(0), C.stride(1),
+        A_,
+        Bt_,
+        C,
+        M,
+        N,
+        K,
+        A_.stride(0),
+        A_.stride(1),
+        Bt_.stride(0),
+        Bt_.stride(1),
+        C.stride(0),
+        C.stride(1),
     )
     return C
 
 
 class ModelNew(nn.Module):
+
     def __init__(self):
         super(ModelNew, self).__init__()
 

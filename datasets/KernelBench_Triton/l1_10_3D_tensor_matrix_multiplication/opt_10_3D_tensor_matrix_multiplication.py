@@ -28,30 +28,88 @@ import triton.language.extra.cann.extension as al
 @triton.autotune(
     configs=[
         # Wide M, wide N — general purpose, balanced
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64, "GROUP_M": 8}),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32, "GROUP_M": 8}),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64,
+            "GROUP_M": 8
+        }),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32,
+            "GROUP_M": 8
+        }),
         # Tall M, thin N (M >> N)
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64,  "BLOCK_K": 64, "GROUP_M": 4}),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64,  "BLOCK_K": 32, "GROUP_M": 4}),
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 64,  "BLOCK_K": 32, "GROUP_M": 4}),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64,
+            "GROUP_M": 4
+        }),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32,
+            "GROUP_M": 4
+        }),
+        triton.Config({
+            "BLOCK_M": 256,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32,
+            "GROUP_M": 4
+        }),
         # Thin M, tall N (N >> M)
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 128, "BLOCK_K": 64, "GROUP_M": 4}),
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 128, "BLOCK_K": 32, "GROUP_M": 4}),
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 256, "BLOCK_K": 32, "GROUP_M": 4}),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64,
+            "GROUP_M": 4
+        }),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32,
+            "GROUP_M": 4
+        }),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 256,
+            "BLOCK_K": 32,
+            "GROUP_M": 4
+        }),
         # Balanced small for non-power-of-2 / small shapes
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 64,  "BLOCK_K": 64, "GROUP_M": 4}),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64,
+            "GROUP_M": 4
+        }),
     ],
     key=["B", "M", "N", "K"],
     use_cuda_graph=False,
 )
 @triton.jit
 def _matmul_3d_opt(
-    a_ptr, b_ptr, c_ptr,
-    B, M, N, K,
-    stride_ab, stride_am, stride_ak,
-    stride_bb, stride_bk, stride_bn,
-    stride_cb, stride_cm, stride_cn,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    B,
+    M,
+    N,
+    K,
+    stride_ab,
+    stride_am,
+    stride_ak,
+    stride_bb,
+    stride_bk,
+    stride_bn,
+    stride_cb,
+    stride_cm,
+    stride_cn,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
     GROUP_M: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -89,8 +147,10 @@ def _matmul_3d_opt(
     for k_idx in tl.range(0, num_k_iters):
         k_offs = k_idx * BLOCK_K + offs_k
 
-        a_ptrs = a_ptr_batch + (offs_m[:, None] * stride_am + k_offs[None, :] * stride_ak)
-        b_ptrs = b_ptr_batch + (k_offs[:, None] * stride_bk + offs_n[None, :] * stride_bn)
+        a_ptrs = a_ptr_batch + (offs_m[:, None] * stride_am +
+                                k_offs[None, :] * stride_ak)
+        b_ptrs = b_ptr_batch + (k_offs[:, None] * stride_bk +
+                                offs_n[None, :] * stride_bn)
 
         # Separate k_masks: A uses k as columns, B uses k as rows
         k_mask = k_offs < K
@@ -110,7 +170,8 @@ def _matmul_3d_opt(
         acc = tl.dot(a, b, acc)
 
     # ---- Output store ----
-    c_ptrs = c_ptr_batch + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+    c_ptrs = c_ptr_batch + (offs_m[:, None] * stride_cm +
+                            offs_n[None, :] * stride_cn)
     c_mask = m_mask & n_mask
     tl.store(c_ptrs, acc.to(c_ptr.dtype.element_ty), mask=c_mask)
 
@@ -120,7 +181,8 @@ def _matmul_3d_opt(
 # Uses the same kernel as the batched version but with B=1.
 # The grid is computed dynamically from M,N to match any autotune config.
 # ---------------------------------------------------------------------------
-def _batched_matmul_2d(A: torch.Tensor, B: torch.Tensor, M: int, N: int, K: int) -> torch.Tensor:
+def _batched_matmul_2d(A: torch.Tensor, B: torch.Tensor, M: int, N: int,
+                       K: int) -> torch.Tensor:
     """Single 2D matmul via the optimized kernel. Grid computed from M,N."""
     # Pick a likely BLOCK_M/BLOCK_N from autotune configs for grid sizing.
     # Use conservative grid (ceil(M/64) * ceil(N/64)) to guarantee coverage
@@ -131,11 +193,22 @@ def _batched_matmul_2d(A: torch.Tensor, B: torch.Tensor, M: int, N: int, K: int)
     grid = (grid_m * grid_n, 1)
     C = torch.zeros(M, N, device=A.device, dtype=A.dtype)
     _matmul_3d_opt[grid](
-        A, B, C,
-        1, M, N, K,
-        0, A.stride(0), A.stride(1),
-        0, B.stride(0), B.stride(1),
-        0, C.stride(0), C.stride(1),
+        A,
+        B,
+        C,
+        1,
+        M,
+        N,
+        K,
+        0,
+        A.stride(0),
+        A.stride(1),
+        0,
+        B.stride(0),
+        B.stride(1),
+        0,
+        C.stride(0),
+        C.stride(1),
     )
     return C
 

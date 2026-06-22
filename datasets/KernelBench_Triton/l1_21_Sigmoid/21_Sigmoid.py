@@ -29,6 +29,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs a Sigmoid activation.
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -48,7 +49,8 @@ class ModelNew(nn.Module):
         if x.dtype not in supported_dtypes:
             raise RuntimeError(f"Unsupported dtype for ModelNew: {x.dtype}")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked inputs")
 
         x_contig = x.contiguous()
         n_elements = x_contig.numel()
@@ -57,15 +59,27 @@ class ModelNew(nn.Module):
 
         y = torch.empty_like(x_contig)
         BLOCK_SIZE = 4096
-        grid = lambda meta: (triton.cdiv(n_elements, BLOCK_SIZE),)
 
-        _sigmoid_kernel[grid](x_contig, y, n_elements, BLOCK_SIZE=BLOCK_SIZE, num_warps=8, num_stages=2)
+        def grid(meta):
+            return (triton.cdiv(n_elements, BLOCK_SIZE), )
+
+        _sigmoid_kernel[grid](x_contig,
+                              y,
+                              n_elements,
+                              BLOCK_SIZE=BLOCK_SIZE,
+                              num_warps=8,
+                              num_stages=2)
         return y
+
+
 batch_size = 4096
 dim = 393216
+
 
 def get_inputs():
     x = torch.rand(batch_size, dim)
     return [x]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

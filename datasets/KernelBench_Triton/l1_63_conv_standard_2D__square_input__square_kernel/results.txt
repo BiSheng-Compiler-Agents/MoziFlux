@@ -1,0 +1,22 @@
+TEST baseline1 small_64 SKIP comparison_provider_preskipped
+TEST baseline2 small_64 SKIP comparison_provider_preskipped
+TEST optimized small_64 PASS max_diff=0
+TEST baseline1 medium_256 SKIP comparison_provider_preskipped
+TEST baseline2 medium_256 SKIP comparison_provider_preskipped
+TEST optimized medium_256 PASS max_diff=0
+TEST baseline1 exact_1024 SKIP comparison_provider_preskipped
+TEST baseline2 exact_1024 SKIP comparison_provider_preskipped
+TEST optimized exact_1024 PASS max_diff=0
+UNIT_TEST PASS
+
+BENCH baseline1 small_64 INF comparison_provider_preskipped
+BENCH baseline2 small_64 INF comparison_provider_preskipped
+BENCH baseline1 medium_256 INF comparison_provider_preskipped
+BENCH baseline2 medium_256 INF comparison_provider_preskipped
+BENCH baseline1 exact_1024 INF comparison_provider_preskipped
+BENCH baseline2 exact_1024 INF comparison_provider_preskipped
+conv2d_standard_2d_square_kernel:
+        label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    small_64       0.010315               inf               inf          0.010304
+1  medium_256       0.106406               inf               inf          0.106537
+2  exact_1024      11.605120               inf               inf         12.347041

@@ -4,7 +4,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_CHANNELS = 8
 DEFAULT_OUT_CHANNELS = 64
@@ -22,9 +21,9 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 @triton.jit
 def _fused_sub_mish_kernel(
-    x_ptr,          # in-place pointer to tensor
-    n_elements,     # total number of elements
-    sub_total,      # subtract_value_1 + subtract_value_2
+    x_ptr,  # in-place pointer to tensor
+    n_elements,  # total number of elements
+    sub_total,  # subtract_value_1 + subtract_value_2
     BLOCK_SIZE: tl.constexpr,
     CHUNKS_PER_PROGRAM: tl.constexpr,
 ):
@@ -32,7 +31,8 @@ def _fused_sub_mish_kernel(
     block_offsets = tl.arange(0, BLOCK_SIZE)
 
     for chunk_idx in range(CHUNKS_PER_PROGRAM):
-        offsets = (pid * CHUNKS_PER_PROGRAM + chunk_idx) * BLOCK_SIZE + block_offsets
+        offsets = (pid * CHUNKS_PER_PROGRAM +
+                   chunk_idx) * BLOCK_SIZE + block_offsets
         mask = offsets < n_elements
 
         # Load and upcast for numerics
@@ -42,18 +42,23 @@ def _fused_sub_mish_kernel(
         # Match PyTorch softplus threshold behavior for better numerical parity.
         abs_x = tl.abs(x32)
         sp_mid = tl.where(x32 > 0.0, x32, 0.0) + tl.log(1.0 + tl.exp(-abs_x))
-        sp = tl.where(x32 > 20.0, x32, tl.where(x32 < -20.0, tl.exp(x32), sp_mid))
+        sp = tl.where(x32 > 20.0, x32,
+                      tl.where(x32 < -20.0, tl.exp(x32), sp_mid))
         y32 = x32 * tl.tanh(sp)
         y = y32.to(x.dtype)
 
         tl.store(x_ptr + offsets, y, mask=mask)
 
 
-def _fused_sub_mish_inplace(x: torch.Tensor, sub1: float, sub2: float) -> torch.Tensor:
+def _fused_sub_mish_inplace(x: torch.Tensor, sub1: float,
+                            sub2: float) -> torch.Tensor:
     if not _is_npu_tensor(x):
-        raise RuntimeError("_fused_sub_mish_inplace expects an Ascend NPU tensor")
+        raise RuntimeError(
+            "_fused_sub_mish_inplace expects an Ascend NPU tensor")
     if x.requires_grad:
-        raise RuntimeError("_fused_sub_mish_inplace does not support autograd-tracked tensors")
+        raise RuntimeError(
+            "_fused_sub_mish_inplace does not support autograd-tracked tensors"
+        )
     if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
         raise TypeError(
             "_fused_sub_mish_inplace supports only float16, bfloat16, and float32 inputs"
@@ -65,7 +70,11 @@ def _fused_sub_mish_inplace(x: torch.Tensor, sub1: float, sub2: float) -> torch.
     if not x.is_contiguous():
         x = x.contiguous()
     sub_total = float(sub1) + float(sub2)
-    grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"] * meta["CHUNKS_PER_PROGRAM"]),)
+
+    def grid(meta):
+        return (triton.cdiv(n_elements,
+                            meta["BLOCK_SIZE"] * meta["CHUNKS_PER_PROGRAM"]), )
+
     _fused_sub_mish_kernel[grid](
         x,
         n_elements,
@@ -82,6 +91,7 @@ class ModelNew(nn.Module):
     """
     Model that performs a convolution, subtracts two values, applies Mish activation.
     """
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -99,9 +109,11 @@ class ModelNew(nn.Module):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects an Ascend NPU tensor input")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
         x = self.conv(x)
-        return _fused_sub_mish_inplace(x, self.subtract_value_1, self.subtract_value_2)
+        return _fused_sub_mish_inplace(x, self.subtract_value_1,
+                                       self.subtract_value_2)
 
 
 batch_size = DEFAULT_BATCH_SIZE
@@ -120,9 +132,14 @@ kernel_size = 3
 subtract_value_1 = 0.5
 subtract_value_2 = 0.2
 
+
 def get_inputs():
-    device="npu",
-    dtype=torch.float32,
+    device = "npu",
     return [torch.rand(batch_size, in_channels, height, width, device=device)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, subtract_value_1, subtract_value_2]
+    return [
+        in_channels, out_channels, kernel_size, subtract_value_1,
+        subtract_value_2
+    ]

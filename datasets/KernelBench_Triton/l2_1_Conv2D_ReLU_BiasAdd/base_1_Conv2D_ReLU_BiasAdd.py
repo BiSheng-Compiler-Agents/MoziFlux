@@ -5,7 +5,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_CHANNELS = 64
 DEFAULT_OUT_CHANNELS = 128
@@ -20,7 +19,8 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
     return bool(getattr(x, "is_npu", False))
 
 
-def _deterministic_uniform_like(param: torch.Tensor, seed: int) -> torch.Tensor:
+def _deterministic_uniform_like(param: torch.Tensor,
+                                seed: int) -> torch.Tensor:
     generator = torch.Generator(device="cpu")
     generator.manual_seed(seed)
     data = torch.empty(param.shape, dtype=torch.float32, device="cpu")
@@ -30,12 +30,14 @@ def _deterministic_uniform_like(param: torch.Tensor, seed: int) -> torch.Tensor:
 
 def _initialize_model_parameters(model: nn.Module) -> None:
     with torch.no_grad():
-        model.conv.weight.copy_(_deterministic_uniform_like(model.conv.weight, MODEL_INIT_SEED))
+        model.conv.weight.copy_(
+            _deterministic_uniform_like(model.conv.weight, MODEL_INIT_SEED))
         if model.conv.bias is not None:
             model.conv.bias.copy_(
-                _deterministic_uniform_like(model.conv.bias, MODEL_INIT_SEED + 1)
-            )
-        model.bias.copy_(_deterministic_uniform_like(model.bias, MODEL_INIT_SEED + 2))
+                _deterministic_uniform_like(model.conv.bias,
+                                            MODEL_INIT_SEED + 1))
+        model.bias.copy_(
+            _deterministic_uniform_like(model.bias, MODEL_INIT_SEED + 2))
 
 
 @triton.jit
@@ -74,18 +76,23 @@ def _relu_add_bias_triton(x: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
     if not _is_npu_tensor(x) or not _is_npu_tensor(bias):
         raise RuntimeError("_relu_add_bias_triton expects NPU tensors")
     if x.requires_grad:
-        raise RuntimeError("_relu_add_bias_triton does not support autograd-enabled input tensors")
+        raise RuntimeError(
+            "_relu_add_bias_triton does not support autograd-enabled input tensors"
+        )
     if x.dtype not in (torch.float16, torch.float32):
-        raise RuntimeError("_relu_add_bias_triton supports only float16 and float32 tensors")
+        raise RuntimeError(
+            "_relu_add_bias_triton supports only float16 and float32 tensors")
     if x.ndim != 4:
-        raise RuntimeError(f"Expected x to have shape [N, C, H, W], got {tuple(x.shape)}")
+        raise RuntimeError(
+            f"Expected x to have shape [N, C, H, W], got {tuple(x.shape)}")
     if bias.numel() != x.shape[1]:
         raise RuntimeError(
             f"Bias must contain exactly one value per channel, got {bias.numel()} for C={x.shape[1]}"
         )
 
     x = x.contiguous()
-    bias_flat = bias.contiguous().reshape(-1).to(device=x.device, dtype=x.dtype)
+    bias_flat = bias.contiguous().reshape(-1).to(device=x.device,
+                                                 dtype=x.dtype)
     N, C, H, W = x.shape
     y = torch.empty_like(x)
     rows = N * C * H
@@ -129,7 +136,8 @@ class ModelNew(nn.Module):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
 
         x = self.conv(x)
         x = x.detach()

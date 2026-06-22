@@ -37,7 +37,7 @@ def _exclusive_cumsum_row_to_padded_kernel(
     zero_col_ptrs = y_ptr + rows_idx * stride_y_row
     tl.store(zero_col_ptrs, 0.0, mask=row_mask)
 
-    carry = tl.zeros((BLOCK_M,), dtype=tl.float32)
+    carry = tl.zeros((BLOCK_M, ), dtype=tl.float32)
     x_row_ptrs = x_ptr + rows_idx[:, None] * stride_x_row
     y_row_ptrs = y_ptr + rows_idx[:, None] * stride_y_row
 
@@ -72,7 +72,7 @@ def _exclusive_cumsum_row_to_padded_fast_kernel(
     zero_col_ptrs = y_ptr + rows_idx * 32769
     tl.store(zero_col_ptrs, 0.0, mask=row_mask)
 
-    carry = tl.zeros((BLOCK_M,), dtype=tl.float32)
+    carry = tl.zeros((BLOCK_M, ), dtype=tl.float32)
     x_row_ptrs = x_ptr + rows_idx[:, None] * 32768
     y_row_ptrs = y_ptr + rows_idx[:, None] * 32769
 
@@ -81,7 +81,8 @@ def _exclusive_cumsum_row_to_padded_fast_kernel(
         x_ptrs = x_row_ptrs + chunk_cols[None, :]
         y_ptrs = y_row_ptrs + (chunk_cols[None, :] + 1)
 
-        vals = tl.load(x_ptrs, mask=row_mask[:, None], other=0.0).to(tl.float32)
+        vals = tl.load(x_ptrs, mask=row_mask[:, None],
+                       other=0.0).to(tl.float32)
         prefix = tl.cumsum(vals, axis=1)
         outputs = prefix + carry[:, None]
         tl.store(y_ptrs, outputs, mask=row_mask[:, None])
@@ -89,6 +90,7 @@ def _exclusive_cumsum_row_to_padded_fast_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self, dim=1):
         super(ModelNew, self).__init__()
         self.dim = dim
@@ -98,8 +100,7 @@ class ModelNew(nn.Module):
             raise RuntimeError("ModelNew expects inputs on Ascend NPU")
         if x.ndim != 2:
             raise RuntimeError(
-                f"ModelNew expects a 2D tensor, but received ndim={x.ndim}"
-            )
+                f"ModelNew expects a 2D tensor, but received ndim={x.ndim}")
         if (self.dim % x.ndim) != 1:
             raise RuntimeError(
                 f"ModelNew only supports dim=1 or -1 for 2D inputs, but received dim={self.dim}"
@@ -119,18 +120,13 @@ class ModelNew(nn.Module):
         stride_x_row, stride_x_col = x.stride()
         stride_y_row, stride_y_col = y.stride()
 
-        use_fast_path = (
-            self.dim == 1
-            and x.dtype == torch.float16
-            and B == TARGET_BATCH
-            and N == TARGET_COLS
-            and stride_x_row == TARGET_COLS
-            and stride_x_col == 1
-            and stride_y_row == TARGET_COLS + 1
-            and stride_y_col == 1
-        )
+        use_fast_path = (self.dim == 1 and x.dtype == torch.float16
+                         and B == TARGET_BATCH and N == TARGET_COLS
+                         and stride_x_row == TARGET_COLS and stride_x_col == 1
+                         and stride_y_row == TARGET_COLS + 1
+                         and stride_y_col == 1)
         if use_fast_path:
-            grid = (triton.cdiv(rows, FAST_BLOCK_M),)
+            grid = (triton.cdiv(rows, FAST_BLOCK_M), )
             _exclusive_cumsum_row_to_padded_fast_kernel[grid](
                 x[:rows],
                 y,
@@ -156,7 +152,7 @@ class ModelNew(nn.Module):
             block_n = 1024
             block_m = 2
 
-        grid = (triton.cdiv(rows, block_m),)
+        grid = (triton.cdiv(rows, block_m), )
         _exclusive_cumsum_row_to_padded_kernel[grid](
             x[:rows],
             y,
@@ -176,7 +172,7 @@ class ModelNew(nn.Module):
 
 
 batch_size = 32768
-input_shape = (32768,)
+input_shape = (32768, )
 dim = 1
 
 

@@ -78,16 +78,20 @@ class ModelNew(nn.Module):
     Parameters:
         None
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
     def forward(self, predictions, targets):
         if predictions.device.type != "npu" or targets.device.type != "npu":
-            raise ValueError("ModelNew expects predictions and targets on Ascend NPU")
+            raise ValueError(
+                "ModelNew expects predictions and targets on Ascend NPU")
         if predictions.ndim != 2 or targets.ndim != 2:
             raise ValueError("ModelNew expects 2D predictions and targets")
         if predictions.shape != targets.shape:
-            raise ValueError("ModelNew expects predictions and targets with matching shapes")
+            raise ValueError(
+                "ModelNew expects predictions and targets with matching shapes"
+            )
 
         # Ensure contiguous memory for predictable strides
         p = predictions.contiguous()
@@ -102,24 +106,35 @@ class ModelNew(nn.Module):
         stride_tb, stride_td = t.stride()
 
         # Launch one program per row; tile over columns internally with unrolling
-        grid = (B,)
+        grid = (B, )
         _kl_div_batch_sum_kernel[grid](
-            p, t, row_sums,
-            B, D,
-            stride_pb, stride_pd,
-            stride_tb, stride_td,
+            p,
+            t,
+            row_sums,
+            B,
+            D,
+            stride_pb,
+            stride_pd,
+            stride_tb,
+            stride_td,
             BLOCK_SIZE=1024,
             num_warps=8,
             num_stages=2,
         )
         # 'batchmean' reduction: sum over all elements divided by batch size
         return row_sums.sum() / B
+
+
 batch_size = 8192 * 2
-input_shape = (8192 * 2,)
+input_shape = (8192 * 2, )
 dim = 1
+
 
 def get_inputs():
     scale = torch.rand(())
-    return [(torch.rand(batch_size, *input_shape)*scale).softmax(dim=-1), torch.rand(batch_size, *input_shape).softmax(dim=-1)]
+    return [(torch.rand(batch_size, *input_shape) * scale).softmax(dim=-1),
+            torch.rand(batch_size, *input_shape).softmax(dim=-1)]
+
+
 def get_init_inputs():
     return []

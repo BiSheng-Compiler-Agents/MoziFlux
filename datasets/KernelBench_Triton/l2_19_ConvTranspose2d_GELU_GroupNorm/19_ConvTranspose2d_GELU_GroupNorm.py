@@ -96,7 +96,8 @@ def _gelu_groupnorm_kernel(
         ch += 1
 
 
-def gelu_groupnorm_fused(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, num_groups: int, eps: float):
+def gelu_groupnorm_fused(x: torch.Tensor, weight: torch.Tensor,
+                         bias: torch.Tensor, num_groups: int, eps: float):
     """
     Fused GELU followed by GroupNorm using a Triton kernel.
     Args:
@@ -109,7 +110,8 @@ def gelu_groupnorm_fused(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tens
         y: [N, C, H, W] tensor with the same dtype as x
     """
     assert x.device.type == "npu", "Triton kernel requires an NPU tensor"
-    assert x.dtype in (torch.float16, torch.bfloat16, torch.float32), "Unsupported input dtype"
+    assert x.dtype in (torch.float16, torch.bfloat16,
+                       torch.float32), "Unsupported input dtype"
     N, C, H, W = x.shape
     assert C % num_groups == 0, "num_groups must divide C"
     y = torch.empty_like(x)
@@ -120,13 +122,19 @@ def gelu_groupnorm_fused(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tens
     b = bias.contiguous()
 
     # Each program handles one (n, g)
-    grid = (N * num_groups,)
+    grid = (N * num_groups, )
 
     # Choose a tile size; 1024 is generally a good default
     BLOCK = 1024
     _gelu_groupnorm_kernel[grid](
-        x, w, b, y,
-        N, C, H, W,
+        x,
+        w,
+        b,
+        y,
+        N,
+        C,
+        H,
+        W,
         num_groups,
         eps,
         BLOCK=BLOCK,
@@ -138,10 +146,16 @@ class ModelNew(nn.Module):
     """
     Model that performs a transposed convolution, applies GELU, and normalizes with GroupNorm.
     """
-    def __init__(self, in_channels, out_channels, kernel_size, stride, groups, num_groups):
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride, groups,
+                 num_groups):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride=stride)
-        self.group_norm = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
+        self.conv_transpose = nn.ConvTranspose2d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride)
+        self.group_norm = nn.GroupNorm(num_groups=num_groups,
+                                       num_channels=out_channels)
 
     def forward(self, x):
         if x.device.type != "npu":
@@ -154,16 +168,21 @@ class ModelNew(nn.Module):
             self.group_norm.num_groups,
             self.group_norm.eps,
         )
-batch_size   = 128  
-in_channels  = 64  
-out_channels = 64  
-height = width = 256  
-kernel_size  = 3
-stride       = 1
+
+
+batch_size = 128
+in_channels = 64
+out_channels = 64
+height = width = 256
+kernel_size = 3
+stride = 1
 groups = 8
 num_groups = 8
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, stride, groups, num_groups]

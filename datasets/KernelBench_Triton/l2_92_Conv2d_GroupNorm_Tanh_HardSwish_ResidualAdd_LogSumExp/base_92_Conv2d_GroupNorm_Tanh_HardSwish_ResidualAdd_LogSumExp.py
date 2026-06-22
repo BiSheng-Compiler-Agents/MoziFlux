@@ -5,7 +5,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_CHANNELS = 8
 DEFAULT_OUT_CHANNELS = 64
@@ -24,7 +23,10 @@ def _fused_tanh_hswish_residual_lse(
     x_conv_ptr,
     x_norm_ptr,
     out_ptr,
-    N, C, H, W,
+    N,
+    C,
+    H,
+    W,
     BLOCK_C: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -48,7 +50,8 @@ def _fused_tanh_hswish_residual_lse(
         ch_mask = (idx < C) & mask_pid
         offs = base + idx * HW
 
-        xc = tl.load(x_conv_ptr + offs, mask=ch_mask, other=-1.0e30).to(tl.float32)
+        xc = tl.load(x_conv_ptr + offs, mask=ch_mask,
+                     other=-1.0e30).to(tl.float32)
         xn = tl.load(x_norm_ptr + offs, mask=ch_mask, other=0.0).to(tl.float32)
 
         t2 = tl.exp(-2.0 * xn)
@@ -72,6 +75,7 @@ def _fused_tanh_hswish_residual_lse(
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -90,7 +94,8 @@ class ModelNew(nn.Module):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
 
         x_conv = self.conv(x)
         x_norm = self.group_norm(x_conv)
@@ -98,7 +103,9 @@ class ModelNew(nn.Module):
         N, C, H, W = x_conv.shape
         x_conv_c = x_conv.contiguous()
         x_norm_c = x_norm.contiguous()
-        out = torch.empty((N, 1, H, W), device=x_conv.device, dtype=x_conv.dtype)
+        out = torch.empty((N, 1, H, W),
+                          device=x_conv.device,
+                          dtype=x_conv.dtype)
 
         if C <= 1:
             block_c = 1
@@ -107,14 +114,19 @@ class ModelNew(nn.Module):
             block_c = min(128, max(1, block_c))
 
         HW = H * W
-        grid = (HW,)
+        grid = (HW, )
         for n in range(N):
-            xc_slice = x_conv_c[n:n+1].contiguous()
-            xn_slice = x_norm_c[n:n+1].contiguous()
-            out_slice = out[n:n+1].contiguous()
+            xc_slice = x_conv_c[n:n + 1].contiguous()
+            xn_slice = x_norm_c[n:n + 1].contiguous()
+            out_slice = out[n:n + 1].contiguous()
             _fused_tanh_hswish_residual_lse[grid](
-                xc_slice, xn_slice, out_slice,
-                1, C, H, W,
+                xc_slice,
+                xn_slice,
+                out_slice,
+                1,
+                C,
+                H,
+                W,
                 BLOCK_C=block_c,
                 num_warps=2,
                 num_stages=2,
@@ -132,6 +144,8 @@ def run_operator(x: torch.Tensor) -> torch.Tensor:
         model = ModelNew().eval().to(device=x.device, dtype=x.dtype)
         _MODEL_CACHE[key] = model
     return model(x)
+
+
 batch_size = 128
 in_channels = 8
 out_channels = 64
@@ -139,7 +153,10 @@ height, width = 128, 128
 kernel_size = 3
 groups = 16
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width, device='npu')]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, groups]

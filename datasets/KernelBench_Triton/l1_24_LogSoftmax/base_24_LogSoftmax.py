@@ -19,8 +19,8 @@ def _log_softmax_streaming_kernel(
 
     offs_n = tl.arange(0, BLOCK_N)
 
-    running_max = tl.full((BLOCK_M,), -float("inf"), tl.float32)
-    running_sum = tl.zeros((BLOCK_M,), tl.float32)
+    running_max = tl.full((BLOCK_M, ), -float("inf"), tl.float32)
+    running_sum = tl.zeros((BLOCK_M, ), tl.float32)
 
     for start_n in range(0, D, BLOCK_N):
         cols = start_n + offs_n
@@ -58,8 +58,8 @@ def _log_softmax_streaming_kernel_aligned(
     rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
 
-    running_max = tl.full((BLOCK_M,), -float("inf"), tl.float32)
-    running_sum = tl.zeros((BLOCK_M,), tl.float32)
+    running_max = tl.full((BLOCK_M, ), -float("inf"), tl.float32)
+    running_sum = tl.zeros((BLOCK_M, ), tl.float32)
     row_bases = rows[:, None] * D
 
     for start_n in range(0, D, BLOCK_N):
@@ -118,17 +118,20 @@ def _pick_block_m(b: int, d: int) -> int:
 
 def _log_softmax_triton(x: torch.Tensor, dim: int) -> torch.Tensor:
     if x.device.type != "npu":
-        raise ValueError("log_softmax Triton path requires an Ascend NPU tensor.")
+        raise ValueError(
+            "log_softmax Triton path requires an Ascend NPU tensor.")
     if x.ndim != 2:
         raise ValueError("log_softmax Triton path expects a 2D tensor.")
     if dim not in (1, -1):
-        raise ValueError("log_softmax Triton path supports only the last dimension.")
+        raise ValueError(
+            "log_softmax Triton path supports only the last dimension.")
     if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
         raise ValueError("Unsupported dtype for Triton log_softmax.")
 
     B, D = x.shape
     if B == 0 or D == 0:
-        raise ValueError("log_softmax Triton path does not support empty tensors.")
+        raise ValueError(
+            "log_softmax Triton path does not support empty tensors.")
 
     x_contig = x.contiguous()
     y = torch.empty_like(x_contig)
@@ -139,7 +142,7 @@ def _log_softmax_triton(x: torch.Tensor, dim: int) -> torch.Tensor:
     num_stages = _pick_num_stages(D)
 
     if B % block_m == 0 and D % block_n == 0:
-        _log_softmax_streaming_kernel_aligned[(B // block_m,)](
+        _log_softmax_streaming_kernel_aligned[(B // block_m, )](
             x_contig,
             y,
             D,
@@ -149,7 +152,7 @@ def _log_softmax_triton(x: torch.Tensor, dim: int) -> torch.Tensor:
             num_stages=num_stages,
         )
     else:
-        _log_softmax_streaming_kernel[(triton.cdiv(B, block_m),)](
+        _log_softmax_streaming_kernel[(triton.cdiv(B, block_m), )](
             x_contig,
             y,
             B,
@@ -163,6 +166,7 @@ def _log_softmax_triton(x: torch.Tensor, dim: int) -> torch.Tensor:
 
 
 class ModelNew(nn.Module):
+
     def __init__(self, dim: int = 1):
         super(ModelNew, self).__init__()
         self.dim = dim

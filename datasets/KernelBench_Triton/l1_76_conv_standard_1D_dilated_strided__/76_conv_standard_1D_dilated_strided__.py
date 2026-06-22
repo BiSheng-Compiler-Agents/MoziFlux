@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 import torch_npu  # noqa: F401
@@ -91,10 +90,22 @@ class ModelNew(nn.Module):
         dilation (int, optional): Spacing between kernel elements. Defaults to 1.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, stride: int = 1, dilation: int = 1, bias: bool = False):
+
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 kernel_size: int,
+                 stride: int = 1,
+                 dilation: int = 1,
+                 bias: bool = False):
         super(ModelNew, self).__init__()
         # Use PyTorch Conv1d parameters for initialization parity
-        self.conv1d = nn.Conv1d(in_channels, out_channels, kernel_size, stride=stride, dilation=dilation, bias=bias)
+        self.conv1d = nn.Conv1d(in_channels,
+                                out_channels,
+                                kernel_size,
+                                stride=stride,
+                                dilation=dilation,
+                                bias=bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -128,18 +139,23 @@ def conv_standard_1d_dilated_strided(
     dilation: int = 1,
 ) -> torch.Tensor:
     if x.device.type != "npu":
-        raise RuntimeError("conv_standard_1d_dilated_strided expects x on NPU.")
+        raise RuntimeError(
+            "conv_standard_1d_dilated_strided expects x on NPU.")
     if weight.device.type != "npu":
-        raise RuntimeError("conv_standard_1d_dilated_strided expects weight on NPU.")
+        raise RuntimeError(
+            "conv_standard_1d_dilated_strided expects weight on NPU.")
     if bias is not None and bias.device.type != "npu":
-        raise RuntimeError("conv_standard_1d_dilated_strided expects bias on NPU.")
+        raise RuntimeError(
+            "conv_standard_1d_dilated_strided expects bias on NPU.")
     if x.ndim != 3:
-        raise RuntimeError(f"Expected x to have shape [N, IC, L_IN], got {tuple(x.shape)}.")
+        raise RuntimeError(
+            f"Expected x to have shape [N, IC, L_IN], got {tuple(x.shape)}.")
     if weight.ndim != 3:
         raise RuntimeError(
             f"Expected weight to have shape [OC, IC, K], got {tuple(weight.shape)}."
         )
-    if bias is not None and (bias.ndim != 1 or bias.shape[0] != weight.shape[0]):
+    if bias is not None and (bias.ndim != 1
+                             or bias.shape[0] != weight.shape[0]):
         raise RuntimeError(
             f"Expected bias to have shape [{weight.shape[0]}], got {tuple(bias.shape)}."
         )
@@ -148,7 +164,9 @@ def conv_standard_1d_dilated_strided(
             f"Input channels ({x.shape[1]}) must match weight.shape[1] ({weight.shape[1]})."
         )
     if stride < 1 or dilation < 1:
-        raise RuntimeError(f"Invalid convolution parameters: stride={stride}, dilation={dilation}.")
+        raise RuntimeError(
+            f"Invalid convolution parameters: stride={stride}, dilation={dilation}."
+        )
     supported_dtypes = (torch.float16, torch.bfloat16, torch.float32)
     if x.dtype not in supported_dtypes:
         raise RuntimeError(f"Unsupported input dtype: {x.dtype}.")
@@ -168,7 +186,8 @@ def conv_standard_1d_dilated_strided(
     N, IC, L_IN = x.shape
     OC, IC_w, K = weight.shape
     if IC != IC_w:
-        raise RuntimeError(f"Input channels mismatch: x has {IC}, weight expects {IC_w}.")
+        raise RuntimeError(
+            f"Input channels mismatch: x has {IC}, weight expects {IC_w}.")
     receptive_field = dilation * (K - 1) + 1
     L_OUT = (L_IN - receptive_field) // stride + 1
     if L_OUT <= 0:
@@ -213,6 +232,8 @@ def conv_standard_1d_dilated_strided(
         num_stages=2,
     )
     return y
+
+
 batch_size = 64
 in_channels = 64
 out_channels = 128
@@ -221,8 +242,11 @@ length = 524280
 stride = 3
 dilation = 4
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, length)
     return [x]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, stride, dilation]

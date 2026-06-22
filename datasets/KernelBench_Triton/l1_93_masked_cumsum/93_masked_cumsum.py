@@ -62,7 +62,8 @@ def masked_cumsum(x, mask, dim=-1):
     if x.ndim == 0:
         raise ValueError("masked_cumsum requires at least one dimension")
     if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-        raise TypeError("masked_cumsum supports float16, bfloat16, and float32 only")
+        raise TypeError(
+            "masked_cumsum supports float16, bfloat16, and float32 only")
 
     dim = dim % x.ndim
     mask = mask.to(torch.bool)
@@ -88,7 +89,7 @@ def masked_cumsum(x, mask, dim=-1):
         block_n = 512
     num_blocks = triton.cdiv(n_size, block_n)
 
-    _cumsum_lastdim_kernel[(m_size,)](
+    _cumsum_lastdim_kernel[(m_size, )](
         y2d,
         out2d,
         m_size,
@@ -107,13 +108,18 @@ def masked_cumsum(x, mask, dim=-1):
     if dim != x.ndim - 1:
         out = out.movedim(-1, dim)
     return out
+
+
 batch_size = 32768
-input_shape = (32768,)
+input_shape = (32768, )
 dim = 1
+
 
 def get_inputs():
     x = torch.rand(batch_size, *input_shape)
     mask = torch.randint(0, 2, x.shape).bool()  # Random boolean mask
     return [x, mask]
+
+
 def get_init_inputs():
     return [dim]

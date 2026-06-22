@@ -1,0 +1,25 @@
+TEST baseline1 small_32 PASS max_diff=0
+TEST baseline2 small_32 SKIP baseline2_readonly_not_loaded
+TEST optimized small_32 PASS max_diff=0
+TEST baseline1 medium_64 PASS max_diff=0
+TEST baseline2 medium_64 SKIP baseline2_readonly_not_loaded
+TEST optimized medium_64 PASS max_diff=0
+TEST baseline1 exact_128 PASS max_diff=0
+TEST baseline2 exact_128 SKIP baseline2_readonly_not_loaded
+TEST optimized exact_128 PASS max_diff=0
+TEST optimized persistent_dispatch PASS max_diff=0
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l2_31_Conv2d_Min_Add_Multiply_1782397854/31_Conv2d_Min_Add_Multiply.py:72: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out = torch.empty_like(x_contig)
+INFO benchmark baseline2 small_32 baseline2_readonly_not_loaded
+INFO benchmark baseline2 medium_64 baseline2_readonly_not_loaded
+INFO benchmark baseline2 exact_128 baseline2_readonly_not_loaded
+conv2d_min_add_multiply:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   small_32       0.067529          0.211297               inf          0.054967
+1  medium_64       0.178058          2.152540               inf          0.173181
+2  exact_128       7.207358         71.593088               inf          4.529304
+
+/home/s00929845/kernel_verify/l2_31_Conv2d_Min_Add_Multiply_1782397854/31_Conv2d_Min_Add_Multiply.py:72: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out = torch.empty_like(x_contig)

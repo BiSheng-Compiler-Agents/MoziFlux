@@ -11,13 +11,20 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 @triton.jit
 def _gelu_gap2d_fused_row_kernel(
-    x_ptr,                      # *f32/ *f16 input tensor pointer [N, C, H, W]
-    y_ptr,                      # *f32 output tensor pointer [N, C]
-    rows, C, H, W,              # ints
-    stride_n, stride_c, stride_h, stride_w,  # strides for x in elements
-    out_stride_n, out_stride_c,              # strides for y in elements
-    BLOCK_M: tl.constexpr,                   # rows per program
-    BLOCK_W: tl.constexpr,                   # tile size across flattened H*W
+        x_ptr,  # *f32/ *f16 input tensor pointer [N, C, H, W]
+        y_ptr,  # *f32 output tensor pointer [N, C]
+        rows,
+        C,
+        H,
+        W,  # ints
+        stride_n,
+        stride_c,
+        stride_h,
+        stride_w,  # strides for x in elements
+        out_stride_n,
+        out_stride_c,  # strides for y in elements
+        BLOCK_M: tl.constexpr,  # rows per program
+        BLOCK_W: tl.constexpr,  # tile size across flattened H*W
 ):
     pid = tl.program_id(axis=0)
     row_ids = pid * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -61,7 +68,8 @@ def gelu_global_avg_pool2d_triton(x: torch.Tensor) -> torch.Tensor:
     """
     assert x.dim() == 4
     if not _is_npu_tensor(x):
-        raise RuntimeError("gelu_global_avg_pool2d_triton expects an Ascend NPU tensor.")
+        raise RuntimeError(
+            "gelu_global_avg_pool2d_triton expects an Ascend NPU tensor.")
 
     orig_dtype = x.dtype
     x_contig = x.contiguous()
@@ -102,13 +110,20 @@ def gelu_global_avg_pool2d_triton(x: torch.Tensor) -> torch.Tensor:
     else:
         BLOCK_M = 8
 
-    grid = (triton.cdiv(rows, BLOCK_M),)
+    grid = (triton.cdiv(rows, BLOCK_M), )
     _gelu_gap2d_fused_row_kernel[grid](
         x_contig,
         y,
-        rows, C, H, W,
-        x_contig.stride(0), x_contig.stride(1), x_contig.stride(2), x_contig.stride(3),
-        y.stride(0), y.stride(1),
+        rows,
+        C,
+        H,
+        W,
+        x_contig.stride(0),
+        x_contig.stride(1),
+        x_contig.stride(2),
+        x_contig.stride(3),
+        y.stride(0),
+        y.stride(1),
         BLOCK_M=BLOCK_M,
         BLOCK_W=BLOCK_W,
         num_warps=num_warps,
@@ -130,7 +145,8 @@ def conv2d_gelu_global_avg_pool(
     groups: int = 1,
 ) -> torch.Tensor:
     if not _is_npu_tensor(x):
-        raise RuntimeError("conv2d_gelu_global_avg_pool expects an Ascend NPU tensor input.")
+        raise RuntimeError(
+            "conv2d_gelu_global_avg_pool expects an Ascend NPU tensor input.")
     y = torch.nn.functional.conv2d(
         x,
         weight,
@@ -147,6 +163,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs a convolution, applies GELU, and then performs global average pooling.
     """
+
     def __init__(self, in_channels, out_channels, kernel_size):
         super(ModelNew, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
@@ -160,13 +177,18 @@ class ModelNew(nn.Module):
         """
         x = self.conv(x)
         return gelu_global_avg_pool2d_triton(x)
+
+
 batch_size = 128
 in_channels = 8
 out_channels = 64
 height, width = 256, 256
 kernel_size = 3
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size]

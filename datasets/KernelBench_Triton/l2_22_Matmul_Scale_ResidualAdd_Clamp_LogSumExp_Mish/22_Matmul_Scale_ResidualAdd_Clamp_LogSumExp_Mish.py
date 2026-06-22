@@ -80,7 +80,9 @@ class ModelNew(nn.Module):
     Model that performs a matrix multiplication, scales the result, adds a residual connection, clamps the output,
     applies LogSumExp, and finally applies the Mish activation function.
     """
-    def __init__(self, input_size, hidden_size, scale_factor, clamp_min, clamp_max):
+
+    def __init__(self, input_size, hidden_size, scale_factor, clamp_min,
+                 clamp_max):
         super(ModelNew, self).__init__()
         self.matmul = nn.Linear(input_size, hidden_size)
         self.scale_factor = float(scale_factor)
@@ -100,7 +102,9 @@ class ModelNew(nn.Module):
 
 def _launch_post_ops(y, scale_factor, clamp_min, clamp_max):
     if y.device.type != "npu":
-        raise RuntimeError("matmul_scale_residualadd_clamp_logsumexp_mish requires NPU tensors")
+        raise RuntimeError(
+            "matmul_scale_residualadd_clamp_logsumexp_mish requires NPU tensors"
+        )
 
     y = y.contiguous()
     B, N = y.shape
@@ -114,7 +118,7 @@ def _launch_post_ops(y, scale_factor, clamp_min, clamp_max):
         block_n = 1 if N <= 1 else 1 << int(math.ceil(math.log2(N)))
     num_warps = 8 if block_n >= 512 else 4
 
-    grid = (triton.cdiv(B, 1),)
+    grid = (triton.cdiv(B, 1), )
     _post_ops_row_lse_mish[grid](
         y,
         out,
@@ -143,6 +147,8 @@ def matmul_scale_residualadd_clamp_logsumexp_mish(
 ):
     y = F.linear(x, weight, bias)
     return _launch_post_ops(y, scale_factor, clamp_min, clamp_max)
+
+
 batch_size = 1024
 input_size = 8192
 hidden_size = 8192
@@ -150,7 +156,10 @@ scale_factor = 2.0
 clamp_min = -10.0
 clamp_max = 10.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, input_size)]
+
+
 def get_init_inputs():
     return [input_size, hidden_size, scale_factor, clamp_min, clamp_max]

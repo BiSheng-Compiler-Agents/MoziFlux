@@ -5,7 +5,6 @@ import triton.language as tl
 import torch_npu  # noqa: F401
 
 
-
 @triton.jit
 def _matmul_bias_relu_kernel(
     a_ptr,  # [M, K]
@@ -90,10 +89,11 @@ def _matmul_bias_relu_kernel(
 
 
 def _validate_inputs(
-    x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        x: torch.Tensor, weight: torch.Tensor,
+        bias: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if x.ndim != 2 or weight.ndim != 2 or bias.ndim != 1:
-        raise ValueError("expected x to be 2D, weight to be 2D, and bias to be 1D")
+        raise ValueError(
+            "expected x to be 2D, weight to be 2D, and bias to be 1D")
     if x.device.type != "npu" or weight.device.type != "npu" or bias.device.type != "npu":
         raise ValueError("fused_gemm_add_relu requires NPU tensors")
     if x.device != weight.device or x.device != bias.device:
@@ -101,9 +101,11 @@ def _validate_inputs(
     if x.dtype != weight.dtype or x.dtype != bias.dtype:
         raise ValueError("x, weight, and bias must share the same dtype")
     if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-        raise TypeError(f"unsupported dtype for fused_gemm_add_relu: {x.dtype}")
+        raise TypeError(
+            f"unsupported dtype for fused_gemm_add_relu: {x.dtype}")
     if x.requires_grad or weight.requires_grad or bias.requires_grad:
-        raise ValueError("fused_gemm_add_relu does not support autograd-tracked tensors")
+        raise ValueError(
+            "fused_gemm_add_relu does not support autograd-tracked tensors")
 
     m, k = x.shape
     n = weight.shape[0]
@@ -115,7 +117,8 @@ def _validate_inputs(
     return x.contiguous(), weight.contiguous(), bias.contiguous()
 
 
-def fused_gemm_add_relu(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
+def fused_gemm_add_relu(x: torch.Tensor, weight: torch.Tensor,
+                        bias: torch.Tensor) -> torch.Tensor:
     a, b, bias_c = _validate_inputs(x, weight, bias)
 
     m, k = a.shape
@@ -170,6 +173,7 @@ class ModelNew(nn.Module):
     Simple model that performs a matrix multiplication, adds a bias term, and applies ReLU.
     Uses a fused Triton kernel on Ascend NPU.
     """
+
     def __init__(self, in_features, out_features, bias_shape):
         super(ModelNew, self).__init__()
         self.gemm = nn.Linear(in_features, out_features, bias=False)
@@ -185,12 +189,17 @@ class ModelNew(nn.Module):
         weight = self.gemm.weight.detach().to(device=x.device, dtype=x.dtype)
         bias = self.bias.detach().to(device=x.device, dtype=x.dtype)
         return fused_gemm_add_relu(x, weight, bias)
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
-bias_shape = (out_features,)
+bias_shape = (out_features, )
+
 
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features, bias_shape]

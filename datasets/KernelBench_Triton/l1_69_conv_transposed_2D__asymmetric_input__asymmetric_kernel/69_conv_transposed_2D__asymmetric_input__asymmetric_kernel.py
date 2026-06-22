@@ -26,7 +26,7 @@ def _touch_tensor_kernel(x_ptr, n_elements, BLOCK: tl.constexpr):
 def _touch_triton_path(x: torch.Tensor) -> None:
     x_contiguous = x.contiguous()
     n_elements = x_contiguous.numel()
-    grid = (triton.cdiv(n_elements, 256),)
+    grid = (triton.cdiv(n_elements, 256), )
     _touch_tensor_kernel[grid](x_contiguous, n_elements, BLOCK=256)
 
 
@@ -51,15 +51,19 @@ def conv_transposed_2d_asymmetric_input_asymmetric_kernel(
     if bias is not None and not _is_npu_tensor(bias):
         raise RuntimeError("bias must be allocated on Ascend NPU")
     if x.dim() != 4:
-        raise ValueError(f"expected a 4D input tensor, got shape {tuple(x.shape)}")
+        raise ValueError(
+            f"expected a 4D input tensor, got shape {tuple(x.shape)}")
     if weight.dim() != 4:
-        raise ValueError(f"expected a 4D weight tensor, got shape {tuple(weight.shape)}")
+        raise ValueError(
+            f"expected a 4D weight tensor, got shape {tuple(weight.shape)}")
     if x.dtype not in (torch.float16, torch.float32):
         raise TypeError(f"unsupported input dtype: {x.dtype}")
     if weight.dtype != x.dtype:
-        raise TypeError(f"weight dtype {weight.dtype} must match input dtype {x.dtype}")
+        raise TypeError(
+            f"weight dtype {weight.dtype} must match input dtype {x.dtype}")
     if bias is not None and bias.dtype != x.dtype:
-        raise TypeError(f"bias dtype {bias.dtype} must match input dtype {x.dtype}")
+        raise TypeError(
+            f"bias dtype {bias.dtype} must match input dtype {x.dtype}")
     if x.shape[1] != weight.shape[0]:
         raise ValueError(
             f"input channels {x.shape[1]} must match weight input channels {weight.shape[0]}"
@@ -84,16 +88,16 @@ class ModelNew(nn.Module):
     """
 
     def __init__(
-        self,
-        in_channels: int = 32,
-        out_channels: int = 64,
-        kernel_size: tuple = (3, 5),
-        stride: tuple = (1, 1),
-        padding: tuple = (0, 0),
-        output_padding: tuple = (0, 0),
-        dilation: tuple = (1, 1),
-        groups: int = 1,
-        bias: bool = False,
+            self,
+            in_channels: int = 32,
+            out_channels: int = 64,
+            kernel_size: tuple = (3, 5),
+            stride: tuple = (1, 1),
+            padding: tuple = (0, 0),
+            output_padding: tuple = (0, 0),
+            dilation: tuple = (1, 1),
+            groups: int = 1,
+            bias: bool = False,
     ):
         super().__init__()
         self.conv_transpose2d = nn.ConvTranspose2d(
@@ -119,6 +123,8 @@ class ModelNew(nn.Module):
             groups=self.conv_transpose2d.groups,
             dilation=self.conv_transpose2d.dilation,
         )
+
+
 batch_size = 64
 in_channels = 64
 out_channels = 128
@@ -126,8 +132,13 @@ kernel_size = (3, 5)
 height_in = 128
 width_in = 256
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, height_in, width_in)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization
+    return [
+        in_channels, out_channels, kernel_size
+    ]  # Provide in_channels, out_channels, kernel_size for initialization

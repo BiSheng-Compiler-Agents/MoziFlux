@@ -23,6 +23,7 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 
 if HAS_TRITON:
+
     @triton.jit
     def _scale_min_channel_kernel(
         x_ptr,
@@ -54,11 +55,8 @@ if HAS_TRITON:
         h = offs_hw // W
         w = offs_hw % W
 
-        x_base = (
-            b_idx[:, None] * stride_xn
-            + h[None, :] * stride_xh
-            + w[None, :] * stride_xw
-        )
+        x_base = (b_idx[:, None] * stride_xn + h[None, :] * stride_xh +
+                  w[None, :] * stride_xw)
         offs_c = tl.arange(0, BLOCK_C)
         acc = tl.full((BLOCK_B, BLOCK_HW), float("inf"), tl.float32)
 
@@ -75,19 +73,18 @@ if HAS_TRITON:
             block_min = tl.min(scaled_vals, axis=2).to(tl.float32)
             acc = tl.minimum(acc, block_min)
 
-        y_offs = (
-            b_idx[:, None] * stride_yn
-            + h[None, :] * stride_yh
-            + w[None, :] * stride_yw
-        )
+        y_offs = (b_idx[:, None] * stride_yn + h[None, :] * stride_yh +
+                  w[None, :] * stride_yw)
         tl.store(
             y_ptr + y_offs,
             acc.to(y_ptr.dtype.element_ty),
             mask=mask_b[:, None] & mask_hw[None, :],
         )
 else:
+
     def _scale_min_channel_kernel(*args, **kwargs):
-        raise RuntimeError("Triton is unavailable, so _scale_min_channel_kernel cannot run.")
+        raise RuntimeError(
+            "Triton is unavailable, so _scale_min_channel_kernel cannot run.")
 
 
 batch_size = 128
@@ -102,6 +99,7 @@ class ModelNew(nn.Module):
     """
     Model that performs a convolution, scales the output, and then applies a minimum operation.
     """
+
     def __init__(
         self,
         in_channels=None,
@@ -131,14 +129,19 @@ class ModelNew(nn.Module):
         if not HAS_TRITON:
             raise RuntimeError("Triton is required for ModelNew.forward.")
         if not _is_npu_tensor(x):
-            raise ValueError("ModelNew.forward expects an Ascend NPU tensor input.")
+            raise ValueError(
+                "ModelNew.forward expects an Ascend NPU tensor input.")
         if torch.is_grad_enabled():
-            raise RuntimeError("ModelNew.forward only supports inference under torch.no_grad().")
+            raise RuntimeError(
+                "ModelNew.forward only supports inference under torch.no_grad()."
+            )
 
         if not _is_npu_tensor(self.conv.weight):
-            raise ValueError("Model parameters must be moved to NPU before execution.")
+            raise ValueError(
+                "Model parameters must be moved to NPU before execution.")
         if self.conv.bias is not None and not _is_npu_tensor(self.conv.bias):
-            raise ValueError("Model bias must be moved to NPU before execution.")
+            raise ValueError(
+                "Model bias must be moved to NPU before execution.")
 
         x = F.conv2d(
             x,
@@ -186,6 +189,8 @@ class ModelNew(nn.Module):
             num_stages=2,
         )
         return y
+
+
 batch_size = 64
 in_channels = 64
 out_channels = 128
@@ -193,7 +198,10 @@ height = width = 256
 kernel_size = 3
 scale_factor = 2.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, scale_factor]

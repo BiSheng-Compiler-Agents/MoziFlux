@@ -1,218 +1,187 @@
-"""
-profile_kernels.py — 89_cumsum (row-wise cumulative sum)
-
-Compares three implementations on Ascend NPU hardware:
-  torch_ref  : torch.cumsum built-in (ACL/NPU path)
-  baseline   : original Triton kernel (89_cumsum.py) — scalar serial loop
-  optimized  : tl.cumsum vectorized kernel (opt_89_cumsum.py)
-
-Baseline signature:
-    _rowwise_cumsum_kernel(x_ptr, y_ptr, carry_in_ptr, carry_out_ptr,
-                           N, chunk_start,
-                           stride_x0, stride_x1, stride_y0, stride_y1,
-                           BLOCK_N: constexpr)
-    Grid: (M,)
-
-The baseline is a chunked scan: for N > BLOCK_N, caller invokes it
-multiple times (each advancing chunk_start by BLOCK_N).  For the
-benchmark shape all N fit in one chunk (N = BLOCK_N).
-
-Optimized dispatch (from opt_89_cumsum.py):
-    BLOCK_N = 64  for N ≤ 64
-    BLOCK_N = 128 for N ≤ 128
-    BLOCK_N = 256 for N ≤ 256
-    > 256: chunked (same calling convention as baseline)
-
-Shapes covering all dispatch paths:
-    small-N    : N=64  → single tile BLOCK_N=64
-    medium-N   : N=128 → single tile BLOCK_N=128
-    non-pow2-N : N=100 → single tile BLOCK_N=128 (masked)
-    large-N    : N=256 → single tile BLOCK_N=256
-    chunked    : N=512 → 2 chunks of BLOCK_N=256
-    benchmark  : M=128, N=512 (common KernelBench shape)
-
-Usage:
-    python profile_kernels.py           # unit test + benchmark + saved figure
-    python profile_kernels.py --test    # correctness only
-    python profile_kernels.py --bench   # benchmark only
-"""
 import argparse
 import importlib.util
 import sys
+import time
 from pathlib import Path
 
 import torch
-import torch_npu  # noqa: F401
 import triton
 
-_DIR = Path(__file__).parent
+try:
+    import torch_npu  # noqa: F401
+except Exception:
+    torch_npu = None
 
+ROOT = Path(__file__).resolve().parent
 
-# ── kernel loading ─────────────────────────────────────────────────────────────
-
-def _load(fname):
-    spec = importlib.util.spec_from_file_location(fname.stem, fname)
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    return m
-
-
-_baseline_mod1 = _load(_DIR / "89_cumsum.py")
-_baseline_mod2 = _load(_DIR / "base_89_cumsum.py")
-_optimized_mod = _load(_DIR / "opt_89_cumsum.py")
-
-
-# ── runner functions ───────────────────────────────────────────────────────────
-
-def _run_torch_ref(x):
-    """PyTorch built-in cumsum (ACL / NPU-native path)."""
-    return torch.cumsum(x, dim=1)
-
-_baseline_model1 = _baseline_mod1.ModelNew()
-
-def _run_baseline1(x):
-    """
-    Original Triton _rowwise_cumsum_kernel.
-    Handles chunked execution: for N > BLOCK_N, loops over chunks.
-    BLOCK_N=64 matches the baseline compile constant.
-    """
-
-    return _baseline_model1(x)
-
-
-_baseline_model2 = _baseline_mod2.ModelNew()
-
-
-def _run_baseline2(x):
-    """
-    Original Triton _rowwise_cumsum_kernel.
-    Handles chunked execution: for N > BLOCK_N, loops over chunks.
-    BLOCK_N=64 matches the baseline compile constant.
-    """
-
-    return _baseline_model2(x)
-
-_optimized_model = _optimized_mod.ModelNew()
-
-def _run_optimized(x):
-    """
-    Optimized _cumsum_vec_kernel (tl.cumsum).
-    Handles N > 256 by looping over BLOCK_N=256 chunks.
-    """
-
-    return _optimized_model(x)
-
-
-# ── shapes ─────────────────────────────────────────────────────────────────────
-# Format: (label, M, N)
-# Covers:
-#   small-N (N≤64, baseline 1 chunk, opt BLOCK_N=64)
-#   medium-N (N=128, opt BLOCK_N=128)
-#   non-pow2-N (N=100, opt BLOCK_N=128 masked)
-#   large-N (N=256, opt BLOCK_N=256)
-#   chunked (N=512 > 256, 2 chunks)
-#   benchmark (M=128, N=512)
+PROVIDERS = {
+    "torch": ("PyTorch / ACL", None),
+    "baseline1": ("Baseline Triton1", "89_cumsum.py"),
+    "baseline2": ("Baseline Triton2", "base_89_cumsum.py"),
+    "optimized": ("Optimized Triton", "opt_89_cumsum.py"),
+}
 
 _BENCH_SHAPES = [
-    ("M32-N64",    32,   64),   # small: N≤64, single tile BLOCK_N=64
-    ("M32-N128",   32,  128),   # medium: N=128, single tile BLOCK_N=128
-    ("M32-N100",   32,  100),   # non-pow2: N=100, BLOCK_N=128 masked
-    ("M32-N256",   32,  256),   # large: N=256, single tile BLOCK_N=256
-    ("M32-N512",   32,  512),   # chunked: N=512, 2 chunks of BLOCK_N=256
-    ("M128-N512", 128,  512),   # benchmark: M=128 N=512
+    ("M32_N64", 32, 64),
+    ("M32_N128", 32, 128),
+    ("M32_N100", 32, 100),
+    ("M32_N256", 32, 256),
+    ("M32_N512", 32, 512),
+    ("M128_N512", 128, 512),
 ]
 
+_MODEL_CACHE = {}
 
-# ── benchmark ──────────────────────────────────────────────────────────────────
+
+def _load(key: str, filename: str):
+    name = f"k_{key}_{Path(filename).stem}".replace(".", "_").replace("-", "_")
+    spec = importlib.util.spec_from_file_location(name, ROOT / filename)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {filename}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _model(key):
+    if key not in _MODEL_CACHE:
+        _, filename = PROVIDERS[key]
+        mod = _load(key, filename)
+        init = mod.get_init_inputs() if hasattr(mod, "get_init_inputs") else []
+        torch.manual_seed(0)
+        if init == [()]:
+            init = []
+        _MODEL_CACHE[key] = mod.ModelNew(*init).to(device="npu").eval()
+    return _MODEL_CACHE[key]
+
+
+def _sync():
+    if hasattr(torch, "npu"):
+        torch.npu.synchronize()
+
+
+def _make_inputs(M, N, seed=42, dtype=torch.float16):
+    torch.manual_seed(seed)
+    return (torch.randn(M, N, device="npu", dtype=dtype) * 5.0).contiguous()
+
+
+def _run_torch_ref(x):
+    return torch.cumsum(x, dim=1)
+
+
+def _run_provider(key, x):
+    if key == "torch":
+        return _run_torch_ref(x)
+    return _model(key)(x)
+
+
+def _would_exceed_core_dim(key, M, N):
+    if key in ("torch", "baseline2", "optimized"):
+        return False
+    # baseline1: grid = (outer,) where outer can be large after reshape
+    return M > 65535
+
+
+def _bench_one(fn, warmup=25, rep=200):
+    try:
+        return triton.testing.do_bench(fn,
+                                       warmup=warmup,
+                                       rep=rep,
+                                       return_mode="mean")
+    except Exception:
+        for _ in range(warmup):
+            fn()
+        _sync()
+        t0 = time.perf_counter()
+        for _ in range(rep):
+            fn()
+        _sync()
+        return (time.perf_counter() - t0) * 1000.0 / rep
+
+
+def unit_test():
+    optimized_ok = True
+    for label, M, N in _BENCH_SHAPES:
+        for dtype in (torch.float16, torch.float32, torch.bfloat16):
+            x = _make_inputs(M, N, dtype=dtype)
+            ref = _run_torch_ref(x)
+            _sync()
+            for key in ("baseline1", "baseline2", "optimized"):
+                try:
+                    if _would_exceed_core_dim(key, M, N):
+                        print(
+                            f"TEST {label} {key} {dtype}: INFO coreDim would exceed Ascend 65535; benchmark returns inf"
+                        )
+                        continue
+                    out = _run_provider(key, x.clone())
+                    _sync()
+                    max_abs = (out.float() - ref.float()).abs().max().item()
+                    close = torch.allclose(out.float(),
+                                           ref.float(),
+                                           atol=1e-2,
+                                           rtol=1e-2)
+                    status = "PASS" if close else ("INFO" if key in (
+                        "baseline1", "baseline2") else "MISMATCH")
+                    print(
+                        f"TEST {label} {key} {dtype}: {status} max_abs={max_abs:.6g}"
+                    )
+                    if key == "optimized":
+                        optimized_ok = optimized_ok and bool(close)
+                except Exception as exc:
+                    print(
+                        f"TEST {label} {key} {dtype}: INFO {type(exc).__name__}: {exc}"
+                    )
+                    if key == "optimized":
+                        optimized_ok = False
+    print(f"UNIT_TEST {'PASS' if optimized_ok else 'FAIL'}")
+    return optimized_ok
+
 
 @triton.testing.perf_report(
     triton.testing.Benchmark(
         x_names=["label"],
         x_vals=[s[0] for s in _BENCH_SHAPES],
-        line_arg="mode",
-        line_vals=["torch_ref", "baseline1", "baseline2", "optimized"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
-        styles=[("blue", "-"), ("red", "-"), ("black", "-"), ("green", "-")],
-        ylabel="Latency (ms)",
-        plot_name="cumsum_perf",
+        line_arg="provider",
+        line_vals=["torch", "baseline1", "baseline2", "optimized"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
+        styles=[("black", "-"), ("blue", "-"), ("green", "--"), ("red", "-")],
+        ylabel="ms",
+        plot_name="cumsum_performance",
         args={},
-    )
-)
-def benchmark(label, mode):
-    _, M, N = next(s for s in _BENCH_SHAPES if s[0] == label)
-    x = torch.rand(M, N, device="npu", dtype=torch.float32)
+    ))
+def benchmark(label, provider):
+    M, N = {s[0]: (s[1], s[2]) for s in _BENCH_SHAPES}[label]
+    x = _make_inputs(M, N, dtype=torch.float16)
+    try:
+        if _would_exceed_core_dim(provider, M, N):
+            print(
+                f"BENCH {label} {provider}: INFO coreDim would exceed Ascend 65535; returning inf"
+            )
+            return float("inf")
+        return _bench_one(lambda: _run_provider(provider, x))
+    except Exception as exc:
+        print(f"BENCH {label} {provider}: INFO {type(exc).__name__}: {exc}")
+        return float("inf")
 
-    if mode == "torch_ref":
-        fn = lambda: _run_torch_ref(x)
-    elif mode == "baseline1":
-        fn = lambda: _run_baseline1(x)
-    elif mode == "baseline2":
-        fn = lambda: _run_baseline2(x)
-    else:
-        fn = lambda: _run_optimized(x)
-
-    # do_bench returns seconds; perf_report ylabel is "Latency (ms)"
-    return triton.testing.do_bench(fn, warmup=25, rep=200, return_mode="mean")
-
-
-# ── unit test ──────────────────────────────────────────────────────────────────
-
-def unit_test():
-    # torch.manual_seed(42)
-    # any_fail = False
-
-    # for label, M, N in _BENCH_SHAPES:
-    #     # Use values in range that produce clearly nonzero cumulative sums
-    #     x = torch.rand(M, N, device="npu", dtype=torch.float32) * 2.0 - 1.0
-
-    #     ref  = _run_torch_ref(x.clone())
-    #     base1 = _run_baseline1(x.clone())
-    #     base2 = _run_baseline2(x.clone())
-    #     opt  = _run_optimized(x.clone())
-
-    #     ok_b1 = torch.allclose(ref, base1, atol=1e-2, rtol=1e-2)
-    #     ok_b2 = torch.allclose(ref, base2, atol=1e-2, rtol=1e-2)
-    #     ok_o = torch.allclose(ref, opt,  atol=1e-2, rtol=1e-2)
-
-    #     maxdelta_b1 = (ref - base1).abs().max().item()
-    #     maxdelta_b2 = (ref - base2).abs().max().item()
-    #     maxdelta_o = (ref - opt).abs().max().item()
-
-    #     print(f"  {label:<14}  "
-    #           f"baseline1 [{('PASS' if ok_b1 else 'FAIL')}]  "
-    #           f"baseline2 [{('PASS' if ok_b2 else 'FAIL')}]  "
-    #           f"optimized [{('PASS' if ok_o else 'FAIL')}]  "
-    #           f"maxΔ_base1={maxdelta_b1:.2e}  "
-    #           f"maxΔ_base2={maxdelta_b2:.2e}  "
-    #           f"maxΔ_opt={maxdelta_o:.2e}")
-
-    #     if not ok_b1 or not ok_b2 or not ok_o:
-    #         any_fail = True
-
-    # if any_fail:
-    #     raise AssertionError("Correctness check failed — see [FAIL] lines above")
-    print("All PASS")
-
-
-# ── entry point ────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Cumsum kernel benchmark")
-    parser.add_argument("--test",  action="store_true", help="Correctness check only")
-    parser.add_argument("--bench", action="store_true", help="Benchmark only")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--test", action="store_true")
+    parser.add_argument("--bench", action="store_true")
     args = parser.parse_args()
-
-    run_test  = args.test  or not args.bench
-    run_bench = args.bench or not args.test
-
-    if run_test:
-        print("=== Unit test ===")
-        unit_test()
-
-    if run_bench:
-        print("=== Benchmark ===")
-        benchmark.run(save_path=str(_DIR), print_data=True)
-        # → prints table + saves cumsum_perf.png automatically
+    if not args.test and not args.bench:
+        args.test = args.bench = True
+    ok = True
+    if args.test:
+        ok = unit_test()
+    if args.bench:
+        benchmark.run(save_path=str(ROOT), print_data=True, show_plots=False)
+    if not ok:
+        print("UNIT_TEST_FAILED")
 
 
 if __name__ == "__main__":

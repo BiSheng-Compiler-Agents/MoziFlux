@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 import triton
@@ -75,7 +74,8 @@ def gemm_groupnorm_swish_multiply_swish(
     if x.dim() != 2:
         raise ValueError("expected `x` to be a 2D tensor")
     if not hasattr(x, "is_npu") or not x.is_npu:
-        raise ValueError("the Triton entrypoint only supports Ascend NPU tensors")
+        raise ValueError(
+            "the Triton entrypoint only supports Ascend NPU tensors")
 
     x = x.contiguous()
     linear_weight = linear_weight.contiguous()
@@ -96,7 +96,7 @@ def gemm_groupnorm_swish_multiply_swish(
     num_warps = 2 if block_size <= 64 else 4
 
     y = torch.empty_like(x)
-    grid = (n_rows * num_groups,)
+    grid = (n_rows * num_groups, )
     _fused_gn_swish_mul_swish_kernel[grid](
         x,
         norm_weight,
@@ -120,11 +120,13 @@ class ModelNew(nn.Module):
     Model that performs a GEMM, GroupNorm, Swish, Multiply, and Swish operations.
     Fused Triton kernel implements: GroupNorm + Swish + Multiply + Swish.
     """
-    def __init__(self, in_features, out_features, num_groups, multiply_weight_shape):
+
+    def __init__(self, in_features, out_features, num_groups,
+                 multiply_weight_shape):
         super(ModelNew, self).__init__()
         self.gemm = nn.Linear(in_features, out_features)
         self.group_norm = nn.GroupNorm(num_groups, out_features)
-        self.multiply_weight = nn.Parameter(torch.randn(multiply_weight_shape)) 
+        self.multiply_weight = nn.Parameter(torch.randn(multiply_weight_shape))
 
     def forward(self, x):
         return gemm_groupnorm_swish_multiply_swish(
@@ -137,13 +139,18 @@ class ModelNew(nn.Module):
             self.group_norm.num_groups,
             self.group_norm.eps,
         )
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
 num_groups = 256
-multiply_weight_shape = (out_features,)
+multiply_weight_shape = (out_features, )
+
 
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features, num_groups, multiply_weight_shape]

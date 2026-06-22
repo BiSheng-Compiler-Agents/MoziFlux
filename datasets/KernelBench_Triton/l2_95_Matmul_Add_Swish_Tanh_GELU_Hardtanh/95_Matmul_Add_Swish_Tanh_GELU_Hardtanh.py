@@ -70,14 +70,18 @@ class ModelNew(nn.Module):
     """
     Simple model that performs a matrix multiplication, adds a value, applies Swish, Tanh, GELU, and Hardtanh activation functions.
     """
-    def __init__(self, in_features=None, out_features=None, add_value_shape=None):
+
+    def __init__(self,
+                 in_features=None,
+                 out_features=None,
+                 add_value_shape=None):
         super(ModelNew, self).__init__()
         if in_features is None:
             in_features = 1024
         if out_features is None:
             out_features = 512
         if add_value_shape is None:
-            add_value_shape = (out_features,)
+            add_value_shape = (out_features, )
         self.matmul = nn.Linear(in_features, out_features)
         self.add_value = nn.Parameter(torch.randn(add_value_shape))
 
@@ -85,7 +89,9 @@ class ModelNew(nn.Module):
         x = self.matmul(x)
         # Fused: (x + add_value) -> Swish -> Tanh -> GELU(exact) -> Hardtanh
         if x.device.type != "npu":
-            raise RuntimeError("ModelNew expects Ascend NPU tensors and does not provide a non-NPU fallback.")
+            raise RuntimeError(
+                "ModelNew expects Ascend NPU tensors and does not provide a non-NPU fallback."
+            )
 
         M, N = x.shape
         out = torch.empty_like(x)
@@ -111,12 +117,17 @@ class ModelNew(nn.Module):
             BLOCK_N=BLOCK_N,
         )
         return out
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
-add_value_shape = (out_features,)
+add_value_shape = (out_features, )
+
 
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features, add_value_shape]

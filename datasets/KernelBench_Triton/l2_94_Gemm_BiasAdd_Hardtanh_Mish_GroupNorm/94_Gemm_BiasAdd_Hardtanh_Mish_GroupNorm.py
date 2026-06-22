@@ -73,7 +73,7 @@ def _next_power_of_2(x: int) -> int:
 batch_size = 128
 in_features = 512
 out_features = 1024
-bias_shape = (out_features,)
+bias_shape = (out_features, )
 num_groups = 32
 
 
@@ -81,6 +81,7 @@ class ModelNew(nn.Module):
     """
     A model that performs a GEMM, BiasAdd, Hardtanh, Mish, and GroupNorm operations in sequence.
     """
+
     def __init__(
         self,
         in_features=in_features,
@@ -95,17 +96,20 @@ class ModelNew(nn.Module):
         self.bias = nn.Parameter(torch.randn(bias_shape))
         self.hardtanh = nn.Hardtanh()
         self.mish = nn.Mish()
-        self.groupnorm = nn.GroupNorm(num_groups=num_groups, num_channels=out_features)
+        self.groupnorm = nn.GroupNorm(num_groups=num_groups,
+                                      num_channels=out_features)
 
     def _fused_post_gemm(self, y: torch.Tensor) -> torch.Tensor | None:
         # Fused BiasAdd -> Hardtanh -> Mish -> GroupNorm using Triton
         N, C = y.shape
         G = self.groupnorm.num_groups
         if (C % G) != 0:
-            raise RuntimeError("Channels must be divisible by num_groups for GroupNorm.")
+            raise RuntimeError(
+                "Channels must be divisible by num_groups for GroupNorm.")
         GROUP_SIZE = C // G
         if GROUP_SIZE > 256:
-            raise RuntimeError("GROUP_SIZE > 256 is not supported by the fused Triton path.")
+            raise RuntimeError(
+                "GROUP_SIZE > 256 is not supported by the fused Triton path.")
 
         # Ensure contiguity
         y_in = y.contiguous()
@@ -127,11 +131,19 @@ class ModelNew(nn.Module):
         else:
             num_warps = 4
 
-        grid = (N * G,)
+        grid = (N * G, )
 
         fused_bias_act_gn_kernel[grid](
-            y_in, extra_bias, gamma, beta, out,
-            N, C, G, GROUP_SIZE, eps,
+            y_in,
+            extra_bias,
+            gamma,
+            beta,
+            out,
+            N,
+            C,
+            G,
+            GROUP_SIZE,
+            eps,
             BLOCK_SIZE=BLOCK_SIZE,
             num_warps=num_warps,
             num_stages=2,
@@ -148,17 +160,23 @@ class ModelNew(nn.Module):
         if x.device.type != "npu":
             raise RuntimeError("ModelNew expects Ascend NPU inputs.")
         if not self.groupnorm.affine:
-            raise RuntimeError("ModelNew requires affine GroupNorm parameters.")
+            raise RuntimeError(
+                "ModelNew requires affine GroupNorm parameters.")
 
         y = self.gemm(x)
         return self._fused_post_gemm(y)
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
-bias_shape = (out_features,)
+bias_shape = (out_features, )
 num_groups = 256
+
 
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features, bias_shape, num_groups]

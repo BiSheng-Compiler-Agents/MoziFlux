@@ -1,0 +1,39 @@
+TEST baseline1 direct_small SKIP baseline_unavailable
+TEST baseline2 direct_small PASS max_err=0
+TEST optimized direct_small PASS max_err=0
+TEST baseline1 nonpow_medium SKIP baseline_unavailable
+TEST baseline2 nonpow_medium PASS max_err=0
+TEST optimized nonpow_medium PASS max_err=0
+TEST baseline1 persistent_synthetic SKIP baseline_unavailable
+TEST baseline2 persistent_synthetic SKIP grid_guard
+TEST optimized persistent_synthetic PASS max_err=0
+UNIT_TEST PASS
+INFO baseline1 direct_small INF baseline_unavailable
+INFO baseline1 nonpow_medium INF baseline_unavailable
+INFO baseline1 persistent_synthetic INF baseline_unavailable
+INFO baseline2 persistent_synthetic INF grid_guard
+avgpool3d-performance:
+                  label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0          direct_small       0.004846               inf          0.021417          0.011358
+1         nonpow_medium       0.007206               inf          0.179953          0.190749
+2  persistent_synthetic       0.026517               inf               inf          8.095309
+
+TEST baseline1 direct_small SKIP baseline_unavailable
+TEST baseline2 direct_small PASS max_err=0
+TEST optimized direct_small PASS max_err=0
+TEST baseline1 nonpow_medium SKIP baseline_unavailable
+TEST baseline2 nonpow_medium PASS max_err=0
+TEST optimized nonpow_medium PASS max_err=0
+TEST baseline1 persistent_synthetic SKIP baseline_unavailable
+TEST baseline2 persistent_synthetic SKIP grid_guard
+TEST optimized persistent_synthetic PASS max_err=0
+UNIT_TEST PASS
+INFO baseline1 direct_small INF baseline_unavailable
+INFO baseline1 nonpow_medium INF baseline_unavailable
+INFO baseline1 persistent_synthetic INF baseline_unavailable
+INFO baseline2 persistent_synthetic INF grid_guard
+avgpool3d-performance:
+                  label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0          direct_small       0.004669               inf          0.021454          0.011508
+1         nonpow_medium       0.007235               inf          0.179974          0.190181
+2  persistent_synthetic       0.026542               inf               inf          8.139362

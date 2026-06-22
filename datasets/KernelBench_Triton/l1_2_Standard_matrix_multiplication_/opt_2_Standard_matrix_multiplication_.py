@@ -29,17 +29,25 @@ import triton
 import triton.language as tl
 import triton.language.extra.cann.extension as al
 
-
 # ── Optimized kernel ───────────────────────────────────────────────────────────
+
 
 @triton.jit
 def _matmul_kernel_opt(
-    A_ptr, B_ptr, C_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_cm, stride_cn,
-    NUM_PID_M, NUM_PID_N,
+    A_ptr,
+    B_ptr,
+    C_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_cm,
+    stride_cn,
+    NUM_PID_M,
+    NUM_PID_N,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -59,13 +67,13 @@ def _matmul_kernel_opt(
     pid = tl.program_id(0)
 
     # GROUP_M pid swizzle: 1D pid -> (pid_m, pid_n) with L2-friendly ordering
-    group_width  = GROUP_M * NUM_PID_N
-    group_id     = pid // group_width
-    first_pid_m  = group_id * GROUP_M
+    group_width = GROUP_M * NUM_PID_N
+    group_id = pid // group_width
+    first_pid_m = group_id * GROUP_M
     group_size_m = tl.minimum(NUM_PID_M - first_pid_m, GROUP_M)
     pid_in_group = pid % group_width
-    pid_m        = first_pid_m + (pid_in_group % group_size_m)
-    pid_n        = pid_in_group // group_size_m
+    pid_m = first_pid_m + (pid_in_group % group_size_m)
+    pid_n = pid_in_group // group_size_m
 
     offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -86,7 +94,7 @@ def _matmul_kernel_opt(
 
     # Static K loop: fully unrolled at compile time for inter-iteration pipelining
     for _ in tl.static_range(NUM_K_TILES):
-        k_off  = _ * BLOCK_K
+        k_off = _ * BLOCK_K
         k_mask = (k_off + offs_k) < K
         a_mask = m_mask[:, None] & k_mask[None, :]
         b_mask = k_mask[:, None] & n_mask[None, :]
@@ -108,10 +116,10 @@ def _matmul_kernel_opt(
 
 # ── Dispatch constants ─────────────────────────────────────────────────────────
 
-_BLOCK_M  = 128
-_BLOCK_N  = 128
-_BLOCK_K  = 32
-_GROUP_M  = 4
+_BLOCK_M = 128
+_BLOCK_N = 128
+_BLOCK_K = 32
+_GROUP_M = 4
 
 
 def _require_npu_or_interp(tensor: torch.Tensor) -> None:
@@ -122,8 +130,7 @@ def _require_npu_or_interp(tensor: torch.Tensor) -> None:
     if os.environ.get("TRITON_INTERPRET") == "1":
         return
     raise RuntimeError(
-        "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1."
-    )
+        "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1.")
 
 
 def _triton_matmul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -138,18 +145,26 @@ def _triton_matmul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     _, N = b.shape
     c = torch.empty((M, N), device=a.device, dtype=torch.float32)
 
-    num_pid_m  = triton.cdiv(M, _BLOCK_M)
-    num_pid_n  = triton.cdiv(N, _BLOCK_N)
+    num_pid_m = triton.cdiv(M, _BLOCK_M)
+    num_pid_n = triton.cdiv(N, _BLOCK_N)
     num_k_tiles = triton.cdiv(K, _BLOCK_K)
-    grid = (num_pid_m * num_pid_n,)
+    grid = (num_pid_m * num_pid_n, )
 
     _matmul_kernel_opt[grid](
-        a, b, c,
-        M, N, K,
-        a.stride(0), a.stride(1),
-        b.stride(0), b.stride(1),
-        c.stride(0), c.stride(1),
-        num_pid_m, num_pid_n,
+        a,
+        b,
+        c,
+        M,
+        N,
+        K,
+        a.stride(0),
+        a.stride(1),
+        b.stride(0),
+        b.stride(1),
+        c.stride(0),
+        c.stride(1),
+        num_pid_m,
+        num_pid_n,
         BLOCK_M=_BLOCK_M,
         BLOCK_N=_BLOCK_N,
         BLOCK_K=_BLOCK_K,
@@ -160,6 +175,7 @@ def _triton_matmul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 
 
 # ── ModelNew ───────────────────────────────────────────────────────────────────
+
 
 class ModelNew(nn.Module):
     """
@@ -182,7 +198,8 @@ N = 2048
 
 
 def get_inputs():
-    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    device = "npu" if hasattr(torch,
+                              "npu") and torch.npu.is_available() else "cpu"
     A = torch.rand(M, K, device=device, dtype=torch.float32)
     B = torch.rand(K, N, device=device, dtype=torch.float32)
     return [A, B]

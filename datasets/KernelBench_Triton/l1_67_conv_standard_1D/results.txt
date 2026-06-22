@@ -1,0 +1,33 @@
+=== Unit Test: l1_67_conv_standard_1D ===
+TEST baseline1 small_L256 SKIP comparison_provider_preskipped
+TEST baseline2 small_L256 SKIP comparison_provider_preskipped
+TEST optimized small_L256 PASS max_diff=0.000000e+00
+  [small_L256      ] Baseline Triton1=[SKIP comparison_provider_preskipped]  Baseline Triton2=[SKIP comparison_provider_preskipped]  Optimized Triton=[PASS 0.00e+00]
+TEST baseline1 medium_L4096 SKIP comparison_provider_preskipped
+TEST baseline2 medium_L4096 SKIP comparison_provider_preskipped
+TEST optimized medium_L4096 PASS max_diff=0.000000e+00
+  [medium_L4096    ] Baseline Triton1=[SKIP comparison_provider_preskipped]  Baseline Triton2=[SKIP comparison_provider_preskipped]  Optimized Triton=[PASS 0.00e+00]
+TEST baseline1 irregular_L8193 SKIP comparison_provider_preskipped
+TEST baseline2 irregular_L8193 SKIP comparison_provider_preskipped
+TEST optimized irregular_L8193 PASS max_diff=0.000000e+00
+  [irregular_L8193 ] Baseline Triton1=[SKIP comparison_provider_preskipped]  Baseline Triton2=[SKIP comparison_provider_preskipped]  Optimized Triton=[PASS 0.00e+00]
+TEST baseline1 exact_L131072 SKIP comparison_provider_preskipped
+TEST baseline2 exact_L131072 SKIP comparison_provider_preskipped
+TEST optimized exact_L131072 PASS max_diff=0.000000e+00
+  [exact_L131072   ] Baseline Triton1=[SKIP comparison_provider_preskipped]  Baseline Triton2=[SKIP comparison_provider_preskipped]  Optimized Triton=[PASS 0.00e+00]
+UNIT_TEST PASS
+
+BENCH baseline1 small_L256 INF comparison_provider_preskipped
+BENCH baseline2 small_L256 INF comparison_provider_preskipped
+BENCH baseline1 medium_L4096 INF comparison_provider_preskipped
+BENCH baseline2 medium_L4096 INF comparison_provider_preskipped
+BENCH baseline1 irregular_L8193 INF comparison_provider_preskipped
+BENCH baseline2 irregular_L8193 INF comparison_provider_preskipped
+BENCH baseline1 exact_L131072 INF comparison_provider_preskipped
+BENCH baseline2 exact_L131072 INF comparison_provider_preskipped
+conv1d_perf:
+             label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0       small_L256       0.007406               inf               inf          0.007453
+1     medium_L4096       0.046326               inf               inf          0.046139
+2  irregular_L8193       0.045343               inf               inf          0.045422
+3    exact_L131072       3.466113               inf               inf          3.461700

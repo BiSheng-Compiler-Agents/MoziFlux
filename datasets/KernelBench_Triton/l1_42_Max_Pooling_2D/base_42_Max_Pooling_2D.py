@@ -73,7 +73,8 @@ def _maxpool2d_kernel(
     ws0 = pid_wo * BLOCK_WO * STRIDE_W - PAD_W
     hs_last = hs0 + (BLOCK_HO - 1) * STRIDE_H + (K_H - 1) * DIL_H
     ws_last = ws0 + (BLOCK_WO - 1) * STRIDE_W + (K_W - 1) * DIL_W
-    tile_interior = tile_full_ho & tile_full_wo & (hs0 >= 0) & (hs_last < H) & (ws0 >= 0) & (ws_last < W)
+    tile_interior = tile_full_ho & tile_full_wo & (hs0 >= 0) & (
+        hs_last < H) & (ws0 >= 0) & (ws_last < W)
 
     # Fastpath for very common 2x2 kernels
     if (K_H == 2) and (K_W == 2):
@@ -114,13 +115,21 @@ def _maxpool2d_kernel(
             row0_base = base_x + ih0 * W
             offs00 = row0_base + iw0
 
-            v00 = tl.load(x_ptr + offs00, mask=(mask_r0 & iw0_in), other=-float("inf"))
-            v01 = tl.load(x_ptr + (offs00 + step_w), mask=(mask_r0 & iw1_in), other=-float("inf"))
+            v00 = tl.load(x_ptr + offs00,
+                          mask=(mask_r0 & iw0_in),
+                          other=-float("inf"))
+            v01 = tl.load(x_ptr + (offs00 + step_w),
+                          mask=(mask_r0 & iw1_in),
+                          other=-float("inf"))
 
             row1_base = row0_base + step_h
             offs10 = row1_base + iw0
-            v10 = tl.load(x_ptr + offs10, mask=(mask_r1 & iw0_in), other=-float("inf"))
-            v11 = tl.load(x_ptr + (offs10 + step_w), mask=(mask_r1 & iw1_in), other=-float("inf"))
+            v10 = tl.load(x_ptr + offs10,
+                          mask=(mask_r1 & iw0_in),
+                          other=-float("inf"))
+            v11 = tl.load(x_ptr + (offs10 + step_w),
+                          mask=(mask_r1 & iw1_in),
+                          other=-float("inf"))
 
             m0 = tl.maximum(v00, v01)
             m1 = tl.maximum(v10, v11)
@@ -139,7 +148,9 @@ def _maxpool2d_kernel(
                 in_bounds = out_mask & ih_in & iw_in
                 safe_iw = tl.where(iw_in, iw, 0)
                 offs = row_base + safe_iw
-                val = tl.load(x_ptr + offs, mask=in_bounds, other=-float("inf"))
+                val = tl.load(x_ptr + offs,
+                              mask=in_bounds,
+                              other=-float("inf"))
                 max_val = tl.maximum(max_val, val)
 
         tl.store(y_ptr + y_offs, max_val, mask=out_mask)
@@ -149,7 +160,12 @@ class ModelNew(nn.Module):
     """
     Max Pooling 2D implemented with a Triton kernel for Ascend NPU tensors.
     """
-    def __init__(self, kernel_size: int = 2, stride: int = 2, padding: int = 1, dilation: int = 3):
+
+    def __init__(self,
+                 kernel_size: int = 2,
+                 stride: int = 2,
+                 padding: int = 1,
+                 dilation: int = 3):
         """
         Initializes the Max Pooling 2D layer.
 
@@ -183,7 +199,8 @@ class ModelNew(nn.Module):
         """
         assert x.dim() == 4, "Input must be 4D NCHW tensor"
         if x.device.type != "npu":
-            raise ValueError("Max Pooling 2D Triton kernel requires an Ascend NPU tensor")
+            raise ValueError(
+                "Max Pooling 2D Triton kernel requires an Ascend NPU tensor")
         N, C, H, W = x.shape
 
         KH = KW = self.kernel_size
@@ -202,9 +219,8 @@ class ModelNew(nn.Module):
         x_in = x.contiguous()
         y = torch.empty((N, C, H_out, W_out), device=x.device, dtype=x.dtype)
 
-        exact_bench_shape = (
-            KH == 4 and KW == 4 and SH == 1 and SW == 1 and PH == 1 and PW == 1 and DH == 1 and DW == 1
-        )
+        exact_bench_shape = (KH == 4 and KW == 4 and SH == 1 and SW == 1
+                             and PH == 1 and PW == 1 and DH == 1 and DW == 1)
         BLOCK_HO = 8
         BLOCK_WO = 256 if exact_bench_shape else 64
 
@@ -220,17 +236,32 @@ class ModelNew(nn.Module):
 
         # Launch kernel; compute in native dtype to reduce casts
         _maxpool2d_kernel[grid](
-            x_in, y,
-            N, C, H, W,
-            H_out, W_out,
-            SH, SW, PH, PW, DH, DW, KH, KW,
+            x_in,
+            y,
+            N,
+            C,
+            H,
+            W,
+            H_out,
+            W_out,
+            SH,
+            SW,
+            PH,
+            PW,
+            DH,
+            DW,
+            KH,
+            KW,
             GRID_WO=grid_wo,
-            BLOCK_HO=BLOCK_HO, BLOCK_WO=BLOCK_WO,
+            BLOCK_HO=BLOCK_HO,
+            BLOCK_WO=BLOCK_WO,
             num_warps=num_warps,
             num_stages=num_stages,
         )
 
         return y
+
+
 batch_size = 32
 channels = 64
 height = 512
@@ -244,8 +275,11 @@ dilation = 1
 def max_pool2d_entry(x: torch.Tensor) -> torch.Tensor:
     return ModelNew(*get_init_inputs())(x)
 
+
 def get_inputs():
     x = torch.rand(batch_size, channels, height, width, device='npu')
     return [x]
+
+
 def get_init_inputs():
     return [kernel_size, stride, padding, dilation]

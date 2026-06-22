@@ -57,7 +57,8 @@ def rms_norm(x: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
     if x.device.type != "npu":
         raise ValueError("rms_norm expects an Ascend NPU tensor")
     if x.dim() != 4:
-        raise ValueError(f"rms_norm expects a 4D NCHW tensor, got shape {tuple(x.shape)}")
+        raise ValueError(
+            f"rms_norm expects a 4D NCHW tensor, got shape {tuple(x.shape)}")
     if not x.is_contiguous():
         raise ValueError("rms_norm expects a contiguous tensor")
 
@@ -80,7 +81,7 @@ def rms_norm(x: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
     else:
         block_c = 128
 
-    _rmsnorm_nchw_kernel[(x_2d.shape[0],)](
+    _rmsnorm_nchw_kernel[(x_2d.shape[0], )](
         x_2d,
         y_2d,
         x_2d.shape[0],
@@ -99,6 +100,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs RMS Normalization.
     """
+
     def __init__(self, num_features: int, eps: float = 1e-5):
         """
         Initializes the RMSNorm layer.
@@ -126,13 +128,18 @@ class ModelNew(nn.Module):
                 f"expected channel dimension {self.num_features}, got {x.size(1)}"
             )
         return rms_norm(x, self.eps)
+
+
 batch_size = 112
 features = 64
 dim1 = 512
 dim2 = 512
 
+
 def get_inputs():
     x = torch.rand(batch_size, features, dim1, dim2)
     return [x]
+
+
 def get_init_inputs():
     return [features]

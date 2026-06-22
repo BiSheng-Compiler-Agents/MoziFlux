@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 1024
 DEFAULT_IN_FEATURES = 8192
 DEFAULT_OUT_FEATURES = 8192
@@ -31,7 +30,7 @@ def linear_mish2_rowwise(
     pid_n = tl.program_id(axis=1)
 
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    acc = tl.zeros((BLOCK_N,), dtype=tl.float32)
+    acc = tl.zeros((BLOCK_N, ), dtype=tl.float32)
 
     x_row_ptr = x_ptr + pid_m * stride_xm
 
@@ -46,9 +45,8 @@ def linear_mish2_rowwise(
             other=0.0,
         ).to(tl.float32)
 
-        w_ptrs = w_ptr + (
-            offs_n[:, None] * stride_wn + offs_k[None, :] * stride_wk
-        )
+        w_ptrs = w_ptr + (offs_n[:, None] * stride_wn +
+                          offs_k[None, :] * stride_wk)
         w_mask = (offs_n[:, None] < N) & k_mask[None, :]
         w_vals = tl.load(w_ptrs, mask=w_mask, other=0.0).to(tl.float32)
         acc += tl.sum(w_vals * x_vals[None, :], axis=1)
@@ -78,11 +76,14 @@ def linear_mish2_rowwise(
     tl.store(y_ptrs, out, mask=offs_n < N)
 
 
-def matmul_mish_mish(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None = None) -> torch.Tensor:
+def matmul_mish_mish(x: torch.Tensor,
+                     weight: torch.Tensor,
+                     bias: torch.Tensor | None = None) -> torch.Tensor:
     if x.device.type != "npu":
         raise RuntimeError("matmul_mish_mish requires Ascend NPU tensors.")
     if x.ndim != 2 or weight.ndim != 2:
-        raise ValueError("matmul_mish_mish expects x and weight to be 2D tensors.")
+        raise ValueError(
+            "matmul_mish_mish expects x and weight to be 2D tensors.")
     if x.shape[1] != weight.shape[1]:
         raise ValueError("x.shape[1] must match weight.shape[1].")
     if x.device != weight.device:
@@ -93,14 +94,16 @@ def matmul_mish_mish(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor |
     if bias is None:
         bias = torch.zeros(weight.shape[0], device=x.device, dtype=x.dtype)
     elif bias.ndim != 1 or bias.shape[0] != weight.shape[0]:
-        raise ValueError("bias must be a 1D tensor with shape [weight.shape[0]].")
+        raise ValueError(
+            "bias must be a 1D tensor with shape [weight.shape[0]].")
     elif bias.device != x.device:
         raise ValueError("bias must be on the same device as x.")
     elif bias.dtype != x.dtype:
         raise ValueError("bias must use the same dtype as x.")
 
     if x.dtype not in (torch.float16, torch.float32, torch.bfloat16):
-        raise TypeError("matmul_mish_mish supports float16, float32, and bfloat16 inputs.")
+        raise TypeError(
+            "matmul_mish_mish supports float16, float32, and bfloat16 inputs.")
 
     x = x.contiguous()
     weight = weight.contiguous()
@@ -158,11 +161,16 @@ class ModelNew(nn.Module):
         else:
             bias = self.linear.bias.to(device=x.device, dtype=x.dtype)
         return matmul_mish_mish(x, weight, bias)
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features]

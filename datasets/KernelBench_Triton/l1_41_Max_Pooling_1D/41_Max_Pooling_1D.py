@@ -1,10 +1,7 @@
-import math
 import torch
 import torch.nn as nn
-import torch_npu
 import triton
 import triton.language as tl
-
 
 DEFAULT_KERNEL_SIZE = 8
 DEFAULT_STRIDE = 1
@@ -15,22 +12,22 @@ DEFAULT_RETURN_INDICES = False
 
 @triton.jit
 def _maxpool1d_forward_kernel(
-    x_ptr,                # *T,  input [NC][L_in]
-    y_ptr,                # *T,  output [NC][L_out]
-    idx_ptr,              # *int64, indices [NC][L_out] (optional)
-    L_in,                 # int32
-    L_out,                # int32
-    STRIDE,               # int32
-    PADDING,              # int32
-    DILATION,             # int32
-    line_stride_x,        # int32 = L_in
-    line_stride_y,        # int32 = L_out
-    HAS_INDEX: tl.constexpr,  # bool, whether to write indices
-    K: tl.constexpr,          # kernel size (compile-time)
-    BLOCK: tl.constexpr,      # tile size along output length
+        x_ptr,  # *T,  input [NC][L_in]
+        y_ptr,  # *T,  output [NC][L_out]
+        idx_ptr,  # *int64, indices [NC][L_out] (optional)
+        L_in,  # int32
+        L_out,  # int32
+        STRIDE,  # int32
+        PADDING,  # int32
+        DILATION,  # int32
+        line_stride_x,  # int32 = L_in
+        line_stride_y,  # int32 = L_out
+        HAS_INDEX: tl.constexpr,  # bool, whether to write indices
+        K: tl.constexpr,  # kernel size (compile-time)
+        BLOCK: tl.constexpr,  # tile size along output length
 ):
-    pid_nc = tl.program_id(axis=0)          # which (N,C) line
-    pid_o_blk = tl.program_id(axis=1)       # which output tile
+    pid_nc = tl.program_id(axis=0)  # which (N,C) line
+    pid_o_blk = tl.program_id(axis=1)  # which output tile
 
     o_offsets = pid_o_blk * BLOCK + tl.arange(0, BLOCK)
     mask_o = o_offsets < L_out
@@ -77,6 +74,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs Max Pooling 1D.
     """
+
     def __init__(
         self,
         kernel_size: int = DEFAULT_KERNEL_SIZE,
@@ -104,7 +102,8 @@ class ModelNew(nn.Module):
 
     def _out_length(self, L_in: int) -> int:
         # PyTorch formula with ceil_mode=False
-        return (L_in + 2 * self.padding - self.dilation * (self.kernel_size - 1) - 1) // self.stride + 1
+        return (L_in + 2 * self.padding - self.dilation *
+                (self.kernel_size - 1) - 1) // self.stride + 1
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -119,19 +118,24 @@ class ModelNew(nn.Module):
         if x.device.type != "npu":
             raise ValueError("ModelNew expects Ascend NPU inputs")
         if x.dtype not in (torch.float16, torch.float32, torch.bfloat16):
-            raise TypeError("ModelNew supports float16, float32, and bfloat16 inputs only")
+            raise TypeError(
+                "ModelNew supports float16, float32, and bfloat16 inputs only")
 
         x = x.contiguous()
         N, C, L_in = x.shape
         L_out = self._out_length(L_in)
 
         if L_out <= 0:
-            raise ValueError("Invalid pooling configuration produces a non-positive output length")
+            raise ValueError(
+                "Invalid pooling configuration produces a non-positive output length"
+            )
 
         y = torch.empty((N, C, L_out), device=x.device, dtype=x.dtype)
         indices = None
         if self.return_indices:
-            indices = torch.empty((N, C, L_out), device=x.device, dtype=torch.int64)
+            indices = torch.empty((N, C, L_out),
+                                  device=x.device,
+                                  dtype=torch.int64)
 
         # Launch kernel: flatten (N, C) into NC lines
         NC = N * C
@@ -139,9 +143,17 @@ class ModelNew(nn.Module):
         grid = (NC, triton.cdiv(L_out, BLOCK))
 
         _maxpool1d_forward_kernel[grid](
-            x, y, indices if self.return_indices else torch.empty(0, device=x.device, dtype=torch.int64),
-            L_in, L_out, self.stride, self.padding, self.dilation,
-            L_in, L_out,
+            x,
+            y,
+            indices if self.return_indices else torch.empty(
+                0, device=x.device, dtype=torch.int64),
+            L_in,
+            L_out,
+            self.stride,
+            self.padding,
+            self.dilation,
+            L_in,
+            L_out,
             HAS_INDEX=self.return_indices,
             K=self.kernel_size,
             BLOCK=BLOCK,
@@ -169,17 +181,22 @@ def max_pool1d(
         dilation=dilation,
         return_indices=return_indices,
     )(x)
+
+
 batch_size = 64
 features = 192
 sequence_length = 65536
 kernel_size = 8
-stride      = 1
-padding     = 4
-dilation    = 3            
+stride = 1
+padding = 4
+dilation = 3
 return_indices = False
+
 
 def get_inputs():
     x = torch.rand(batch_size, features, sequence_length)
     return [x]
+
+
 def get_init_inputs():
     return [kernel_size, stride, padding, dilation, return_indices]

@@ -6,10 +6,14 @@ import triton.language as tl
 
 @triton.jit
 def _l2norm_rowwise_kernel(
-    x_ptr, y_ptr,
-    M, N,
-    stride_xm, stride_xn,
-    stride_ym, stride_yn,
+    x_ptr,
+    y_ptr,
+    M,
+    N,
+    stride_xm,
+    stride_xn,
+    stride_ym,
+    stride_yn,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
 ):
@@ -27,7 +31,9 @@ def _l2norm_rowwise_kernel(
     while n < N:
         offs = n + cols
         mask = row_mask[:, None] & (offs[None, :] < N)
-        x = tl.load(x_row_ptrs + (n * stride_xn) + col_ptrs_x, mask=mask, other=0.0)
+        x = tl.load(x_row_ptrs + (n * stride_xn) + col_ptrs_x,
+                    mask=mask,
+                    other=0.0)
         xf = x.to(tl.float32)
         sumsq += tl.sum(xf * xf, axis=1)
         n += BLOCK_N
@@ -38,7 +44,9 @@ def _l2norm_rowwise_kernel(
     while n < N:
         offs = n + cols
         mask = row_mask[:, None] & (offs[None, :] < N)
-        x = tl.load(x_row_ptrs + (n * stride_xn) + col_ptrs_x, mask=mask, other=0.0)
+        x = tl.load(x_row_ptrs + (n * stride_xn) + col_ptrs_x,
+                    mask=mask,
+                    other=0.0)
         y = x * inv_norm[:, None]
         tl.store(y_row_ptrs + (n * stride_yn) + col_ptrs_y, y, mask=mask)
         n += BLOCK_N
@@ -60,6 +68,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs L2 normalization.
     """
+
     def __init__(self):
         """
         Initializes the L2Norm layer.
@@ -80,11 +89,13 @@ class ModelNew(nn.Module):
             torch.Tensor: Output tensor with L2 normalization applied, same shape as input.
         """
         if not getattr(x, "is_npu", False):
-            raise RuntimeError("ModelNew expects an input tensor on Ascend NPU")
+            raise RuntimeError(
+                "ModelNew expects an input tensor on Ascend NPU")
         if x.dim() != 2:
             raise ValueError("ModelNew expects a 2D input tensor")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
 
         x_c = x.contiguous()
         B, D = x_c.shape
@@ -94,24 +105,33 @@ class ModelNew(nn.Module):
         stride_ym, stride_yn = y.stride()
 
         BLOCK_M, BLOCK_N, num_warps, num_stages = _select_config(D)
-        grid = (triton.cdiv(B, BLOCK_M),)
+        grid = (triton.cdiv(B, BLOCK_M), )
 
         _l2norm_rowwise_kernel[grid](
-            x_c, y,
-            B, D,
-            stride_xm, stride_xn,
-            stride_ym, stride_yn,
+            x_c,
+            y,
+            B,
+            D,
+            stride_xm,
+            stride_xn,
+            stride_ym,
+            stride_yn,
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
             num_warps=num_warps,
             num_stages=num_stages,
         )
         return y
+
+
 batch_size = 32768
 dim = 65535
+
 
 def get_inputs():
     x = torch.rand(batch_size, dim)
     return [x]
+
+
 def get_init_inputs():
     return []

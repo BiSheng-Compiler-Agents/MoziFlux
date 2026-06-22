@@ -1,0 +1,19 @@
+TEST PyTorch / ACL small_1k PASS
+TEST baseline1 small_1k PASS max_abs=0.000000e+00
+TEST baseline2 small_1k PASS max_abs=0.000000e+00
+TEST optimized small_1k PASS max_abs=0.000000e+00
+TEST PyTorch / ACL medium_1m PASS
+TEST baseline1 medium_1m PASS max_abs=1.164153e-10
+TEST baseline2 medium_1m PASS max_abs=1.164153e-10
+TEST optimized medium_1m PASS max_abs=0.000000e+00
+TEST PyTorch / ACL target_112x64x512x512 PASS
+TEST baseline1 target_112x64x512x512 SKIP coreDim_guard n_tiles=114688
+TEST baseline2 target_112x64x512x512 SKIP coreDim_guard n_tiles=114688
+TEST optimized target_112x64x512x512 PASS max_abs=3.637979e-12
+UNIT_TEST PASS
+
+frobenius_norm:
+                   label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0               small_1k       0.007084          0.005059          0.005737          0.004803
+1              medium_1m       0.019126          0.013868          0.014943          0.014331
+2  target_112x64x512x512      25.516468               inf               inf         16.953049

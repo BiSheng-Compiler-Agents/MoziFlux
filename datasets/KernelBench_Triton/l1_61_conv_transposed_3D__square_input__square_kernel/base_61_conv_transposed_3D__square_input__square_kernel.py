@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 8
 DEFAULT_IN_CHANNELS = 48
 DEFAULT_OUT_CHANNELS = 48
@@ -35,7 +34,7 @@ def _launch_identity_kernel(tensor: torch.Tensor) -> torch.Tensor:
     n_elements = output.numel()
     if n_elements == 0:
         return output
-    grid = (triton.cdiv(n_elements, 15616),)
+    grid = (triton.cdiv(n_elements, 15616), )
     _copy_kernel[grid](tensor, output, n_elements, BLOCK=15616)
     return output
 
@@ -99,6 +98,8 @@ class ModelNew(nn.Module):
             output_padding=self.conv_transpose3d.output_padding[0],
             groups=self.conv_transpose3d.groups,
         )
+
+
 batch_size = 8
 in_channels = 48
 out_channels = 48
@@ -107,8 +108,13 @@ depth = 64
 height = 64
 width = 64
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, depth, height, width)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization
+    return [
+        in_channels, out_channels, kernel_size
+    ]  # Provide in_channels, out_channels, kernel_size for initialization

@@ -17,7 +17,9 @@ def _hardtanh_kernel(x_ptr, y_ptr, n_elements, min_val, max_val,
     tl.store(y_ptr + offsets, x, mask=mask)
 
 
-def _hardtanh_triton(x: torch.Tensor, min_val: float = -1.0, max_val: float = 1.0) -> torch.Tensor:
+def _hardtanh_triton(x: torch.Tensor,
+                     min_val: float = -1.0,
+                     max_val: float = 1.0) -> torch.Tensor:
     x = x.contiguous()
     y = torch.empty_like(x)
     n_elements = x.numel()
@@ -26,10 +28,16 @@ def _hardtanh_triton(x: torch.Tensor, min_val: float = -1.0, max_val: float = 1.
 
     # Tuned for H100/H200; modest tile to keep occupancy high and launch overhead low.
     BLOCK_SIZE = 4096
-    grid = lambda META: ((n_elements + BLOCK_SIZE - 1) // BLOCK_SIZE,)
+
+    def grid(META):
+        return ((n_elements + BLOCK_SIZE - 1) // BLOCK_SIZE, )
 
     _hardtanh_kernel[grid](
-        x, y, n_elements, min_val, max_val,
+        x,
+        y,
+        n_elements,
+        min_val,
+        max_val,
         BLOCK_SIZE=BLOCK_SIZE,
         num_warps=4,
         num_stages=2,
@@ -41,20 +49,28 @@ class ModelNew(nn.Module):
     """
     HardTanh activation backed by the Triton kernel on Ascend NPU.
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if not hasattr(x, "is_npu") or not x.is_npu:
-            raise RuntimeError("ModelNew expects an input tensor on Ascend NPU")
+            raise RuntimeError(
+                "ModelNew expects an input tensor on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
         return _hardtanh_triton(x, -1.0, 1.0)
+
+
 batch_size = 4096
 dim = 393216
+
 
 def get_inputs():
     x = torch.rand(batch_size, dim)
     return [x]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

@@ -1,0 +1,22 @@
+TEST baseline1 small PASS
+TEST baseline2 small PASS
+TEST optimized small PASS
+TEST baseline1 medium PASS
+TEST baseline2 medium PASS
+TEST optimized medium PASS
+TEST baseline1 target PASS
+TEST baseline2 target PASS
+TEST optimized target PASS
+TEST baseline1 tiny_triton PASS
+TEST baseline2 tiny_triton PASS
+TEST optimized tiny_triton PASS
+TEST baseline1 fallback_c80 PASS
+TEST baseline2 fallback_c80 SKIP value_diff_or_unavailable RuntimeError
+TEST optimized fallback_c80 PASS
+UNIT_TEST PASS
+
+conv3d_hardswish_relu_softmax_mean:
+    label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   small       0.028830          0.035864          0.033349          0.028806
+1  medium       0.109348          0.146655          0.151047          0.109405
+2  target       0.740930          0.956083          0.988924          0.740613

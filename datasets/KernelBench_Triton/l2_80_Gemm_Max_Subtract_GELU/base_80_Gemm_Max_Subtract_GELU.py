@@ -33,6 +33,7 @@ def _fill_zero_exact_2048(out_ptr):
 
 
 class ModelNew(nn.Module):
+
     def __init__(self, in_features=None, out_features=None, max_dim=None):
         super(ModelNew, self).__init__()
         if in_features is None:
@@ -48,26 +49,27 @@ class ModelNew(nn.Module):
         if self.max_dim != 1:
             raise NotImplementedError(
                 "ModelNew only supports max_dim == 1 so the Triton zero-fill fast path "
-                "remains the sole execution path."
-            )
+                "remains the sole execution path.")
         bsz = x.shape[0]
         out = torch.empty((bsz, 1), device=x.device, dtype=x.dtype)
         n_elements = out.numel()
         if n_elements == 256:
-            _fill_zero_exact_256[(1,)](out)
+            _fill_zero_exact_256[(1, )](out)
             return out
         if n_elements == 1024:
-            _fill_zero_exact_1024[(4,)](out)
+            _fill_zero_exact_1024[(4, )](out)
             return out
         if n_elements == 2048:
-            _fill_zero_exact_2048[(2,)](out)
+            _fill_zero_exact_2048[(2, )](out)
             return out
         if n_elements > 0:
             block = 1 << (n_elements - 1).bit_length()
             block = 1024 if block > 1024 else block
         else:
             block = 1
-        _fill_zero_kernel[(triton.cdiv(n_elements, block),)](out, n_elements, BLOCK=block)
+        _fill_zero_kernel[(triton.cdiv(n_elements, block), )](out,
+                                                              n_elements,
+                                                              BLOCK=block)
         return out
 
 

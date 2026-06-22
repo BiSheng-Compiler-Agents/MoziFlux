@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 import triton
@@ -124,6 +123,7 @@ class ModelNew(nn.Module):
     """
     A 3D convolutional layer followed by multiplication, instance normalization, clamping, multiplication, and a max operation.
     """
+
     def __init__(
         self,
         in_channels: int = 3,
@@ -162,11 +162,16 @@ class ModelNew(nn.Module):
         rstd = torch.empty((N, C), device=x.device, dtype=x.dtype)
 
         # Kernel 1: compute mean and rstd over spatial dims for (x * multiplier)
-        grid_mu = (N * C,)
+        grid_mu = (N * C, )
         BLOCK_S1 = 2048
         _compute_mu_rstd_kernel[grid_mu](
-            x, m, mu, rstd,
-            S, C, self.instance_norm.eps,
+            x,
+            m,
+            mu,
+            rstd,
+            S,
+            C,
+            self.instance_norm.eps,
             BLOCK_S=BLOCK_S1,
             num_warps=8,
             num_stages=4,
@@ -178,9 +183,17 @@ class ModelNew(nn.Module):
         BLOCK_C2 = 16
         grid_reduce = (N, triton.cdiv(S, BLOCK_S2))
         _postprocess_and_reduce_max_kernel[grid_reduce](
-            x, m, mu, rstd, out,
-            S, C, float(self.clamp_min), float(self.clamp_max),
-            BLOCK_S=BLOCK_S2, BLOCK_C=BLOCK_C2,
+            x,
+            m,
+            mu,
+            rstd,
+            out,
+            S,
+            C,
+            float(self.clamp_min),
+            float(self.clamp_max),
+            BLOCK_S=BLOCK_S2,
+            BLOCK_C=BLOCK_C2,
             num_warps=4,
             num_stages=2,
         )
@@ -188,6 +201,8 @@ class ModelNew(nn.Module):
         # Reshape to [N, D, H, W]
         out = out.view(N, D, H, W)
         return out
+
+
 batch_size = 128
 in_channels = 3
 out_channels = 16
@@ -197,7 +212,13 @@ multiplier_shape = (out_channels, 1, 1, 1)
 clamp_min = -1.0
 clamp_max = 1.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, depth, height, width)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, multiplier_shape, clamp_min, clamp_max]
+    return [
+        in_channels, out_channels, kernel_size, multiplier_shape, clamp_min,
+        clamp_max
+    ]

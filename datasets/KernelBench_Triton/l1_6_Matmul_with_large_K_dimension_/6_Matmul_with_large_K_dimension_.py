@@ -154,9 +154,10 @@ class ModelNew(nn.Module):
     """
     Simple model that performs a single matrix multiplication (C = A * B) with a large K dimension
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
-    
+
     def forward(self, A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
         """
         Performs matrix multiplication of A and B.
@@ -182,23 +183,38 @@ class ModelNew(nn.Module):
         M, K = A.shape
         _, N = B.shape
         C = torch.empty((M, N), device=A.device, dtype=A.dtype)
-        grid = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]), triton.cdiv(N, meta["BLOCK_N"]))
+
+        def grid(meta):
+            return (triton.cdiv(M, meta["BLOCK_M"]),
+                    triton.cdiv(N, meta["BLOCK_N"]))
 
         _matmul_kernel[grid](
-            A, B, C,
-            M, N, K,
-            A.stride(0), A.stride(1),
-            B.stride(0), B.stride(1),
-            C.stride(0), C.stride(1),
+            A,
+            B,
+            C,
+            M,
+            N,
+            K,
+            A.stride(0),
+            A.stride(1),
+            B.stride(0),
+            B.stride(1),
+            C.stride(0),
+            C.stride(1),
         )
         return C
+
+
 M = 256
 N = 256
 K = 131072 * 4
+
 
 def get_inputs():
     A = torch.rand(M, K)
     B = torch.rand(K, N)
     return [A, B]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

@@ -1,0 +1,16 @@
+TEST baseline1 small_square PASS
+TEST baseline2 small_square PASS
+TEST optimized small_square PASS
+TEST baseline1 medium_square PASS
+TEST baseline2 medium_square PASS
+TEST optimized medium_square PASS
+TEST baseline1 target_square SKIP grid_guard
+TEST baseline2 target_square SKIP grid_guard
+TEST optimized target_square PASS
+UNIT_TEST PASS
+
+depthwise_conv2d_square:
+           label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   small_square       0.025035          0.078746          0.059400          0.024245
+1  medium_square       0.069445          0.262714          0.349823          0.070908
+2  target_square       2.206660               inf               inf          2.218322

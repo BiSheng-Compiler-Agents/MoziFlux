@@ -5,6 +5,7 @@ import torch.nn as nn
 
 import triton
 import triton.language as tl
+import triton.language.extra.cann.extension as al
 
 EXACT_N = 4096
 EXACT_BLOCK_M = 128
@@ -101,8 +102,8 @@ def _matmul_kernel_exact(
     for _ in range(0, EXACT_K, BLOCK_K):
         a = tl.load(a_ptrs)
         b = tl.load(b_ptrs)
-        tl.compile_hint(a, "dot_pad_only_k")
-        tl.compile_hint(b, "dot_pad_only_k")
+        al.compile_hint(a, "dot_pad_only_k")
+        al.compile_hint(b, "dot_pad_only_k")
         accumulator += tl.dot(a, b)
         a_ptrs += BLOCK_K * stride_ak
         b_ptrs += BLOCK_K * stride_bk

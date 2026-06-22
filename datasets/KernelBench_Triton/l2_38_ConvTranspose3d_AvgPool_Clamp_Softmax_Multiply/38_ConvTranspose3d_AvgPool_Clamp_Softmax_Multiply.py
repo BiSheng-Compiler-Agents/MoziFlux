@@ -18,10 +18,16 @@ import triton.language as tl
 )
 @triton.jit
 def _clamp_softmax_mul2_tiled_ncdhw(
-    x_ptr, y_ptr,
-    N, C, DHW,
-    stride_n, stride_c,
-    clamp_min, clamp_max, scale,
+    x_ptr,
+    y_ptr,
+    N,
+    C,
+    DHW,
+    stride_n,
+    stride_c,
+    clamp_min,
+    clamp_max,
+    scale,
     OUT_DTYPE: tl.constexpr,
     BLOCK_C: tl.constexpr,
     BLOCK_POS: tl.constexpr,
@@ -62,7 +68,9 @@ def _clamp_softmax_mul2_tiled_ncdhw(
     out = x * inv
 
     # write back
-    tl.store(y_ptr + base_n + offs_c[:, None] * stride_c + offs_p[None, :], out.to(OUT_DTYPE), mask=mask)
+    tl.store(y_ptr + base_n + offs_c[:, None] * stride_c + offs_p[None, :],
+             out.to(OUT_DTYPE),
+             mask=mask)
 
 
 def _next_power_of_2(x: int) -> int:
@@ -104,21 +112,29 @@ class ModelNew(nn.Module):
         clamp_max=DEFAULT_CLAMP_MAX,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose3d(
-            in_channels, out_channels, kernel_size,
-            stride=stride, padding=padding, output_padding=output_padding
-        )
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding,
+                                                 output_padding=output_padding)
         self.avg_pool = nn.AvgPool3d(pool_kernel_size)
         self.clamp_min = float(clamp_min)
         self.clamp_max = float(clamp_max)
 
     @staticmethod
-    def _fused_clamp_softmax_mul2_tiled(x: torch.Tensor, clamp_min: float, clamp_max: float, scale: float = 2.0):
+    def _fused_clamp_softmax_mul2_tiled(x: torch.Tensor,
+                                        clamp_min: float,
+                                        clamp_max: float,
+                                        scale: float = 2.0):
         # Fused: clamp -> softmax(dim=1) -> *scale for NCDHW, tiled over spatial positions for coalesced access.
         if x.device.type != "npu":
-            raise RuntimeError("ModelNew expects Ascend NPU tensors for the Triton fused path.")
+            raise RuntimeError(
+                "ModelNew expects Ascend NPU tensors for the Triton fused path."
+            )
         if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-            raise RuntimeError(f"Unsupported dtype for Triton fused path: {x.dtype}")
+            raise RuntimeError(
+                f"Unsupported dtype for Triton fused path: {x.dtype}")
         if x.numel() == 0:
             return torch.empty_like(x)
 
@@ -127,7 +143,8 @@ class ModelNew(nn.Module):
         DHW = D * H * W
         y = torch.empty_like(x)
 
-        sN, sC, sD, sH, sW = x.stride()  # only sN and sC are used since DHW is contiguous
+        sN, sC, sD, sH, sW = x.stride(
+        )  # only sN and sC are used since DHW is contiguous
 
         # choose BLOCK_C as next power-of-two >= C but at least 32 to map well to a warp
         BLOCK_C = max(32, _next_power_of_2(C))
@@ -138,12 +155,20 @@ class ModelNew(nn.Module):
         elif x.dtype == torch.bfloat16:
             OUT_DTYPE = tl.bfloat16
 
-        grid = lambda META: (N, triton.cdiv(DHW, META['BLOCK_POS']))
+        def grid(META):
+            return (N, triton.cdiv(DHW, META['BLOCK_POS']))
+
         _clamp_softmax_mul2_tiled_ncdhw[grid](
-            x, y,
-            N, C, DHW,
-            sN, sC,
-            float(clamp_min), float(clamp_max), float(scale),
+            x,
+            y,
+            N,
+            C,
+            DHW,
+            sN,
+            sC,
+            float(clamp_min),
+            float(clamp_max),
+            float(scale),
             OUT_DTYPE=OUT_DTYPE,
             BLOCK_C=BLOCK_C,
         )
@@ -160,8 +185,11 @@ class ModelNew(nn.Module):
         x = self.conv_transpose(x)
         x = self.avg_pool(x)
         # Fused: clamp -> softmax(dim=1) -> *2 using tiled Triton kernel
-        x = self._fused_clamp_softmax_mul2_tiled(x, self.clamp_min, self.clamp_max, 2.0)
+        x = self._fused_clamp_softmax_mul2_tiled(x, self.clamp_min,
+                                                 self.clamp_max, 2.0)
         return x
+
+
 batch_size = 32
 in_channels = 32
 out_channels = 64
@@ -174,7 +202,13 @@ pool_kernel_size = 2
 clamp_min = 0.0
 clamp_max = 1.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, depth, height, width)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, pool_kernel_size, clamp_min, clamp_max]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding,
+        output_padding, pool_kernel_size, clamp_min, clamp_max
+    ]

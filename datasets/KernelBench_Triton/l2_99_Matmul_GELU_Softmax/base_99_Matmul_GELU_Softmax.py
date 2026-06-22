@@ -7,15 +7,17 @@ import triton.language as tl
 
 @triton.jit
 def _linear_gelu_softmax_rowwise(
-    x_ptr,         # [B, K]
-    w_ptr,         # [N, K]
-    b_ptr,         # [N]
-    y_ptr,         # [B, N]
-    stride_x,      # stride between rows of x (in elements)
-    stride_w_n,    # stride for weight along N (in elements)
-    stride_w_k,    # stride for weight along K (in elements)
-    stride_y,      # stride between rows of y (in elements)
-    B, K, N,       # dimensions
+    x_ptr,  # [B, K]
+    w_ptr,  # [N, K]
+    b_ptr,  # [N]
+    y_ptr,  # [B, N]
+    stride_x,  # stride between rows of x (in elements)
+    stride_w_n,  # stride for weight along N (in elements)
+    stride_w_k,  # stride for weight along K (in elements)
+    stride_y,  # stride between rows of y (in elements)
+    B,
+    K,
+    N,  # dimensions
     NUM_N_TILES: tl.constexpr,
     NUM_K_TILES: tl.constexpr,
     BLOCK_N: tl.constexpr,
@@ -42,11 +44,17 @@ def _linear_gelu_softmax_rowwise(
             k = k_start + cols_k
             k_mask = k < K
 
-            x_vals = tl.load(x_row_ptr + k, mask=k_mask, other=0.0, cache_modifier=".cg").to(tl.float32)
+            x_vals = tl.load(x_row_ptr + k,
+                             mask=k_mask,
+                             other=0.0,
+                             cache_modifier=".cg").to(tl.float32)
 
             w_ptrs = w_ptr + j[:, None] * stride_w_n + k[None, :] * stride_w_k
             wk_mask = j_mask[:, None] & k_mask[None, :]
-            w_vals = tl.load(w_ptrs, mask=wk_mask, other=0.0, cache_modifier=".cg").to(tl.float32)
+            w_vals = tl.load(w_ptrs,
+                             mask=wk_mask,
+                             other=0.0,
+                             cache_modifier=".cg").to(tl.float32)
 
             acc += tl.sum(w_vals * x_vals[None, :], axis=1)
             k_start += BLOCK_K
@@ -78,11 +86,17 @@ def _linear_gelu_softmax_rowwise(
             k = k_start + cols_k
             k_mask = k < K
 
-            x_vals = tl.load(x_row_ptr + k, mask=k_mask, other=0.0, cache_modifier=".cg").to(tl.float32)
+            x_vals = tl.load(x_row_ptr + k,
+                             mask=k_mask,
+                             other=0.0,
+                             cache_modifier=".cg").to(tl.float32)
 
             w_ptrs = w_ptr + j[:, None] * stride_w_n + k[None, :] * stride_w_k
             wk_mask = j_mask[:, None] & k_mask[None, :]
-            w_vals = tl.load(w_ptrs, mask=wk_mask, other=0.0, cache_modifier=".cg").to(tl.float32)
+            w_vals = tl.load(w_ptrs,
+                             mask=wk_mask,
+                             other=0.0,
+                             cache_modifier=".cg").to(tl.float32)
 
             acc += tl.sum(w_vals * x_vals[None, :], axis=1)
             k_start += BLOCK_K
@@ -92,7 +106,8 @@ def _linear_gelu_softmax_rowwise(
         gelu_vals = 0.5 * logits * (1.0 + tl.erf(logits * inv_sqrt2))
 
         tl.store(y_row_ptr + j, gelu_vals, mask=j_mask)
-        row_max = tl.maximum(row_max, tl.max(tl.where(j_mask, gelu_vals, neg_inf), axis=0))
+        row_max = tl.maximum(
+            row_max, tl.max(tl.where(j_mask, gelu_vals, neg_inf), axis=0))
         n_start += BLOCK_N
 
     denom = 0.0
@@ -129,8 +144,7 @@ def _require_supported_runtime(tensor: torch.Tensor) -> None:
     if os.environ.get("TRITON_INTERPRET") == "1":
         return
     raise RuntimeError(
-        "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1."
-    )
+        "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1.")
 
 
 def _validate_inputs(
@@ -146,7 +160,8 @@ def _validate_inputs(
         raise ValueError("x and weight must be on the same device.")
     if bias is not None:
         if bias.ndim != 1 or bias.shape[0] != weight.shape[0]:
-            raise ValueError("bias must be a 1D tensor with shape [out_features].")
+            raise ValueError(
+                "bias must be a 1D tensor with shape [out_features].")
         if bias.device != x.device:
             raise ValueError("bias must be on the same device as x.")
     if x.dtype != weight.dtype or (bias is not None and bias.dtype != x.dtype):
@@ -158,19 +173,23 @@ def _validate_inputs(
     x = x.contiguous()
     weight = weight.contiguous()
     if bias is None:
-        bias = torch.zeros(weight.shape[0], device=weight.device, dtype=weight.dtype)
+        bias = torch.zeros(weight.shape[0],
+                           device=weight.device,
+                           dtype=weight.dtype)
     else:
         bias = bias.contiguous()
     return x, weight, bias
 
 
-def matmul_gelu_softmax(
-    x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None = None
-) -> torch.Tensor:
+def matmul_gelu_softmax(x: torch.Tensor,
+                        weight: torch.Tensor,
+                        bias: torch.Tensor | None = None) -> torch.Tensor:
     x, weight, bias = _validate_inputs(x, weight, bias)
     batch_size, in_features = x.shape
     out_features = weight.shape[0]
-    output = torch.empty((batch_size, out_features), device=x.device, dtype=x.dtype)
+    output = torch.empty((batch_size, out_features),
+                         device=x.device,
+                         dtype=x.dtype)
 
     block_n = min(128, max(16, _next_power_of_two(out_features)))
     block_k = min(128, max(32, _next_power_of_two(in_features)))
@@ -178,7 +197,7 @@ def matmul_gelu_softmax(
     num_k_tiles = triton.cdiv(in_features, block_k)
     num_warps = 1 if block_n <= 32 else 2
 
-    _linear_gelu_softmax_rowwise[(batch_size,)](
+    _linear_gelu_softmax_rowwise[(batch_size, )](
         x,
         weight,
         bias,
@@ -220,12 +239,18 @@ class ModelNew(nn.Module):
 
     def forward(self, x):
         return matmul_gelu_softmax(x, self.linear.weight, self.linear.bias)
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
 
+
 def get_inputs():
-    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    device = "npu" if hasattr(torch,
+                              "npu") and torch.npu.is_available() else "cpu"
     return [torch.rand(batch_size, in_features, device=device)]
+
+
 def get_init_inputs():
     return [in_features, out_features]

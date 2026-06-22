@@ -32,6 +32,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs an ELU activation.
     """
+
     def __init__(self, alpha: float = 1.0):
         """
         Initializes the ELU model.
@@ -55,7 +56,8 @@ class ModelNew(nn.Module):
         if x.device.type != "npu":
             raise ValueError("ModelNew expects an Ascend NPU tensor input")
         if x.requires_grad:
-            raise ValueError("ModelNew does not support autograd-enabled inputs")
+            raise ValueError(
+                "ModelNew does not support autograd-enabled inputs")
         if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
             raise TypeError(
                 "ModelNew supports only float16, bfloat16, and float32 tensors"
@@ -82,7 +84,7 @@ class ModelNew(nn.Module):
             num_warps = 4
 
         def grid(meta):
-            return (triton.cdiv(N, meta['BLOCK_SIZE']),)
+            return (triton.cdiv(N, meta['BLOCK_SIZE']), )
 
         _elu_kernel[grid](
             x_contig.view(-1),
@@ -94,11 +96,16 @@ class ModelNew(nn.Module):
             num_stages=2,
         )
         return y.view_as(x)
+
+
 batch_size = 4096
 dim = 393216
+
 
 def get_inputs():
     x = torch.rand(batch_size, dim)
     return [x]
+
+
 def get_init_inputs():
     return [1.0]  # Provide alpha value for initialization

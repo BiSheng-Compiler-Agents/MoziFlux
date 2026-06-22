@@ -59,19 +59,22 @@ def _softmax_row_fwd_db_kernel(
     # ── Pass 1: online numerically-stable max + exp-sum ───────────────────
     for start in tl.range(0, n_cols, BLOCK_N):
         offs = start + tl.arange(0, BLOCK_N)
-        offs = tl.multiple_of(offs, BLOCK_N)      # Pattern 11: alignment hint
-        offs = tl.max_contiguous(offs, BLOCK_N)   # Pattern 11: contiguity hint
+        offs = tl.multiple_of(offs, BLOCK_N)  # Pattern 11: alignment hint
+        offs = tl.max_contiguous(offs, BLOCK_N)  # Pattern 11: contiguity hint
         col_mask = offs < n_cols
         mask = row_mask[:, None] & col_mask[None, :]
         x_ptrs = x_ptr + rows[:, None] * stride_row + offs[None, :]
-        x = tl.load(x_ptrs, mask=mask, other=-float("inf"),
+        x = tl.load(x_ptrs,
+                    mask=mask,
+                    other=-float("inf"),
                     eviction_policy="evict_first").to(tl.float32)  # Pattern 19
         block_max = tl.max(x, axis=1)
         new_row_max = tl.where(row_mask, tl.maximum(row_max, block_max), 0.0)
-        exp_scale   = tl.where(row_mask, tl.exp(row_max - new_row_max), 0.0)
+        exp_scale = tl.where(row_mask, tl.exp(row_max - new_row_max), 0.0)
         row_sum = tl.where(
             row_mask,
-            row_sum * exp_scale + tl.sum(tl.exp(x - new_row_max[:, None]), axis=1),
+            row_sum * exp_scale +
+            tl.sum(tl.exp(x - new_row_max[:, None]), axis=1),
             1.0,
         )
         row_max = new_row_max
@@ -85,13 +88,16 @@ def _softmax_row_fwd_db_kernel(
         mask = row_mask[:, None] & col_mask[None, :]
         x_ptrs = x_ptr + rows[:, None] * stride_row + offs[None, :]
         y_ptrs = y_ptr + rows[:, None] * stride_row + offs[None, :]
-        x = tl.load(x_ptrs, mask=mask, other=-float("inf"),
+        x = tl.load(x_ptrs,
+                    mask=mask,
+                    other=-float("inf"),
                     eviction_policy="evict_first").to(tl.float32)
         y = tl.exp(x - row_max[:, None]) / row_sum[:, None]
         tl.store(y_ptrs, y, mask=mask)
 
 
 class ModelNew(nn.Module):
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -102,10 +108,13 @@ class ModelNew(nn.Module):
         y = x.new_empty(x.shape)
         BLOCK_M = 2
         BLOCK_N = 2048
-        grid = (triton.cdiv(n_rows, BLOCK_M),)
+        grid = (triton.cdiv(n_rows, BLOCK_M), )
         _softmax_row_fwd_db_kernel[grid](
-            x, y,
-            n_rows, n_cols, x.stride(0),
+            x,
+            y,
+            n_rows,
+            n_cols,
+            x.stride(0),
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
             num_warps=8,

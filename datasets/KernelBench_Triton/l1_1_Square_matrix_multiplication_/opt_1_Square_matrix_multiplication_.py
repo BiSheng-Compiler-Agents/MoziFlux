@@ -41,37 +41,43 @@ import triton.language as tl
 import triton.language.extra.cann.extension as al
 
 # ── Tuned constants for 4096×4096 benchmark shape ────────────────────────────
-EXACT_N     = 4096
-EXACT_BM    = 128
-EXACT_BN    = 128
-EXACT_BK    = 32
+EXACT_N = 4096
+EXACT_BM = 128
+EXACT_BN = 128
+EXACT_BK = 32
 EXACT_GROUP = 4
 
 
 # ── Exact (mask-free) kernel ─────────────────────────────────────────────────
 @triton.jit
 def _matmul_kernel_exact(
-    a_ptr, b_ptr, c_ptr,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_cm, stride_cn,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_cm,
+    stride_cn,
     NUM_PID_M: tl.constexpr,
     NUM_PID_N: tl.constexpr,
-    EXACT_K:   tl.constexpr,   # = EXACT_N (4096), constexpr → tl.static_range unrolls
-    BLOCK_M:   tl.constexpr,
-    BLOCK_N:   tl.constexpr,
-    BLOCK_K:   tl.constexpr,
-    GROUP_M:   tl.constexpr,
+    EXACT_K: tl.
+    constexpr,  # = EXACT_N (4096), constexpr → tl.static_range unrolls
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
+    GROUP_M: tl.constexpr,
 ):
     # 1D grid with GROUP_M pid swizzle for L2 cache locality
     pid = tl.program_id(0)
-    group_width  = GROUP_M * NUM_PID_N
-    group_id     = pid // group_width
-    first_pid_m  = group_id * GROUP_M
+    group_width = GROUP_M * NUM_PID_N
+    group_id = pid // group_width
+    first_pid_m = group_id * GROUP_M
     group_size_m = tl.minimum(NUM_PID_M - first_pid_m, GROUP_M)
     pid_in_group = pid % group_width
-    pid_m        = first_pid_m + (pid_in_group % group_size_m)
-    pid_n        = pid_in_group // group_size_m
+    pid_m = first_pid_m + (pid_in_group % group_size_m)
+    pid_n = pid_in_group // group_size_m
 
     offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -97,17 +103,24 @@ def _matmul_kernel_exact(
         b_ptrs += BLOCK_K * stride_bk
 
     c_ptrs = c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn
-    tl.store(c_ptrs, acc)   # output is FP32 (acc already FP32)
+    tl.store(c_ptrs, acc)  # output is FP32 (acc already FP32)
 
 
 # ── Generic (masked) kernel for other shapes ─────────────────────────────────
 @triton.jit
 def _matmul_kernel_generic(
-    a_ptr, b_ptr, c_ptr,
-    m, n, k,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_cm, stride_cn,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    m,
+    n,
+    k,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_cm,
+    stride_cn,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -143,6 +156,7 @@ def _matmul_kernel_generic(
 
 # ── Host helpers ──────────────────────────────────────────────────────────────
 
+
 def _require_supported_runtime(tensor: torch.Tensor) -> None:
     if tensor.is_cuda:
         return
@@ -151,15 +165,15 @@ def _require_supported_runtime(tensor: torch.Tensor) -> None:
     if os.environ.get("TRITON_INTERPRET") == "1":
         return
     raise RuntimeError(
-        "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1."
-    )
+        "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1.")
 
 
 def _validate_inputs(a: torch.Tensor, b: torch.Tensor):
     if a.ndim != 2 or b.ndim != 2:
         raise ValueError("ModelNew expects two 2D tensors.")
     if a.shape[1] != b.shape[0]:
-        raise ValueError(f"Incompatible shapes: {tuple(a.shape)} @ {tuple(b.shape)}")
+        raise ValueError(
+            f"Incompatible shapes: {tuple(a.shape)} @ {tuple(b.shape)}")
     if a.shape[0] != a.shape[1] or b.shape[0] != b.shape[1]:
         raise ValueError("This operator is defined for square matrix inputs.")
     if a.device != b.device:
@@ -182,22 +196,27 @@ def _triton_square_matmul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 
     if m == EXACT_N and n == EXACT_N and k == EXACT_N:
         # ── Fast path: benchmark shape 4096×4096 ──────────────────────────────
-        num_pid_m = EXACT_N // EXACT_BM    # 32
-        num_pid_n = EXACT_N // EXACT_BN    # 32
+        num_pid_m = EXACT_N // EXACT_BM  # 32
+        num_pid_n = EXACT_N // EXACT_BN  # 32
         total_programs = num_pid_m * num_pid_n  # 1024
-        grid = (total_programs,)
+        grid = (total_programs, )
         _matmul_kernel_exact[grid](
-            a, b, c,
-            a.stride(0), a.stride(1),
-            b.stride(0), b.stride(1),
-            c.stride(0), c.stride(1),
-            NUM_PID_M = num_pid_m,
-            NUM_PID_N = num_pid_n,
-            EXACT_K   = EXACT_N,
-            BLOCK_M   = EXACT_BM,
-            BLOCK_N   = EXACT_BN,
-            BLOCK_K   = EXACT_BK,
-            GROUP_M   = EXACT_GROUP,
+            a,
+            b,
+            c,
+            a.stride(0),
+            a.stride(1),
+            b.stride(0),
+            b.stride(1),
+            c.stride(0),
+            c.stride(1),
+            NUM_PID_M=num_pid_m,
+            NUM_PID_N=num_pid_n,
+            EXACT_K=EXACT_N,
+            BLOCK_M=EXACT_BM,
+            BLOCK_N=EXACT_BN,
+            BLOCK_K=EXACT_BK,
+            GROUP_M=EXACT_GROUP,
         )
     else:
         # ── Generic path: any square matrix ──────────────────────────────────
@@ -206,18 +225,28 @@ def _triton_square_matmul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         BK = 32
         grid = (triton.cdiv(m, BM), triton.cdiv(n, BN))
         _matmul_kernel_generic[grid](
-            a, b, c,
-            m, n, k,
-            a.stride(0), a.stride(1),
-            b.stride(0), b.stride(1),
-            c.stride(0), c.stride(1),
-            BLOCK_M=BM, BLOCK_N=BN, BLOCK_K=BK,
+            a,
+            b,
+            c,
+            m,
+            n,
+            k,
+            a.stride(0),
+            a.stride(1),
+            b.stride(0),
+            b.stride(1),
+            c.stride(0),
+            c.stride(1),
+            BLOCK_M=BM,
+            BLOCK_N=BN,
+            BLOCK_K=BK,
         )
 
     return c.to(dtype=a.dtype)
 
 
 # ── Module interface ──────────────────────────────────────────────────────────
+
 
 class ModelNew(nn.Module):
     """
@@ -249,7 +278,8 @@ N = 4096
 
 
 def get_inputs():
-    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    device = "npu" if hasattr(torch,
+                              "npu") and torch.npu.is_available() else "cpu"
     A = torch.rand(N, N, device=device)
     B = torch.rand(N, N, device=device)
     return [A, B]

@@ -29,21 +29,26 @@ def _hardsigmoid_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self):
         super().__init__()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.device.type != "npu":
-            raise ValueError(f"ModelNew expects an Ascend NPU tensor, got device={x.device!s}")
+            raise ValueError(
+                f"ModelNew expects an Ascend NPU tensor, got device={x.device!s}"
+            )
         if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
             raise TypeError(f"Unsupported dtype for ModelNew: {x.dtype}")
 
         x_contig = x.contiguous()
         y = torch.empty_like(x_contig)
         n_elements = x_contig.numel()
-        grid = lambda meta: (
-            triton.cdiv(n_elements, meta["BLOCK_SIZE"] * meta["BLOCKS_PER_PROGRAM"]),
-        )
+
+        def grid(meta):
+            return (triton.cdiv(
+                n_elements, meta["BLOCK_SIZE"] * meta["BLOCKS_PER_PROGRAM"]), )
+
         _hardsigmoid_kernel[grid](
             x_contig,
             y,

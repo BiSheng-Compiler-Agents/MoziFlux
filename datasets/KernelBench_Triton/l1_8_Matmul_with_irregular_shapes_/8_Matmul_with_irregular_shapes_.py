@@ -50,6 +50,7 @@ def _matmul_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self):
         super().__init__()
 
@@ -65,7 +66,8 @@ class ModelNew(nn.Module):
         if a.dtype != b.dtype:
             raise TypeError("ModelNew requires matching input dtypes")
         if a.dtype not in (torch.float16, torch.bfloat16):
-            raise TypeError("ModelNew supports float16 and bfloat16 inputs only")
+            raise TypeError(
+                "ModelNew supports float16 and bfloat16 inputs only")
 
         a_contig = a.contiguous()
         b_contig = b.contiguous()
@@ -98,13 +100,18 @@ class ModelNew(nn.Module):
             num_stages=4,
         )
         return c
+
+
 M = 8205
 K = 2949
 N = 5921
+
 
 def get_inputs():
     A = torch.rand(M, K)
     B = torch.rand(K, N)
     return [A, B]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

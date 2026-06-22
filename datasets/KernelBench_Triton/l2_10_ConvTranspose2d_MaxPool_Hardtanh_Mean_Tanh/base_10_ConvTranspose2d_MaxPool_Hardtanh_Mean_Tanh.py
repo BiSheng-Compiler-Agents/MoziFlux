@@ -6,17 +6,23 @@ import triton.language as tl
 
 @triton.jit
 def _fused_maxpool2x2_hardtanh_mean_tanh(
-    x_ptr,                # ptr to input [B, C, H, W]
-    out_ptr,              # ptr to output [B, C, 1, 1]
-    C, H, W,              # tensor sizes
-    inv_tot,              # precomputed 1.0 / (H_OUT * W_OUT)
-    x_stride_b, x_stride_c, x_stride_h, x_stride_w,   # input strides
-    o_stride_b, o_stride_c,                           # output strides
-    H_OUT: tl.constexpr,  # pooled H = floor(H/2)
-    W_OUT: tl.constexpr,  # pooled W = floor(W/2)
-    BLOCK_W: tl.constexpr, # tile size covering H_OUT*W_OUT (power-of-two)
-    hard_min: tl.constexpr,  # hardtanh lower bound
-    hard_max: tl.constexpr,  # hardtanh upper bound
+        x_ptr,  # ptr to input [B, C, H, W]
+        out_ptr,  # ptr to output [B, C, 1, 1]
+        C,
+        H,
+        W,  # tensor sizes
+        inv_tot,  # precomputed 1.0 / (H_OUT * W_OUT)
+        x_stride_b,
+        x_stride_c,
+        x_stride_h,
+        x_stride_w,  # input strides
+        o_stride_b,
+        o_stride_c,  # output strides
+        H_OUT: tl.constexpr,  # pooled H = floor(H/2)
+        W_OUT: tl.constexpr,  # pooled W = floor(W/2)
+        BLOCK_W: tl.constexpr,  # tile size covering H_OUT*W_OUT (power-of-two)
+        hard_min: tl.constexpr,  # hardtanh lower bound
+        hard_max: tl.constexpr,  # hardtanh upper bound
 ):
     # One program per (b, c)
     pid = tl.program_id(axis=0)
@@ -80,6 +86,7 @@ class ModelNew(nn.Module):
     Model that performs a transposed convolution, followed by max pooling, hardtanh activation, mean operation, and tanh activation.
     Fused Triton kernel is used to compute: maxpool -> hardtanh -> mean (H,W) -> tanh in a single pass.
     """
+
     def __init__(
         self,
         in_channels=32,
@@ -93,8 +100,13 @@ class ModelNew(nn.Module):
         hardtanh_max=1.0,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
-        self.maxpool = nn.MaxPool2d(kernel_size=maxpool_kernel_size, stride=maxpool_stride)
+        self.conv_transpose = nn.ConvTranspose2d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding)
+        self.maxpool = nn.MaxPool2d(kernel_size=maxpool_kernel_size,
+                                    stride=maxpool_stride)
         self.hardtanh = nn.Hardtanh(min_val=hardtanh_min, max_val=hardtanh_max)
 
     def forward(self, x):
@@ -107,7 +119,9 @@ class ModelNew(nn.Module):
         W_OUT = W // 2
         TOT = H_OUT * W_OUT
         if TOT == 0:
-            raise ValueError("ModelNew requires pooled spatial dimensions to stay non-zero.")
+            raise ValueError(
+                "ModelNew requires pooled spatial dimensions to stay non-zero."
+            )
 
         out = torch.empty((B, C, 1, 1), device=x.device, dtype=x.dtype)
 
@@ -118,23 +132,35 @@ class ModelNew(nn.Module):
             return 1 if v <= 1 else 1 << (v - 1).bit_length()
 
         BLOCK_W = next_pow2(TOT)
-        grid = (B * C,)
+        grid = (B * C, )
         inv_tot = 1.0 / float(TOT)
         _fused_maxpool2x2_hardtanh_mean_tanh[grid](
-            x, out,
-            C, H, W,
+            x,
+            out,
+            C,
+            H,
+            W,
             inv_tot,
-            xb, xc, xh, xw,
-            ob, oc,
-            H_OUT=H_OUT, W_OUT=W_OUT, BLOCK_W=BLOCK_W,
-            hard_min=float(self.hardtanh.min_val), hard_max=float(self.hardtanh.max_val),
+            xb,
+            xc,
+            xh,
+            xw,
+            ob,
+            oc,
+            H_OUT=H_OUT,
+            W_OUT=W_OUT,
+            BLOCK_W=BLOCK_W,
+            hard_min=float(self.hardtanh.min_val),
+            hard_max=float(self.hardtanh.max_val),
         )
         return out
+
+
 batch_size = 128
-in_channels  = 64  
-out_channels = 64  
-height = width = 256  
-kernel_size  = 3
+in_channels = 64
+out_channels = 64
+height = width = 256
+kernel_size = 3
 stride = 1
 padding = 1
 maxpool_kernel_size = 2
@@ -142,12 +168,20 @@ maxpool_stride = 2
 hardtanh_min = -1
 hardtanh_max = 1
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, maxpool_kernel_size, maxpool_stride, hardtanh_min, hardtanh_max]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding,
+        maxpool_kernel_size, maxpool_stride, hardtanh_min, hardtanh_max
+    ]
+
 
 _model_cache = {}
+
 
 def run_fused_kernel(x):
     global _model_cache

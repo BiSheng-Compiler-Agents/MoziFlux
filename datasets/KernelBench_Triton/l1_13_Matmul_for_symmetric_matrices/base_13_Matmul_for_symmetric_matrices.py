@@ -5,7 +5,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 SPECIALIZED_N = 4096
 SPECIALIZED_BLOCK_M = 128
 SPECIALIZED_BLOCK_N = 128
@@ -118,17 +117,20 @@ def _require_supported_runtime(tensor: torch.Tensor) -> None:
     if os.environ.get("TRITON_INTERPRET") == "1":
         return
     raise RuntimeError(
-        "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1."
-    )
+        "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1.")
 
 
-def _validate_inputs(a: torch.Tensor, b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def _validate_inputs(a: torch.Tensor,
+                     b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     if a.ndim != 2 or b.ndim != 2:
         raise ValueError("ModelNew expects two 2D tensors.")
     if a.shape[0] != a.shape[1] or b.shape[0] != b.shape[1]:
-        raise ValueError("This operator expects square symmetric-matrix inputs.")
+        raise ValueError(
+            "This operator expects square symmetric-matrix inputs.")
     if a.shape[1] != b.shape[0]:
-        raise ValueError(f"Incompatible shapes for matmul: {tuple(a.shape)} and {tuple(b.shape)}.")
+        raise ValueError(
+            f"Incompatible shapes for matmul: {tuple(a.shape)} and {tuple(b.shape)}."
+        )
     if a.device != b.device:
         raise ValueError("Inputs must be on the same device.")
     if a.dtype != b.dtype:
@@ -168,9 +170,13 @@ def _run_generic_path(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return c.to(dtype=a.dtype)
 
 
-def _run_specialized_4096_fp32(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    c = torch.empty((SPECIALIZED_N, SPECIALIZED_N), device=a.device, dtype=torch.float32)
-    grid = ((SPECIALIZED_N // SPECIALIZED_BLOCK_M) * (SPECIALIZED_N // SPECIALIZED_BLOCK_N),)
+def _run_specialized_4096_fp32(a: torch.Tensor,
+                               b: torch.Tensor) -> torch.Tensor:
+    c = torch.empty((SPECIALIZED_N, SPECIALIZED_N),
+                    device=a.device,
+                    dtype=torch.float32)
+    grid = ((SPECIALIZED_N // SPECIALIZED_BLOCK_M) *
+            (SPECIALIZED_N // SPECIALIZED_BLOCK_N), )
     _specialized_symmetric_matmul_kernel_4096[grid](
         a,
         b,
@@ -192,11 +198,8 @@ def _run_specialized_4096_fp32(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor
 
 def _triton_symmetric_matmul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     a, b = _validate_inputs(a, b)
-    if (
-        a.dtype == torch.float32
-        and a.shape == (SPECIALIZED_N, SPECIALIZED_N)
-        and b.shape == (SPECIALIZED_N, SPECIALIZED_N)
-    ):
+    if (a.dtype == torch.float32 and a.shape == (SPECIALIZED_N, SPECIALIZED_N)
+            and b.shape == (SPECIALIZED_N, SPECIALIZED_N)):
         return _run_specialized_4096_fp32(a, b)
     return _run_generic_path(a, b)
 
@@ -217,7 +220,8 @@ N = 4096
 
 
 def get_inputs():
-    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    device = "npu" if hasattr(torch,
+                              "npu") and torch.npu.is_available() else "cpu"
     A = torch.rand(N, N, device=device)
     A = (A + A.T) / 2
     B = torch.rand(N, N, device=device)

@@ -91,13 +91,17 @@ def _fused_scale_softmax(x: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
     if x.device.type != "npu":
         raise RuntimeError("_fused_scale_softmax expects inputs on Ascend NPU")
     if x.ndim != 2:
-        raise RuntimeError(f"_fused_scale_softmax expects a 2D tensor, got shape {tuple(x.shape)}")
+        raise RuntimeError(
+            f"_fused_scale_softmax expects a 2D tensor, got shape {tuple(x.shape)}"
+        )
     if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-        raise RuntimeError(f"Unsupported dtype for _fused_scale_softmax: {x.dtype}")
+        raise RuntimeError(
+            f"Unsupported dtype for _fused_scale_softmax: {x.dtype}")
 
     B, N = x.shape
     if N > 1024:
-        raise RuntimeError(f"_fused_scale_softmax supports up to 1024 columns, got {N}")
+        raise RuntimeError(
+            f"_fused_scale_softmax supports up to 1024 columns, got {N}")
 
     x_contig = x.contiguous()
     out = torch.empty_like(x_contig)
@@ -115,12 +119,16 @@ def _fused_scale_softmax(x: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
 
     # Tile one full row per program
     BLOCK_SIZE = min(1024, _next_power_of_2(N))
-    grid = (B,)
+    grid = (B, )
 
     _scale_softmax_row_kernel[grid](
-        x_contig, s_buf, out,
-        x_contig.stride(0), x_contig.stride(1),
-        out.stride(0), out.stride(1),
+        x_contig,
+        s_buf,
+        out,
+        x_contig.stride(0),
+        x_contig.stride(1),
+        out.stride(0),
+        out.stride(1),
         N,
         HAS_VECTOR_SCALE=has_vector_scale,
         BLOCK_SIZE=BLOCK_SIZE,
@@ -132,22 +140,31 @@ class ModelNew(nn.Module):
     """
     Model that performs a matrix multiplication (Gemm), Batch Normalization, scaling, and Softmax.
     """
+
     def __init__(
-        self,
-        in_features=1024,
-        out_features=512,
-        bn_eps=1e-5,
-        bn_momentum=0.1,
-        scale_shape=(1,),
-        device="npu",
-        dtype=torch.float32,
+            self,
+            in_features=1024,
+            out_features=512,
+            bn_eps=1e-5,
+            bn_momentum=0.1,
+            scale_shape=(1, ),
+            device="npu",
+            dtype=torch.float32,
     ):
         super(ModelNew, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.gemm = nn.Linear(in_features, out_features, device=device, dtype=dtype)
-        self.bn = nn.BatchNorm1d(out_features, eps=bn_eps, momentum=bn_momentum, device=device, dtype=dtype)
-        self.scale = nn.Parameter(torch.ones(scale_shape, device=device, dtype=dtype))
+        self.gemm = nn.Linear(in_features,
+                              out_features,
+                              device=device,
+                              dtype=dtype)
+        self.bn = nn.BatchNorm1d(out_features,
+                                 eps=bn_eps,
+                                 momentum=bn_momentum,
+                                 device=device,
+                                 dtype=dtype)
+        self.scale = nn.Parameter(
+            torch.ones(scale_shape, device=device, dtype=dtype))
 
     def forward(self, x):
         """
@@ -163,7 +180,8 @@ class ModelNew(nn.Module):
                 f"ModelNew expects shape [batch, {self.in_features}], got {tuple(x.shape)}"
             )
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
 
         param = next(self.parameters())
         if param.device != x.device or param.dtype != x.dtype:
@@ -172,14 +190,19 @@ class ModelNew(nn.Module):
         x = self.gemm(x.contiguous())
         x = self.bn(x)
         return _fused_scale_softmax(x, self.scale)
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
 bn_eps = 1e-5
 bn_momentum = 0.1
-scale_shape = (1,)
+scale_shape = (1, )
+
 
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features, bn_eps, bn_momentum, scale_shape]

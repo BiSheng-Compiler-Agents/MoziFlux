@@ -9,20 +9,116 @@ import torch_npu  # noqa: F401
 @triton.autotune(
     configs=[
         # Balanced tiles
-        triton.Config({"BLOCK_M": 96,  "BLOCK_N": 128, "BLOCK_K": 64, "GROUP_M": 2},  num_warps=4,  num_stages=4),
-        triton.Config({"BLOCK_M": 96,  "BLOCK_N": 128, "BLOCK_K": 128, "GROUP_M": 2},  num_warps=4,  num_stages=4),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64, "GROUP_M": 2},  num_warps=8,  num_stages=5),
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 128, "BLOCK_K": 64, "GROUP_M": 2},  num_warps=4,  num_stages=4),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64,  "BLOCK_K": 64, "GROUP_M": 2},  num_warps=4,  num_stages=4),
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 64,  "BLOCK_K": 32, "GROUP_M": 2},  num_warps=4,  num_stages=2),
+        triton.Config(
+            {
+                "BLOCK_M": 96,
+                "BLOCK_N": 128,
+                "BLOCK_K": 64,
+                "GROUP_M": 2
+            },
+            num_warps=4,
+            num_stages=4),
+        triton.Config(
+            {
+                "BLOCK_M": 96,
+                "BLOCK_N": 128,
+                "BLOCK_K": 128,
+                "GROUP_M": 2
+            },
+            num_warps=4,
+            num_stages=4),
+        triton.Config(
+            {
+                "BLOCK_M": 128,
+                "BLOCK_N": 128,
+                "BLOCK_K": 64,
+                "GROUP_M": 2
+            },
+            num_warps=8,
+            num_stages=5),
+        triton.Config(
+            {
+                "BLOCK_M": 64,
+                "BLOCK_N": 128,
+                "BLOCK_K": 64,
+                "GROUP_M": 2
+            },
+            num_warps=4,
+            num_stages=4),
+        triton.Config(
+            {
+                "BLOCK_M": 128,
+                "BLOCK_N": 64,
+                "BLOCK_K": 64,
+                "GROUP_M": 2
+            },
+            num_warps=4,
+            num_stages=4),
+        triton.Config(
+            {
+                "BLOCK_M": 64,
+                "BLOCK_N": 64,
+                "BLOCK_K": 32,
+                "GROUP_M": 2
+            },
+            num_warps=4,
+            num_stages=2),
         # Wider N or M
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 32, "GROUP_M": 2},  num_warps=8,  num_stages=4),
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 32, "GROUP_M": 2},  num_warps=8,  num_stages=4),
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 256, "BLOCK_K": 64, "GROUP_M": 2},  num_warps=8,  num_stages=4),
+        triton.Config(
+            {
+                "BLOCK_M": 128,
+                "BLOCK_N": 256,
+                "BLOCK_K": 32,
+                "GROUP_M": 2
+            },
+            num_warps=8,
+            num_stages=4),
+        triton.Config(
+            {
+                "BLOCK_M": 256,
+                "BLOCK_N": 128,
+                "BLOCK_K": 32,
+                "GROUP_M": 2
+            },
+            num_warps=8,
+            num_stages=4),
+        triton.Config(
+            {
+                "BLOCK_M": 64,
+                "BLOCK_N": 256,
+                "BLOCK_K": 64,
+                "GROUP_M": 2
+            },
+            num_warps=8,
+            num_stages=4),
         # Deeper K
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 128, "GROUP_M": 2}, num_warps=8,  num_stages=4),
-        triton.Config({"BLOCK_M": 64,  "BLOCK_N": 128, "BLOCK_K": 128, "GROUP_M": 2}, num_warps=4,  num_stages=4),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64,  "BLOCK_K": 128, "GROUP_M": 2}, num_warps=4,  num_stages=4),
+        triton.Config(
+            {
+                "BLOCK_M": 128,
+                "BLOCK_N": 128,
+                "BLOCK_K": 128,
+                "GROUP_M": 2
+            },
+            num_warps=8,
+            num_stages=4),
+        triton.Config(
+            {
+                "BLOCK_M": 64,
+                "BLOCK_N": 128,
+                "BLOCK_K": 128,
+                "GROUP_M": 2
+            },
+            num_warps=4,
+            num_stages=4),
+        triton.Config(
+            {
+                "BLOCK_M": 128,
+                "BLOCK_N": 64,
+                "BLOCK_K": 128,
+                "GROUP_M": 2
+            },
+            num_warps=4,
+            num_stages=4),
     ],
     key=["M", "N", "K"],
 )
@@ -31,11 +127,19 @@ def _matmul_AT_B_kernel(
     A_ptr,  # A: (K, M)
     B_ptr,  # B: (K, N)
     C_ptr,  # C: (M, N)
-    M, N, K,
-    stride_a_k, stride_a_m,
-    stride_b_k, stride_b_n,
-    stride_c_m, stride_c_n,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr, GROUP_M: tl.constexpr,
+    M,
+    N,
+    K,
+    stride_a_k,
+    stride_a_m,
+    stride_b_k,
+    stride_b_n,
+    stride_c_m,
+    stride_c_n,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
+    GROUP_M: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
     num_pid_m = tl.cdiv(M, BLOCK_M)
@@ -50,7 +154,7 @@ def _matmul_AT_B_kernel(
     # Offsets for this tile
     offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)  # along M (rows of C)
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)  # along N (cols of C)
-    offs_k = tl.arange(0, BLOCK_K)                    # along K (reduction)
+    offs_k = tl.arange(0, BLOCK_K)  # along K (reduction)
 
     # Provide compiler hints for vectorization/tiling
     tl.multiple_of(offs_m, BLOCK_M)
@@ -66,15 +170,19 @@ def _matmul_AT_B_kernel(
         k_idx = k0 + offs_k  # [BK]
 
         # Load A tile from (K, M) as [BK, BM], then transpose to [BM, BK]
-        a_ptrs = A_ptr + (k_idx[:, None] * stride_a_k + offs_m[None, :] * stride_a_m)
+        a_ptrs = A_ptr + (k_idx[:, None] * stride_a_k +
+                          offs_m[None, :] * stride_a_m)
         a_mask = (k_idx[:, None] < K) & (offs_m[None, :] < M)
         a = tl.load(a_ptrs, mask=a_mask, other=0.0, cache_modifier=".cg")
-        a = tl.trans(a).to(tl.float32)  # shape [BM, BK] with A[k, m] laid out as (m, k)
+        a = tl.trans(a).to(
+            tl.float32)  # shape [BM, BK] with A[k, m] laid out as (m, k)
 
         # Load B tile from (K, N) as [BK, BN]
-        b_ptrs = B_ptr + (k_idx[:, None] * stride_b_k + offs_n[None, :] * stride_b_n)
+        b_ptrs = B_ptr + (k_idx[:, None] * stride_b_k +
+                          offs_n[None, :] * stride_b_n)
         b_mask = (k_idx[:, None] < K) & (offs_n[None, :] < N)
-        b = tl.load(b_ptrs, mask=b_mask, other=0.0, cache_modifier=".cg").to(tl.float32)  # shape [BK, BN]
+        b = tl.load(b_ptrs, mask=b_mask, other=0.0,
+                    cache_modifier=".cg").to(tl.float32)  # shape [BK, BN]
 
         # Accumulate: C[m, n] += sum_k A[k, m] * B[k, n]
         acc += tl.dot(a, b)
@@ -82,7 +190,8 @@ def _matmul_AT_B_kernel(
         k0 += BLOCK_K
 
     # Write back C tile
-    c_ptrs = C_ptr + (offs_m[:, None] * stride_c_m + offs_n[None, :] * stride_c_n)
+    c_ptrs = C_ptr + (offs_m[:, None] * stride_c_m +
+                      offs_n[None, :] * stride_c_n)
     c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
     tl.store(c_ptrs, acc, mask=c_mask)
 
@@ -95,6 +204,7 @@ class ModelNew(nn.Module):
       - B has shape (K, N)
       - Output C has shape (M, N)
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -117,26 +227,39 @@ class ModelNew(nn.Module):
         # Strides (in elements)
         stride_a_k, stride_a_m = Ac.stride()  # A: (K, M)
         stride_b_k, stride_b_n = Bc.stride()  # B: (K, N)
-        stride_c_m, stride_c_n = C.stride()   # C: (M, N)
+        stride_c_m, stride_c_n = C.stride()  # C: (M, N)
 
         def grid(meta):
-            return (triton.cdiv(M, meta["BLOCK_M"]) * triton.cdiv(N, meta["BLOCK_N"]),)
+            return (triton.cdiv(M, meta["BLOCK_M"]) *
+                    triton.cdiv(N, meta["BLOCK_N"]), )
 
         _matmul_AT_B_kernel[grid](
-            Ac, Bc, C,
-            M, N, K,
-            stride_a_k, stride_a_m,
-            stride_b_k, stride_b_n,
-            stride_c_m, stride_c_n,
+            Ac,
+            Bc,
+            C,
+            M,
+            N,
+            K,
+            stride_a_k,
+            stride_a_m,
+            stride_b_k,
+            stride_b_n,
+            stride_c_m,
+            stride_c_n,
         )
         return C
+
+
 M = 1024 * 2
 K = 4096 * 2
 N = 2048 * 2
+
 
 def get_inputs():
     A = torch.rand(K, M)
     B = torch.rand(K, N)
     return [A, B]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

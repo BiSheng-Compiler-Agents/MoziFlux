@@ -85,6 +85,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs L2 normalization.
     """
+
     def __init__(self):
         """
         Initializes the L2Norm layer.
@@ -105,11 +106,13 @@ class ModelNew(nn.Module):
             torch.Tensor: Output tensor with L2 normalization applied, same shape as input.
         """
         if not getattr(x, "is_npu", False):
-            raise RuntimeError("ModelNew expects an input tensor on Ascend NPU")
+            raise RuntimeError(
+                "ModelNew expects an input tensor on Ascend NPU")
         if x.dim() != 2:
             raise ValueError("ModelNew expects a 2D input tensor")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
 
         x_c = x.contiguous()
         B, D = x_c.shape
@@ -119,23 +122,32 @@ class ModelNew(nn.Module):
         stride_ym, stride_yn = y.stride()
 
         BLOCK_N, num_warps = _select_block_and_warps(D)
-        grid = (B,)
+        grid = (B, )
 
         _l2norm_rowwise_kernel[grid](
-            x_c, y,
-            B, D,
-            stride_xm, stride_xn,
-            stride_ym, stride_yn,
+            x_c,
+            y,
+            B,
+            D,
+            stride_xm,
+            stride_xn,
+            stride_ym,
+            stride_yn,
             BLOCK_N=BLOCK_N,
             num_warps=num_warps,
             num_stages=4,
         )
         return y
+
+
 batch_size = 32768
 dim = 65535
+
 
 def get_inputs():
     x = torch.rand(batch_size, dim)
     return [x]
+
+
 def get_init_inputs():
     return []

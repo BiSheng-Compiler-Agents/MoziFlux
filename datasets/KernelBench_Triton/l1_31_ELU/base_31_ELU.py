@@ -26,6 +26,7 @@ def _elu_kernel(x_ptr, y_ptr, N, alpha, NUM_BLOCKS, BLOCK_SIZE: tl.constexpr):
 
 
 class ModelNew(nn.Module):
+
     def __init__(self, alpha: float = 1.0):
         super(ModelNew, self).__init__()
         self.alpha = float(alpha)
@@ -34,7 +35,8 @@ class ModelNew(nn.Module):
         if x.device.type != "npu":
             raise ValueError("ModelNew expects an Ascend NPU tensor input")
         if x.requires_grad:
-            raise ValueError("ModelNew does not support autograd-enabled inputs")
+            raise ValueError(
+                "ModelNew does not support autograd-enabled inputs")
         if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
             raise TypeError(
                 "ModelNew supports only float16, bfloat16, and float32 tensors"
@@ -63,7 +65,7 @@ class ModelNew(nn.Module):
         num_blocks = min(total_tiles, 5120)
 
         def grid(meta):
-            return (num_blocks,)
+            return (num_blocks, )
 
         _elu_kernel[grid](
             x_contig.view(-1),

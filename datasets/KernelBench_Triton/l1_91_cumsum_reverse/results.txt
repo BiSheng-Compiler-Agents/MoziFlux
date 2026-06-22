@@ -1,0 +1,28 @@
+TEST baseline1 tiny PASS
+TEST baseline2 tiny SKIP provider_exception_MLIRCompilationError
+TEST optimized tiny PASS
+TEST baseline1 mask_odd PASS
+TEST baseline2 mask_odd SKIP provider_exception_MLIRCompilationError
+TEST optimized mask_odd PASS
+TEST baseline1 medium PASS
+TEST baseline2 medium SKIP provider_exception_MLIRCompilationError
+TEST optimized medium PASS
+TEST baseline1 target PASS
+TEST baseline2 target PASS
+TEST optimized target PASS
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l1_91_cumsum_reverse_1782370082/91_cumsum_reverse.py:84: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y2 = torch.empty_like(x2)
+INFO bench baseline2 tiny inf MLIRCompilationError
+INFO bench baseline2 mask_odd inf MLIRCompilationError
+INFO bench baseline2 medium inf MLIRCompilationError
+cumsum_reverse_latency:
+      label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      tiny       0.007558          0.028085               inf          0.007549
+1  mask_odd       0.015563          0.188891               inf          0.015555
+2    medium       0.142640          2.160154               inf          0.142689
+3    target     127.577202       3377.401123        283.104736        127.609329
+
+/home/s00929845/kernel_verify/l1_91_cumsum_reverse_1782370082/91_cumsum_reverse.py:84: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y2 = torch.empty_like(x2)

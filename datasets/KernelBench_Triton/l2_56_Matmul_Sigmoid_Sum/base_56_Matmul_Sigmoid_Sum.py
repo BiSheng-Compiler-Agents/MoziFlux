@@ -11,12 +11,12 @@ def _require_npu_tensor(name: str, tensor: torch.Tensor) -> None:
 
 @triton.jit
 def _fused_linear_sigmoid_sum_kernel(
-    x_ptr,         # float* [B, I]
-    w_ptr,         # float* [H, I]
-    b_ptr,         # float* [H]
-    out_ptr,       # float* [B]
+    x_ptr,  # float* [B, I]
+    w_ptr,  # float* [H, I]
+    b_ptr,  # float* [H]
+    out_ptr,  # float* [B]
     B: tl.constexpr,
-    I: tl.constexpr,
+    I: tl.constexpr,  # noqa: E741
     H: tl.constexpr,
     stride_xb,
     stride_xi,
@@ -38,8 +38,8 @@ def _fused_linear_sigmoid_sum_kernel(
         h0_mask = h0_offsets < H
         h1_mask = h1_offsets < H
 
-        z0 = tl.zeros((BLOCK_H,), dtype=tl.float32)
-        z1 = tl.zeros((BLOCK_H,), dtype=tl.float32)
+        z0 = tl.zeros((BLOCK_H, ), dtype=tl.float32)
+        z1 = tl.zeros((BLOCK_H, ), dtype=tl.float32)
 
         k_start = 0
         while k_start < I:
@@ -49,18 +49,26 @@ def _fused_linear_sigmoid_sum_kernel(
             x_ptrs = x_ptr + pid_b * stride_xb + k_idx * stride_xi
             x_vals = tl.load(x_ptrs, mask=k_mask, other=0.0).to(tl.float32)
 
-            w0_ptrs = w_ptr + (h0_offsets[:, None] * stride_wh + k_idx[None, :] * stride_wi)
-            w1_ptrs = w_ptr + (h1_offsets[:, None] * stride_wh + k_idx[None, :] * stride_wi)
-            w0_tile = tl.load(w0_ptrs, mask=h0_mask[:, None] & k_mask[None, :], other=0.0).to(tl.float32)
-            w1_tile = tl.load(w1_ptrs, mask=h1_mask[:, None] & k_mask[None, :], other=0.0).to(tl.float32)
+            w0_ptrs = w_ptr + (h0_offsets[:, None] * stride_wh +
+                               k_idx[None, :] * stride_wi)
+            w1_ptrs = w_ptr + (h1_offsets[:, None] * stride_wh +
+                               k_idx[None, :] * stride_wi)
+            w0_tile = tl.load(w0_ptrs,
+                              mask=h0_mask[:, None] & k_mask[None, :],
+                              other=0.0).to(tl.float32)
+            w1_tile = tl.load(w1_ptrs,
+                              mask=h1_mask[:, None] & k_mask[None, :],
+                              other=0.0).to(tl.float32)
 
             z0 += tl.sum(w0_tile * x_vals[None, :], axis=1)
             z1 += tl.sum(w1_tile * x_vals[None, :], axis=1)
 
             k_start += BLOCK_K
 
-        b0 = tl.load(b_ptr + h0_offsets * stride_bo, mask=h0_mask, other=0.0).to(tl.float32)
-        b1 = tl.load(b_ptr + h1_offsets * stride_bo, mask=h1_mask, other=0.0).to(tl.float32)
+        b0 = tl.load(b_ptr + h0_offsets * stride_bo, mask=h0_mask,
+                     other=0.0).to(tl.float32)
+        b1 = tl.load(b_ptr + h1_offsets * stride_bo, mask=h1_mask,
+                     other=0.0).to(tl.float32)
         z0 = z0 + b0
         z1 = z1 + b1
 
@@ -75,6 +83,7 @@ def _fused_linear_sigmoid_sum_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self, input_size, hidden_size):
         super(ModelNew, self).__init__()
         self.linear = nn.Linear(input_size, hidden_size)
@@ -83,7 +92,8 @@ class ModelNew(nn.Module):
         return matmul_sigmoid_sum(x, self.linear.weight, self.linear.bias)
 
 
-def matmul_sigmoid_sum(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
+def matmul_sigmoid_sum(x: torch.Tensor, weight: torch.Tensor,
+                       bias: torch.Tensor) -> torch.Tensor:
     _require_npu_tensor("x", x)
     _require_npu_tensor("weight", weight)
     _require_npu_tensor("bias", bias)
@@ -94,17 +104,21 @@ def matmul_sigmoid_sum(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
     if bias.dim() != 1:
         raise ValueError(f"bias must be 1D, got shape {tuple(bias.shape)}")
 
-    B, I = x.shape
+    B, In = x.shape
     H, weight_k = weight.shape
-    if weight_k != I:
-        raise ValueError(f"weight second dimension must match x second dimension, got {weight_k} and {I}")
+    if weight_k != In:
+        raise ValueError(
+            f"weight second dimension must match x second dimension, got {weight_k} and {In}"
+        )
     if bias.shape[0] != H:
-        raise ValueError(f"bias length must match weight first dimension, got {bias.shape[0]} and {H}")
+        raise ValueError(
+            f"bias length must match weight first dimension, got {bias.shape[0]} and {H}"
+        )
 
     x_in = x.contiguous()
     weight_in = weight.contiguous()
     bias_in = bias.contiguous()
-    out = torch.zeros((B,), device=x_in.device, dtype=torch.float32)
+    out = torch.zeros((B, ), device=x_in.device, dtype=torch.float32)
 
     stride_xb, stride_xi = x_in.stride()
     stride_wh, stride_wi = weight_in.stride()
@@ -113,7 +127,7 @@ def matmul_sigmoid_sum(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
 
     block_h = 64
     block_k = 128
-    grid = (B,)
+    grid = (B, )
 
     _fused_linear_sigmoid_sum_kernel[grid](
         x_in,
@@ -121,7 +135,7 @@ def matmul_sigmoid_sum(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
         bias_in,
         out,
         B,
-        I,
+        In,
         H,
         stride_xb,
         stride_xi,

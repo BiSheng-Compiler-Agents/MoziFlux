@@ -1,0 +1,28 @@
+TEST baseline1 dim0_path PASS
+TEST baseline2 dim0_path PASS
+TEST optimized dim0_path PASS
+TEST baseline1 dim1_path PASS
+TEST baseline2 dim1_path PASS
+TEST optimized dim1_path PASS
+TEST baseline1 dim2_path PASS
+TEST baseline2 dim2_path PASS
+TEST optimized dim2_path PASS
+TEST baseline1 neg_dim1 PASS
+TEST baseline2 neg_dim1 PASS
+TEST optimized neg_dim1 PASS
+TEST baseline1 small_dim1 PASS
+TEST baseline2 small_dim1 PASS
+TEST optimized small_dim1 PASS
+TEST baseline1 medium_dim1 PASS
+TEST baseline2 medium_dim1 PASS
+TEST optimized medium_dim1 PASS
+TEST baseline1 target_original PASS
+TEST baseline2 target_original PASS
+TEST optimized target_original PASS
+UNIT_TEST PASS
+
+max_reduction_dim_benchmark:
+             label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0       small_dim1       0.006834          0.026733          0.037537          0.014283
+1      medium_dim1       0.106707          0.280932          0.250504          0.165970
+2  target_original       5.453156         24.488056         17.077112         13.200398

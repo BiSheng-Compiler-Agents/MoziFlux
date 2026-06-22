@@ -4,7 +4,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 1024
 DEFAULT_INPUT_SIZE = 8192
 DEFAULT_HIDDEN_SIZE = 8192
@@ -32,10 +31,14 @@ def _sigmoid_scale_residual_kernel(
     mask = offsets < n_elements
 
     if USE_ALIGNMENT_HINTS:
-        offsets = tl.max_contiguous(tl.multiple_of(offsets, BLOCK_SIZE), BLOCK_SIZE)
+        offsets = tl.max_contiguous(tl.multiple_of(offsets, BLOCK_SIZE),
+                                    BLOCK_SIZE)
 
     if USE_STREAMING_LOAD:
-        x = tl.load(x_ptr + offsets, mask=mask, other=0.0, cache_modifier=".cg")
+        x = tl.load(x_ptr + offsets,
+                    mask=mask,
+                    other=0.0,
+                    cache_modifier=".cg")
     else:
         x = tl.load(x_ptr + offsets, mask=mask, other=0.0)
 
@@ -52,12 +55,17 @@ def _sigmoid_scale_residual_kernel(
         y_store = y
 
     if USE_EVICT_STORE:
-        tl.store(out_ptr + offsets, y_store, mask=mask, eviction_policy="evict_first")
+        tl.store(out_ptr + offsets,
+                 y_store,
+                 mask=mask,
+                 eviction_policy="evict_first")
     else:
         tl.store(out_ptr + offsets, y_store, mask=mask)
 
 
-def _resolve_launch_config(n_elements: int, dtype: torch.dtype) -> tuple[int, int, int, bool, bool, bool, bool]:
+def _resolve_launch_config(
+        n_elements: int,
+        dtype: torch.dtype) -> tuple[int, int, int, bool, bool, bool, bool]:
     if dtype == torch.float16:
         if n_elements >= (1 << 18):
             return 4096, 4, 1, True, True, False, False
@@ -74,6 +82,7 @@ class ModelNew(nn.Module):
     """
     Model implementing the pattern "Gemm_Sigmoid_Scaling_ResidualAdd".
     """
+
     def __init__(
         self,
         input_size: int = DEFAULT_INPUT_SIZE,
@@ -97,13 +106,18 @@ class ModelNew(nn.Module):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
         if x.dtype not in (torch.float16, torch.float32):
-            raise RuntimeError("ModelNew supports only float16 and float32 inputs")
+            raise RuntimeError(
+                "ModelNew supports only float16 and float32 inputs")
         if not _is_npu_tensor(self.gemm.weight):
-            raise RuntimeError("ModelNew weights must be placed on Ascend NPU before execution")
+            raise RuntimeError(
+                "ModelNew weights must be placed on Ascend NPU before execution"
+            )
         if self.gemm.bias is not None and not _is_npu_tensor(self.gemm.bias):
-            raise RuntimeError("ModelNew bias must be placed on Ascend NPU before execution")
+            raise RuntimeError(
+                "ModelNew bias must be placed on Ascend NPU before execution")
 
         x = self.gemm(x)
         x = x.contiguous()
@@ -120,7 +134,9 @@ class ModelNew(nn.Module):
             use_evict_store,
         ) = _resolve_launch_config(n_elements, x.dtype)
 
-        grid = lambda META: (triton.cdiv(n_elements, META["BLOCK_SIZE"]),)
+        def grid(META):
+            return (triton.cdiv(n_elements, META["BLOCK_SIZE"]), )
+
         _sigmoid_scale_residual_kernel[grid](
             x,
             y,
@@ -148,12 +164,17 @@ def run_operator(x: torch.Tensor) -> torch.Tensor:
         model.eval()
         _MODEL_CACHE[key] = model
     return model(x)
+
+
 batch_size = 1024
 input_size = 8192
 hidden_size = 8192
 scaling_factor = 2.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, input_size, device='npu')]
+
+
 def get_init_inputs():
     return [input_size, hidden_size, scaling_factor]

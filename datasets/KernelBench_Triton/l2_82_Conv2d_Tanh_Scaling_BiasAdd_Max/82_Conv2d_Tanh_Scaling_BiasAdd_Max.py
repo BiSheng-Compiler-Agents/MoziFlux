@@ -89,13 +89,16 @@ class ModelNew(nn.Module):
     A model that performs a convolution, applies tanh, scaling, adds a bias term, and then max-pools.
     Fused Triton kernel computes tanh + scale + bias + max-pooling on CUDA for speed.
     """
-    def __init__(self, in_channels, out_channels, kernel_size, scaling_factor, bias_shape, pool_kernel_size):
+
+    def __init__(self, in_channels, out_channels, kernel_size, scaling_factor,
+                 bias_shape, pool_kernel_size):
         super(ModelNew, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
         self.scaling_factor = float(scaling_factor)
         self.bias = nn.Parameter(torch.randn(bias_shape))
         self.max_pool = nn.MaxPool2d(pool_kernel_size)
-        self._pool_k = pool_kernel_size if isinstance(pool_kernel_size, int) else pool_kernel_size[0]
+        self._pool_k = pool_kernel_size if isinstance(
+            pool_kernel_size, int) else pool_kernel_size[0]
 
     def forward(self, x):
         # Convolution
@@ -121,14 +124,27 @@ class ModelNew(nn.Module):
             # Use square tiles to minimize masked compute on small pooled maps
             BLOCK_H = 16
             BLOCK_W = 16
-            grid = (B * C, triton.cdiv(HPO, BLOCK_H), triton.cdiv(WPO, BLOCK_W))
+            grid = (B * C, triton.cdiv(HPO,
+                                       BLOCK_H), triton.cdiv(WPO, BLOCK_W))
 
             _fused_tanh_scale_bias_maxpool2d[grid](
-                x, bias_flat, y,
-                B, C, H, W,
-                HPO, WPO,
-                sb, sc, sh, sw,
-                ob, oc, oh, ow,
+                x,
+                bias_flat,
+                y,
+                B,
+                C,
+                H,
+                W,
+                HPO,
+                WPO,
+                sb,
+                sc,
+                sh,
+                sw,
+                ob,
+                oc,
+                oh,
+                ow,
                 self.scaling_factor,
                 POOL_K=K,
                 BLOCK_H=BLOCK_H,
@@ -144,6 +160,8 @@ class ModelNew(nn.Module):
             x = x + self.bias
             x = self.max_pool(x)
             return x
+
+
 batch_size = 128
 in_channels = 8
 out_channels = 64
@@ -153,7 +171,13 @@ scaling_factor = 2.0
 bias_shape = (out_channels, 1, 1)
 pool_kernel_size = 4
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, scaling_factor, bias_shape, pool_kernel_size]
+    return [
+        in_channels, out_channels, kernel_size, scaling_factor, bias_shape,
+        pool_kernel_size
+    ]

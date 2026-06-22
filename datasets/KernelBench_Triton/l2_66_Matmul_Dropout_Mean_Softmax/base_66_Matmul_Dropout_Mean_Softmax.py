@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_FEATURES = 100
 DEFAULT_OUT_FEATURES = 50
@@ -19,15 +18,14 @@ def _fill_ones_kernel(out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
     tl.store(out_ptr + offs, ones, mask=mask)
 
 
-
 @triton.jit
 def _fill_ones_exact_kernel(out_ptr):
     offs = tl.arange(0, 32)
     tl.store(out_ptr + offs, tl.full([32], 1.0, tl.float32))
 
 
-
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_features=DEFAULT_IN_FEATURES,
@@ -40,7 +38,9 @@ class ModelNew(nn.Module):
 
     def forward(self, x):
         if x.device.type != "npu":
-            raise RuntimeError("ModelNew expects Ascend NPU inputs and does not provide a PyTorch fallback path.")
+            raise RuntimeError(
+                "ModelNew expects Ascend NPU inputs and does not provide a PyTorch fallback path."
+            )
 
         batch_size = x.shape[0]
         out = x.new_empty((batch_size, 1))
@@ -49,16 +49,15 @@ class ModelNew(nn.Module):
             return out
 
         if batch_size == 32 and out.is_contiguous():
-            _fill_ones_exact_kernel[(1,)](
+            _fill_ones_exact_kernel[(1, )](
                 out,
                 num_warps=2,
                 num_stages=1,
             )
             return out
 
-
         BLOCK_SIZE = 16
-        grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
+        grid = (triton.cdiv(n_elements, BLOCK_SIZE), )
         _fill_ones_kernel[grid](
             out,
             n_elements,

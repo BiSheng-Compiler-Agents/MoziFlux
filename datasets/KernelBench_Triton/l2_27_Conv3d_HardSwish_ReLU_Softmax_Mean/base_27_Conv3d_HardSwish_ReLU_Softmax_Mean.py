@@ -12,13 +12,15 @@ TUNE_NUM_STAGES = 2
 
 @triton.jit
 def _fused_hswish_relu_softmax_mean_kernel(
-    x_ptr,             # *float or *half, shape [N, C, S] (S = D*H*W), contiguous N,C,S layout
-    out_ptr,           # *float or *half, shape [N, C]
-    N, C, S,           # int32
-    stride_n,          # int32, elements between successive n
-    stride_c,          # int32, elements between successive c
-    stride_out_n,      # int32, elements between successive n in out
-    inv_S,             # float32, 1.0 / S
+    x_ptr,  # *float or *half, shape [N, C, S] (S = D*H*W), contiguous N,C,S layout
+    out_ptr,  # *float or *half, shape [N, C]
+    N,
+    C,
+    S,  # int32
+    stride_n,  # int32, elements between successive n
+    stride_c,  # int32, elements between successive c
+    stride_out_n,  # int32, elements between successive n in out
+    inv_S,  # float32, 1.0 / S
     BLOCK_C: tl.constexpr,
     BLOCK_S: tl.constexpr,
 ):
@@ -32,7 +34,7 @@ def _fused_hswish_relu_softmax_mean_kernel(
     c_base = base_n + c_idx[:, None] * stride_c
 
     # Accumulator over spatial positions for each channel
-    acc = tl.zeros((BLOCK_C,), dtype=tl.float32)
+    acc = tl.zeros((BLOCK_C, ), dtype=tl.float32)
 
     inv6 = 1.0 / 6.0
     s_start = 0
@@ -54,10 +56,10 @@ def _fused_hswish_relu_softmax_mean_kernel(
         y_masked = tl.where(mask, y, -float("inf"))
 
         # Softmax across channels (axis=0) per spatial column
-        m = tl.max(y_masked, axis=0)                           # [BLOCK_S]
-        expv = tl.exp(y_masked - m[None, :])                   # [BLOCK_C, BLOCK_S]
-        sumexp = tl.sum(expv, axis=0)                          # [BLOCK_S]
-        p = expv / sumexp[None, :]                             # [BLOCK_C, BLOCK_S]
+        m = tl.max(y_masked, axis=0)  # [BLOCK_S]
+        expv = tl.exp(y_masked - m[None, :])  # [BLOCK_C, BLOCK_S]
+        sumexp = tl.sum(expv, axis=0)  # [BLOCK_S]
+        p = expv / sumexp[None, :]  # [BLOCK_C, BLOCK_S]
         p = tl.where(mask, p, 0.0)
 
         # Accumulate probabilities across spatial positions for each channel
@@ -79,7 +81,8 @@ def _next_power_of_2(x: int) -> int:
 def fused_hswish_relu_softmax_mean(x: torch.Tensor) -> torch.Tensor:
     # x: [N, C, D, H, W]
     if x.device.type != "npu":
-        raise RuntimeError("fused_hswish_relu_softmax_mean expects an Ascend NPU tensor")
+        raise RuntimeError(
+            "fused_hswish_relu_softmax_mean expects an Ascend NPU tensor")
     N, C, D, H, W = x.shape
     S = D * H * W
     x = x.contiguous()
@@ -99,13 +102,18 @@ def fused_hswish_relu_softmax_mean(x: torch.Tensor) -> torch.Tensor:
 
     BLOCK_S = TUNE_BLOCK_S
 
-    grid = (N,)
+    grid = (N, )
     inv_S = float(1.0 / S)
 
     _fused_hswish_relu_softmax_mean_kernel[grid](
-        x, out,
-        N, C, S,
-        stride_n, stride_c, stride_out_n,
+        x,
+        out,
+        N,
+        C,
+        S,
+        stride_n,
+        stride_c,
+        stride_out_n,
         inv_S,
         BLOCK_C=TARGET_CHANNELS,
         BLOCK_S=BLOCK_S,
@@ -120,9 +128,13 @@ class ModelNew(nn.Module):
     Simple model that performs a 3D convolution, applies HardSwish, ReLU, Softmax, and then calculates the mean.
     Fused with a Triton kernel for post-convolution operations.
     """
+
     def __init__(self, in_channels, out_channels, kernel_size, bias=True):
         super(ModelNew, self).__init__()
-        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size, bias=bias)
+        self.conv = nn.Conv3d(in_channels,
+                              out_channels,
+                              kernel_size,
+                              bias=bias)
 
     def forward(self, x):
         # Conv stays in PyTorch (highly optimized), post-ops fused in Triton
@@ -145,13 +157,15 @@ def _set_deterministic_seed(seed: int) -> None:
 
 def conv3d_hardswish_relu_softmax_mean(x: torch.Tensor) -> torch.Tensor:
     if x.device.type != "npu":
-        raise RuntimeError("conv3d_hardswish_relu_softmax_mean expects an Ascend NPU tensor")
+        raise RuntimeError(
+            "conv3d_hardswish_relu_softmax_mean expects an Ascend NPU tensor")
 
     key = (str(x.device), x.dtype)
     model = _MODEL_CACHE.get(key)
     if model is None:
         _set_deterministic_seed(0)
-        model = ModelNew(*get_init_inputs()).eval().to(device=x.device, dtype=x.dtype)
+        model = ModelNew(*get_init_inputs()).eval().to(device=x.device,
+                                                       dtype=x.dtype)
         _MODEL_CACHE[key] = model
 
     with torch.no_grad():
@@ -160,6 +174,7 @@ def conv3d_hardswish_relu_softmax_mean(x: torch.Tensor) -> torch.Tensor:
 
 def get_inputs():
     return [torch.randn(batch_size, in_channels, depth, height, width)]
+
 
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size]

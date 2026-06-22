@@ -41,9 +41,8 @@ def _fused_post_ops_bias_kernel(
         x = (x * (1.0 + erf_term)) * 0.5
         x = 1.0 / (1.0 + tl.exp(-x))
         c_idx = ((offs // stride_c) % C).to(tl.int32)
-        bias = tl.load(
-            bias_ptr + c_idx * bias_stride_c, mask=mask, other=0.0
-        ).to(tl.float32)
+        bias = tl.load(bias_ptr + c_idx * bias_stride_c, mask=mask,
+                       other=0.0).to(tl.float32)
         tl.store(y_ptr + offs, x + bias, mask=mask)
         current += program_count
 
@@ -80,6 +79,7 @@ def _fused_post_ops_bias_slice_grid_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -110,7 +110,8 @@ class ModelNew(nn.Module):
         if stride_c % block == 0:
             channel_slices = n_elements // stride_c
             tiles_per_channel = stride_c // block
-            slice_programs = min(channel_slices, max(1, 65535 // tiles_per_channel))
+            slice_programs = min(channel_slices,
+                                 max(1, 65535 // tiles_per_channel))
             grid = (slice_programs, tiles_per_channel)
             _fused_post_ops_bias_slice_grid_kernel[grid](
                 y,
@@ -126,7 +127,7 @@ class ModelNew(nn.Module):
             )
         else:
             total_programs = triton.cdiv(n_elements, block)
-            grid = (min(total_programs, 65535),)
+            grid = (min(total_programs, 65535), )
             _fused_post_ops_bias_kernel[grid](
                 y,
                 bias,
@@ -148,7 +149,8 @@ def _set_deterministic_seed(seed: int) -> None:
         torch.npu.manual_seed_all(seed)
 
 
-def conv3d_relu_leakyrelu_gelu_sigmoid_biasadd(x: torch.Tensor) -> torch.Tensor:
+def conv3d_relu_leakyrelu_gelu_sigmoid_biasadd(
+        x: torch.Tensor) -> torch.Tensor:
     if x.device.type != "npu":
         raise RuntimeError(
             "conv3d_relu_leakyrelu_gelu_sigmoid_biasadd expects an Ascend NPU tensor"
@@ -157,7 +159,8 @@ def conv3d_relu_leakyrelu_gelu_sigmoid_biasadd(x: torch.Tensor) -> torch.Tensor:
     model = _MODEL_CACHE.get(key)
     if model is None:
         _set_deterministic_seed(0)
-        model = ModelNew(*get_init_inputs()).eval().to(device=x.device, dtype=x.dtype)
+        model = ModelNew(*get_init_inputs()).eval().to(device=x.device,
+                                                       dtype=x.dtype)
         _MODEL_CACHE[key] = model
     with torch.no_grad():
         return model(x)

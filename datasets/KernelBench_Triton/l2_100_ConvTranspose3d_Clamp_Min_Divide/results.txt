@@ -1,0 +1,21 @@
+=== Unit Test: ConvTranspose3d_Clamp_Min_Divide ===
+TEST baseline1 small_B1_D4 PASS max_diff=0.000000e+00
+TEST baseline2 small_B1_D4 SKIP baseline2_preskipped
+TEST optimized small_B1_D4 PASS max_diff=0.000000e+00
+TEST baseline1 medium_B2_D8 PASS max_diff=0.000000e+00
+TEST baseline2 medium_B2_D8 SKIP baseline2_preskipped
+TEST optimized medium_B2_D8 PASS max_diff=0.000000e+00
+TEST baseline1 large_B4_D12 PASS max_diff=0.000000e+00
+TEST baseline2 large_B4_D12 SKIP baseline2_preskipped
+TEST optimized large_B4_D12 PASS max_diff=0.000000e+00
+TEST baseline1 target_B16_D24 SKIP grid_guard
+TEST baseline2 target_B16_D24 SKIP baseline2_preskipped
+TEST optimized target_B16_D24 PASS max_diff=0.000000e+00
+UNIT_TEST PASS
+
+convtranspose3d_clamp_divide_perf:
+            label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0     small_B1_D4       0.012527          0.010799               inf          0.011085
+1    medium_B2_D8       0.036932          0.033107               inf          0.033013
+2    large_B4_D12       0.138519          0.131433               inf          0.131202
+3  target_B16_D24      20.476652               inf               inf         16.333014

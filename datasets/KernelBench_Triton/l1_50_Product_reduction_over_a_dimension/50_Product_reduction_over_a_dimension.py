@@ -10,10 +10,16 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 @triton.jit
 def _prod_dim1_kernel(
-    x_ptr, y_ptr,
-    B, M, K,
-    stride_b, stride_m, stride_k,
-    stride_ob, stride_ok,
+    x_ptr,
+    y_ptr,
+    B,
+    M,
+    K,
+    stride_b,
+    stride_m,
+    stride_k,
+    stride_ob,
+    stride_ok,
     BLOCK_K: tl.constexpr,
     UNROLL: tl.constexpr,
 ):
@@ -43,14 +49,38 @@ def _prod_dim1_kernel(
     # Main unrolled loop: process UNROLL rows per iteration when available
     while m + (UNROLL - 1) < M:
         # Load UNROLL rows; with mask on K only (rows guaranteed in-bounds here)
-        v0 = tl.load(ptr + (m + 0) * stride_m, mask=mask_k, other=1.0, cache_modifier=".cg").to(tl.float32)
-        v1 = tl.load(ptr + (m + 1) * stride_m, mask=mask_k, other=1.0, cache_modifier=".cg").to(tl.float32)
-        v2 = tl.load(ptr + (m + 2) * stride_m, mask=mask_k, other=1.0, cache_modifier=".cg").to(tl.float32)
-        v3 = tl.load(ptr + (m + 3) * stride_m, mask=mask_k, other=1.0, cache_modifier=".cg").to(tl.float32)
-        v4 = tl.load(ptr + (m + 4) * stride_m, mask=mask_k, other=1.0, cache_modifier=".cg").to(tl.float32)
-        v5 = tl.load(ptr + (m + 5) * stride_m, mask=mask_k, other=1.0, cache_modifier=".cg").to(tl.float32)
-        v6 = tl.load(ptr + (m + 6) * stride_m, mask=mask_k, other=1.0, cache_modifier=".cg").to(tl.float32)
-        v7 = tl.load(ptr + (m + 7) * stride_m, mask=mask_k, other=1.0, cache_modifier=".cg").to(tl.float32)
+        v0 = tl.load(ptr + (m + 0) * stride_m,
+                     mask=mask_k,
+                     other=1.0,
+                     cache_modifier=".cg").to(tl.float32)
+        v1 = tl.load(ptr + (m + 1) * stride_m,
+                     mask=mask_k,
+                     other=1.0,
+                     cache_modifier=".cg").to(tl.float32)
+        v2 = tl.load(ptr + (m + 2) * stride_m,
+                     mask=mask_k,
+                     other=1.0,
+                     cache_modifier=".cg").to(tl.float32)
+        v3 = tl.load(ptr + (m + 3) * stride_m,
+                     mask=mask_k,
+                     other=1.0,
+                     cache_modifier=".cg").to(tl.float32)
+        v4 = tl.load(ptr + (m + 4) * stride_m,
+                     mask=mask_k,
+                     other=1.0,
+                     cache_modifier=".cg").to(tl.float32)
+        v5 = tl.load(ptr + (m + 5) * stride_m,
+                     mask=mask_k,
+                     other=1.0,
+                     cache_modifier=".cg").to(tl.float32)
+        v6 = tl.load(ptr + (m + 6) * stride_m,
+                     mask=mask_k,
+                     other=1.0,
+                     cache_modifier=".cg").to(tl.float32)
+        v7 = tl.load(ptr + (m + 7) * stride_m,
+                     mask=mask_k,
+                     other=1.0,
+                     cache_modifier=".cg").to(tl.float32)
 
         # Pairwise products to improve ILP
         acc0 *= (v0 * v1)
@@ -62,7 +92,10 @@ def _prod_dim1_kernel(
 
     # Tail handling
     while m < M:
-        v = tl.load(ptr + m * stride_m, mask=mask_k, other=1.0, cache_modifier=".cg").to(tl.float32)
+        v = tl.load(ptr + m * stride_m,
+                    mask=mask_k,
+                    other=1.0,
+                    cache_modifier=".cg").to(tl.float32)
         acc0 *= v
         m += 1
 
@@ -78,6 +111,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs product reduction over a dimension.
     """
+
     def __init__(self, dim: int):
         super(ModelNew, self).__init__()
         self.dim = dim
@@ -86,11 +120,15 @@ class ModelNew(nn.Module):
         return product_reduction_over_a_dimension(x, self.dim)
 
 
-def product_reduction_over_a_dimension(x: torch.Tensor, dim: int) -> torch.Tensor:
+def product_reduction_over_a_dimension(x: torch.Tensor,
+                                       dim: int) -> torch.Tensor:
     if not _is_npu_tensor(x):
-        raise RuntimeError("product_reduction_over_a_dimension expects an Ascend NPU tensor")
+        raise RuntimeError(
+            "product_reduction_over_a_dimension expects an Ascend NPU tensor")
     if x.dim() != 3:
-        raise ValueError(f"product_reduction_over_a_dimension expects a 3D tensor, got {x.dim()}D")
+        raise ValueError(
+            f"product_reduction_over_a_dimension expects a 3D tensor, got {x.dim()}D"
+        )
     if x.dtype not in (torch.float16, torch.float32, torch.bfloat16):
         raise TypeError(f"unsupported dtype for product reduction: {x.dtype}")
 
@@ -133,10 +171,13 @@ dim1 = 256
 dim2 = 256
 reduction_dim = 1
 
+
 def get_inputs():
-    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    device = "npu" if hasattr(torch,
+                              "npu") and torch.npu.is_available() else "cpu"
     x = torch.randn(batch_size, dim1, dim2, device=device)
     return [x]
+
 
 def get_init_inputs():
     return [reduction_dim]

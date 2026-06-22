@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 BLOCK_N = 512
 NUM_WARPS = 4
 NUM_STAGES = 2
@@ -52,6 +51,7 @@ def _touch_first_elem(y_ptr, M, stride_ym, stride_yn):
 
 
 class ModelNew(nn.Module):
+
     def __init__(self, dim=1):
         super(ModelNew, self).__init__()
         self.dim = dim
@@ -66,7 +66,8 @@ class ModelNew(nn.Module):
         if dim < 0:
             dim += x.ndim
         if dim < 0 or dim >= x.ndim:
-            raise IndexError(f"dim={self.dim} is out of range for ndim={x.ndim}")
+            raise IndexError(
+                f"dim={self.dim} is out of range for ndim={x.ndim}")
 
         if x.numel() == 0:
             return torch.empty_like(x)
@@ -77,7 +78,7 @@ class ModelNew(nn.Module):
         flat = moved.reshape(-1, scan_len)
         out_flat = torch.empty_like(flat)
 
-        grid = (flat.shape[0],)
+        grid = (flat.shape[0], )
         _cumprod_rowwise_kernel_vectorized[grid](
             flat,
             out_flat,
@@ -100,7 +101,7 @@ class ModelNew(nn.Module):
 
 
 batch_size = 32768
-input_shape = (32768,)
+input_shape = (32768, )
 dim = 1
 
 

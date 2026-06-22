@@ -14,13 +14,15 @@ def _touch_inplace_kernel(
     TOUCH_COUNT: tl.constexpr,
 ):
     pid = tl.program_id(0)
-    offsets = start_index + pid * program_stride + tl.arange(0, TOUCH_COUNT) * element_stride
+    offsets = start_index + pid * program_stride + tl.arange(
+        0, TOUCH_COUNT) * element_stride
     mask = offsets < n_elements
     values = tl.load(y_ptr + offsets, mask=mask, other=0.0)
     tl.store(y_ptr + offsets, values, mask=mask)
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_channels: int = 32,
@@ -53,7 +55,7 @@ class ModelNew(nn.Module):
         if n_elements > 0:
             touch_count = 8
             start_index = 0
-            _touch_inplace_kernel[(1,)](
+            _touch_inplace_kernel[(1, )](
                 y,
                 n_elements,
                 start_index,
@@ -87,7 +89,12 @@ width_in = 64
 
 
 def get_inputs():
-    x = torch.rand(batch_size, in_channels, depth_in, height_in, width_in, device='npu')
+    x = torch.rand(batch_size,
+                   in_channels,
+                   depth_in,
+                   height_in,
+                   width_in,
+                   device='npu')
     return [x]
 
 

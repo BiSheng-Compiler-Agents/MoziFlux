@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 DEFAULT_ADD_VALUE = 0.5
 DEFAULT_MULTIPLY_VALUE = 2.0
 DEFAULT_IN_CHANNELS = 64
@@ -31,8 +30,10 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 )
 @triton.jit
 def _fused_min_gelu_mul_kernel(
-    x_ptr, y_ptr,
-    add_value, multiply_value,
+    x_ptr,
+    y_ptr,
+    add_value,
+    multiply_value,
     n_elements,
     BLOCK_SIZE: tl.constexpr,
 ):
@@ -67,6 +68,7 @@ class ModelNew(nn.Module):
     """
     Model that performs a transposed convolution, adds a value, takes the minimum, applies GELU, and multiplies by a value.
     """
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -77,7 +79,10 @@ class ModelNew(nn.Module):
         multiply_value: float = DEFAULT_MULTIPLY_VALUE,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride=stride).to("npu")
+        self.conv_transpose = nn.ConvTranspose2d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride).to("npu")
         self.add_value = float(add_value)
         self.multiply_value = float(multiply_value)
 
@@ -96,9 +101,15 @@ class ModelNew(nn.Module):
         x = x.contiguous()
         y = torch.empty_like(x)
         n_elements = x.numel()
-        grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-        _fused_min_gelu_mul_kernel[grid](x, y, self.add_value, self.multiply_value, n_elements)
+
+        def grid(meta):
+            return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]), )
+
+        _fused_min_gelu_mul_kernel[grid](x, y, self.add_value,
+                                         self.multiply_value, n_elements)
         return y
+
+
 batch_size = 128
 in_channels = 64
 out_channels = 128
@@ -108,7 +119,13 @@ stride = 2
 add_value = 0.5
 multiply_value = 2.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, add_value, multiply_value]
+    return [
+        in_channels, out_channels, kernel_size, stride, add_value,
+        multiply_value
+    ]

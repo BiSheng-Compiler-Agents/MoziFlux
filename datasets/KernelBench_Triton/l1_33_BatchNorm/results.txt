@@ -1,0 +1,28 @@
+TEST baseline1 train small_8x64x32x32 PASS max_err=1.43051e-06
+TEST baseline2 train small_8x64x32x32 PASS max_err=1.43051e-06
+TEST optimized train small_8x64x32x32 PASS max_err=9.53674e-07
+TEST baseline1 train medium_16x64x128x128 SKIP coreDim_guard
+TEST baseline2 train medium_16x64x128x128 SKIP coreDim_guard
+TEST optimized train medium_16x64x128x128 PASS max_err=8.34465e-07
+TEST baseline1 train target_64x64x512x512 SKIP coreDim_guard
+TEST baseline2 train target_64x64x512x512 SKIP coreDim_guard
+TEST optimized train target_64x64x512x512 PASS max_err=1.43051e-06
+TEST baseline1 eval eval_dispatch_4x64x17x19 PASS max_err=0
+TEST baseline2 eval eval_dispatch_4x64x17x19 PASS max_err=0
+TEST optimized eval eval_dispatch_4x64x17x19 PASS max_err=0
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l1_33_BatchNorm_1782329988/33_BatchNorm.py:267: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x_fp32)
+INFO BENCH baseline1 medium_16x64x128x128 inf coreDim_guard
+INFO BENCH baseline2 medium_16x64x128x128 inf coreDim_guard
+INFO BENCH baseline1 target_64x64x512x512 inf coreDim_guard
+INFO BENCH baseline2 target_64x64x512x512 inf coreDim_guard
+batchnorm2d-performance:
+                  label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small_8x64x32x32       0.009189          0.731568           0.27507          0.038568
+1  medium_16x64x128x128       0.162908               inf               inf          0.474645
+2  target_64x64x512x512       8.659007               inf               inf         15.909076
+
+/home/s00929845/kernel_verify/l1_33_BatchNorm_1782329988/33_BatchNorm.py:267: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x_fp32)

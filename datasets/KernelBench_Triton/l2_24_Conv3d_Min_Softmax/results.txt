@@ -1,0 +1,17 @@
+TEST baseline1 small PASS max_abs=2.235174e-08
+TEST baseline2 small PASS max_abs=1.490116e-08
+TEST optimized small PASS max_abs=2.235174e-08
+TEST baseline1 medium PASS max_abs=2.980232e-08
+TEST baseline2 medium PASS max_abs=2.235174e-08
+TEST optimized medium PASS max_abs=2.980232e-08
+TEST baseline1 target PASS max_abs=3.725290e-08
+TEST baseline2 target PASS max_abs=2.235174e-08
+TEST optimized target PASS max_abs=0.000000e+00
+TEST optimized fallback_c80 PASS max_abs=0.000000e+00
+UNIT_TEST PASS
+
+conv3d_min_softmax:
+    label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   small       0.100837          0.013226          0.031650          0.013277
+1  medium       0.139859          0.088327          0.164544          0.088387
+2  target       1.547628          1.771558          3.134761          1.439981

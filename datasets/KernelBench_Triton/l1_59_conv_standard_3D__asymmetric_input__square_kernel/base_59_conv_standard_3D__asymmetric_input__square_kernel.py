@@ -21,6 +21,7 @@ def _noop_touch_kernel(x_ptr, n_elements, BLK: tl.constexpr):
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -49,7 +50,7 @@ class ModelNew(nn.Module):
         if y.device.type == "npu" and y.numel() > 0:
             n_elements = y.numel()
             BLK = 1
-            grid = (1,)
+            grid = (1, )
             _noop_touch_kernel[grid](y, n_elements, BLK=BLK)
         return y
 

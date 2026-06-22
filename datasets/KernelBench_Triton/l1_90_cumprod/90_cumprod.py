@@ -90,7 +90,8 @@ class ModelNew(nn.Module):
         if dim < 0:
             dim += x.ndim
         if dim < 0 or dim >= x.ndim:
-            raise IndexError(f"dim={self.dim} is out of range for ndim={x.ndim}")
+            raise IndexError(
+                f"dim={self.dim} is out of range for ndim={x.ndim}")
 
         if x.numel() == 0:
             return torch.empty_like(x)
@@ -101,7 +102,7 @@ class ModelNew(nn.Module):
         flat = moved.reshape(-1, scan_len)
         out_flat = torch.empty_like(flat)
 
-        grid = (flat.shape[0],)
+        grid = (flat.shape[0], )
         _cumprod_rowwise_kernel_vectorized[grid](
             flat,
             out_flat,
@@ -118,11 +119,16 @@ class ModelNew(nn.Module):
         for idx, src in enumerate(perm):
             inv_perm[src] = idx
         return out.permute(inv_perm)
+
+
 batch_size = 32768
-input_shape = (32768,)
+input_shape = (32768, )
 dim = 1
+
 
 def get_inputs():
     return [torch.rand(batch_size, *input_shape)]
+
+
 def get_init_inputs():
     return [dim]

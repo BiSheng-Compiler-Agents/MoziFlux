@@ -9,8 +9,13 @@ def _bn_row_reduce_nhw_store(
     x_ptr,
     partial_sum_ptr,
     partial_sumsq_ptr,
-    N, H, W,
-    stride_n, stride_c, stride_h, stride_w,
+    N,
+    H,
+    W,
+    stride_n,
+    stride_c,
+    stride_h,
+    stride_w,
     NH,  # number of (n,h) rows per channel
     C,
     BLOCK_C: tl.constexpr,
@@ -31,13 +36,17 @@ def _bn_row_reduce_nhw_store(
     for cc in tl.static_range(0, BLOCK_C):
         c = c_block * BLOCK_C + cc
         if c < C:
-            row_base = x_ptr + n[:, None] * stride_n + c * stride_c + h[:, None] * stride_h
-            acc_sum = tl.zeros((BLOCK_NH_ROWS,), dtype=tl.float32)
-            acc_sumsq = tl.zeros((BLOCK_NH_ROWS,), dtype=tl.float32)
+            row_base = x_ptr + n[:,
+                                 None] * stride_n + c * stride_c + h[:,
+                                                                     None] * stride_h
+            acc_sum = tl.zeros((BLOCK_NH_ROWS, ), dtype=tl.float32)
+            acc_sumsq = tl.zeros((BLOCK_NH_ROWS, ), dtype=tl.float32)
             for cw in tl.static_range(0, NUM_W_CHUNKS):
                 w_idx = cw * BLOCK_W + offs_w
                 mask = row_mask[:, None] & (w_idx[None, :] < W)
-                vals = tl.load(row_base + w_idx[None, :] * stride_w, mask=mask, other=0.0)
+                vals = tl.load(row_base + w_idx[None, :] * stride_w,
+                               mask=mask,
+                               other=0.0)
                 acc_sum += tl.sum(vals, axis=1)
                 acc_sumsq += tl.sum(vals * vals, axis=1)
             base_idx = c * NH + nh_rows
@@ -55,13 +64,13 @@ def _bn_finalize_params(
     running_var_ptr,
     weight_ptr,
     bias_ptr,
-    NH,      # number of (n,h) rows per channel
-    M,       # total elements per-channel = N*H*W
-    eps,     # epsilon
+    NH,  # number of (n,h) rows per channel
+    M,  # total elements per-channel = N*H*W
+    eps,  # epsilon
     exp_avg_factor,  # exponential_average_factor
     use_batch_stats,  # 1 if using batch stats, 0 if using running stats
-    do_update,        # 1 to update running stats (training & tracking), else 0
-    affine_flag,      # 1 if affine, else 0
+    do_update,  # 1 to update running stats (training & tracking), else 0
+    affine_flag,  # 1 if affine, else 0
     BLOCK_NH: tl.constexpr,
     NUM_NH_CHUNKS: tl.constexpr,
 ):
@@ -126,9 +135,17 @@ def _bn_apply_nhw(
     y_ptr,
     scale_ptr,
     shift_ptr,
-    N, H, W,
-    stride_nx, stride_cx, stride_hx, stride_wx,
-    stride_ny, stride_cy, stride_hy, stride_wy,
+    N,
+    H,
+    W,
+    stride_nx,
+    stride_cx,
+    stride_hx,
+    stride_wx,
+    stride_ny,
+    stride_cy,
+    stride_hy,
+    stride_wy,
     C,
     BLOCK_C: tl.constexpr,
     BLOCK_NH_ROWS: tl.constexpr,
@@ -148,12 +165,18 @@ def _bn_apply_nhw(
         if c < C:
             scale_c = tl.load(scale_ptr + c)
             shift_c = tl.load(shift_ptr + c)
-            x_row = x_ptr + n[:, None] * stride_nx + c * stride_cx + h[:, None] * stride_hx
-            y_row = y_ptr + n[:, None] * stride_ny + c * stride_cy + h[:, None] * stride_hy
+            x_row = x_ptr + n[:,
+                              None] * stride_nx + c * stride_cx + h[:,
+                                                                    None] * stride_hx
+            y_row = y_ptr + n[:,
+                              None] * stride_ny + c * stride_cy + h[:,
+                                                                    None] * stride_hy
             for cw in tl.static_range(0, NUM_W_CHUNKS):
                 w_idx = cw * BLOCK_W + offs_w
                 mask = row_mask[:, None] & (w_idx[None, :] < W)
-                x = tl.load(x_row + w_idx[None, :] * stride_wx, mask=mask, other=0.0)
+                x = tl.load(x_row + w_idx[None, :] * stride_wx,
+                            mask=mask,
+                            other=0.0)
                 y = x * scale_c + shift_c
                 tl.store(y_row + w_idx[None, :] * stride_wy, y, mask=mask)
 
@@ -162,6 +185,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs Batch Normalization using Triton-optimized kernels.
     """
+
     def __init__(self, num_features: int = 64):
         super(ModelNew, self).__init__()
         self.bn = nn.BatchNorm2d(num_features=num_features)
@@ -188,7 +212,8 @@ class ModelNew(nn.Module):
             if bn.num_batches_tracked is not None:
                 bn.num_batches_tracked.add_(1)
                 if bn.momentum is None:
-                    exponential_average_factor = 1.0 / float(bn.num_batches_tracked.item())
+                    exponential_average_factor = 1.0 / float(
+                        bn.num_batches_tracked.item())
             else:
                 exponential_average_factor = 1.0
 
@@ -215,7 +240,9 @@ class ModelNew(nn.Module):
         shift = torch.empty(C, device=x.device, dtype=torch.float32)
 
         # Running stats pointers (may be dummy if not tracked)
-        if bn.track_running_stats and (bn.running_mean is not None) and (bn.running_var is not None):
+        if bn.track_running_stats and (bn.running_mean
+                                       is not None) and (bn.running_var
+                                                         is not None):
             running_mean = bn.running_mean
             running_var = bn.running_var
         else:
@@ -223,7 +250,8 @@ class ModelNew(nn.Module):
             running_mean = torch.zeros(C, device=x.device, dtype=torch.float32)
             running_var = torch.ones(C, device=x.device, dtype=torch.float32)
 
-        affine_flag = int(bn.affine and (bn.weight is not None) and (bn.bias is not None))
+        affine_flag = int(bn.affine and (bn.weight is not None)
+                          and (bn.bias is not None))
         if affine_flag:
             weight = bn.weight.to(dtype=torch.float32)
             bias = bn.bias.to(dtype=torch.float32)
@@ -234,15 +262,27 @@ class ModelNew(nn.Module):
 
         # If we use batch stats, first compute per-(c, nh) partial reductions without atomics
         if use_batch_stats:
-            partial_sum = torch.empty((C, NH), device=x.device, dtype=torch.float32)
-            partial_sumsq = torch.empty((C, NH), device=x.device, dtype=torch.float32)
-            grid_rows = (triton.cdiv(C, BLOCK_C), triton.cdiv(NH, BLOCK_NH_ROWS))
+            partial_sum = torch.empty((C, NH),
+                                      device=x.device,
+                                      dtype=torch.float32)
+            partial_sumsq = torch.empty((C, NH),
+                                        device=x.device,
+                                        dtype=torch.float32)
+            grid_rows = (triton.cdiv(C,
+                                     BLOCK_C), triton.cdiv(NH, BLOCK_NH_ROWS))
             _bn_row_reduce_nhw_store[grid_rows](
                 x_fp32,
-                partial_sum, partial_sumsq,
-                N, H, W,
-                stride_n, stride_c, stride_h, stride_w,
-                NH, C,
+                partial_sum,
+                partial_sumsq,
+                N,
+                H,
+                W,
+                stride_n,
+                stride_c,
+                stride_h,
+                stride_w,
+                NH,
+                C,
                 BLOCK_C=BLOCK_C,
                 BLOCK_NH_ROWS=BLOCK_NH_ROWS,
                 BLOCK_W=BLOCK_W,
@@ -253,16 +293,27 @@ class ModelNew(nn.Module):
         else:
             # allocate dummy to satisfy kernel signature
             partial_sum = torch.empty(1, device=x.device, dtype=torch.float32)
-            partial_sumsq = torch.empty(1, device=x.device, dtype=torch.float32)
+            partial_sumsq = torch.empty(1,
+                                        device=x.device,
+                                        dtype=torch.float32)
 
         # Finalize params (mean/var/scale/shift), and optionally update running stats
-        _bn_finalize_params[(C,)](
-            partial_sum, partial_sumsq,
-            scale, shift,
-            running_mean, running_var,
-            weight, bias,
-            NH, M, eps, exponential_average_factor,
-            int(use_batch_stats), int(update_stats), affine_flag,
+        _bn_finalize_params[(C, )](
+            partial_sum,
+            partial_sumsq,
+            scale,
+            shift,
+            running_mean,
+            running_var,
+            weight,
+            bias,
+            NH,
+            M,
+            eps,
+            exponential_average_factor,
+            int(use_batch_stats),
+            int(update_stats),
+            affine_flag,
             BLOCK_NH=BLOCK_NH,
             NUM_NH_CHUNKS=NUM_NH_CHUNKS,
             num_warps=4,
@@ -273,11 +324,21 @@ class ModelNew(nn.Module):
         y = torch.empty_like(x_fp32)
         grid_apply = (triton.cdiv(C, BLOCK_C), triton.cdiv(NH, BLOCK_NH_ROWS))
         _bn_apply_nhw[grid_apply](
-            x_fp32, y,
-            scale, shift,
-            N, H, W,
-            stride_n, stride_c, stride_h, stride_w,
-            stride_n, stride_c, stride_h, stride_w,
+            x_fp32,
+            y,
+            scale,
+            shift,
+            N,
+            H,
+            W,
+            stride_n,
+            stride_c,
+            stride_h,
+            stride_w,
+            stride_n,
+            stride_c,
+            stride_h,
+            stride_w,
             C,
             BLOCK_C=BLOCK_C,
             BLOCK_NH_ROWS=BLOCK_NH_ROWS,
@@ -288,13 +349,18 @@ class ModelNew(nn.Module):
         )
 
         return y
+
+
 batch_size = 64
 features = 64
 dim1 = 512
 dim2 = 512
 
+
 def get_inputs():
     x = torch.rand(batch_size, features, dim1, dim2)
     return [x]
+
+
 def get_init_inputs():
     return [features]

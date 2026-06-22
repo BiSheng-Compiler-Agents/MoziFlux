@@ -1,0 +1,21 @@
+TEST baseline1 small_direct PASS max_abs=1.19209e-07
+TEST baseline2 small_direct SKIP readonly_comparison
+TEST optimized small_direct PASS max_abs=0
+TEST baseline1 medium_direct PASS max_abs=1.19209e-07
+TEST baseline2 medium_direct SKIP readonly_comparison
+TEST optimized medium_direct PASS max_abs=0
+TEST baseline1 target_persistent SKIP grid_guard
+TEST baseline2 target_persistent SKIP readonly_comparison
+TEST optimized target_persistent PASS max_abs=0
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l2_26_ConvTranspose3d_Add_HardSwish_1782391736/26_ConvTranspose3d_Add_HardSwish.py:53: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out = torch.empty_like(x_c)
+convtranspose3d_add_hardswish:
+               label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0       small_direct       0.023062          0.014778               inf          0.015268
+1      medium_direct       0.099436          0.086471               inf          0.078851
+2  target_persistent      13.696477               inf               inf          7.543422
+
+/home/s00929845/kernel_verify/l2_26_ConvTranspose3d_Add_HardSwish_1782391736/26_ConvTranspose3d_Add_HardSwish.py:53: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out = torch.empty_like(x_c)

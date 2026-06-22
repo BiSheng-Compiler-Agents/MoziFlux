@@ -57,17 +57,20 @@ def _require_supported_runtime(tensor: torch.Tensor) -> None:
     if os.environ.get("TRITON_INTERPRET") == "1":
         return
     raise RuntimeError(
-        "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1."
-    )
+        "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1.")
 
 
-def _validate_inputs(a: torch.Tensor, b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def _validate_inputs(a: torch.Tensor,
+                     b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     if a.ndim != 2 or b.ndim != 2:
         raise ValueError("ModelNew expects two 2D tensors.")
     if a.shape[0] != a.shape[1] or b.shape[0] != b.shape[1]:
-        raise ValueError("This operator expects square symmetric-matrix inputs.")
+        raise ValueError(
+            "This operator expects square symmetric-matrix inputs.")
     if a.shape[1] != b.shape[0]:
-        raise ValueError(f"Incompatible shapes for matmul: {tuple(a.shape)} and {tuple(b.shape)}.")
+        raise ValueError(
+            f"Incompatible shapes for matmul: {tuple(a.shape)} and {tuple(b.shape)}."
+        )
     if a.device != b.device:
         raise ValueError("Inputs must be on the same device.")
     if a.dtype != b.dtype:
@@ -118,10 +121,14 @@ class ModelNew(nn.Module):
 
     def forward(self, A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
         return _triton_symmetric_matmul(A, B)
+
+
 N = 4096
 
+
 def get_inputs():
-    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    device = "npu" if hasattr(torch,
+                              "npu") and torch.npu.is_available() else "cpu"
     """
     Generates a pair of random symmetric matrices for testing.
 
@@ -133,6 +140,8 @@ def get_inputs():
     B = torch.rand(N, N, device=device)
     B = (B + B.T) / 2  # Ensure symmetry
     return [A, B]
+
+
 def get_init_inputs():
     """
     No specific initialization inputs needed for this model.

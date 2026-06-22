@@ -88,13 +88,17 @@ def _groupnorm_fwd_kernel(
         start += BLOCK_HW
 
 
-def group_norm_triton(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, num_groups: int, eps: float):
+def group_norm_triton(x: torch.Tensor, weight: torch.Tensor,
+                      bias: torch.Tensor, num_groups: int, eps: float):
     if not getattr(x, "is_npu", False):
-        raise RuntimeError("group_norm_triton expects an input tensor on Ascend NPU")
+        raise RuntimeError(
+            "group_norm_triton expects an input tensor on Ascend NPU")
     if x.requires_grad:
-        raise RuntimeError("group_norm_triton does not support autograd-enabled inputs")
+        raise RuntimeError(
+            "group_norm_triton does not support autograd-enabled inputs")
     if x.ndim < 3:
-        raise ValueError("group_norm_triton expects input with shape (N, C, ...)")
+        raise ValueError(
+            "group_norm_triton expects input with shape (N, C, ...)")
 
     # Ensure contiguous layout and flatten spatial dims
     x = x.contiguous()
@@ -117,7 +121,7 @@ def group_norm_triton(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor,
         w = weight.to(device=x.device, dtype=torch.float32)
         b = bias.to(device=x.device, dtype=torch.float32)
 
-    stats_grid = (N * num_groups,)
+    stats_grid = (N * num_groups, )
     _groupnorm_stats_kernel[stats_grid](
         x_flat,
         mean,
@@ -134,7 +138,7 @@ def group_norm_triton(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor,
         num_stages=2,
     )
 
-    apply_grid = (N * C,)
+    apply_grid = (N * C, )
     _groupnorm_fwd_kernel[apply_grid](
         x_flat,
         y_flat,
@@ -159,6 +163,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs Group Normalization.
     """
+
     def __init__(self, num_features: int = 64, num_groups: int = 8):
         """
         Initializes the GroupNorm layer.
@@ -168,7 +173,8 @@ class ModelNew(nn.Module):
             num_groups (int): Number of groups to divide the channels into.
         """
         super(ModelNew, self).__init__()
-        self.gn = nn.GroupNorm(num_groups=num_groups, num_channels=num_features)
+        self.gn = nn.GroupNorm(num_groups=num_groups,
+                               num_channels=num_features)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -181,18 +187,26 @@ class ModelNew(nn.Module):
             torch.Tensor: Output tensor with Group Normalization applied, same shape as input.
         """
         if not getattr(x, "is_npu", False):
-            raise RuntimeError("ModelNew expects an input tensor on Ascend NPU")
+            raise RuntimeError(
+                "ModelNew expects an input tensor on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
-        return group_norm_triton(x, self.gn.weight, self.gn.bias, self.gn.num_groups, self.gn.eps)
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
+        return group_norm_triton(x, self.gn.weight, self.gn.bias,
+                                 self.gn.num_groups, self.gn.eps)
+
+
 batch_size = 112  # scaled up
 features = 64
 num_groups = 8
 dim1 = 512
 dim2 = 512
 
+
 def get_inputs():
     x = torch.rand(batch_size, features, dim1, dim2)
     return [x]
+
+
 def get_init_inputs():
-    return [features, num_groups] # num_features
+    return [features, num_groups]  # num_features

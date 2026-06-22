@@ -1,0 +1,35 @@
+TEST N64 baseline1: PASS max_abs=0
+TEST N64 baseline2: PASS max_abs=0
+TEST N64 optimized: PASS max_abs=2.36943e-38
+TEST N128 baseline1: PASS max_abs=0
+TEST N128 baseline2: PASS max_abs=0
+TEST N128 optimized: PASS max_abs=2.36943e-38
+TEST N256 baseline1: PASS max_abs=0
+TEST N256 baseline2: PASS max_abs=0
+TEST N256 optimized: PASS max_abs=2.36943e-38
+TEST N512 baseline1: PASS max_abs=0
+TEST N512 baseline2: PASS max_abs=0
+TEST N512 optimized: PASS max_abs=0
+TEST N1024 baseline1: PASS max_abs=0
+TEST N1024 baseline2: PASS max_abs=0
+TEST N1024 optimized: PASS max_abs=2.36943e-38
+TEST N2048 baseline1: PASS max_abs=0.00158691
+TEST N2048 baseline2: PASS max_abs=0.00158691
+TEST N2048 optimized: PASS max_abs=0.00158691
+TEST benchmark baseline1: PASS max_abs=0.00549316
+TEST benchmark baseline2: PASS max_abs=0.00549316
+TEST benchmark optimized: PASS max_abs=0.00549316
+TEST N8192 baseline1: PASS max_abs=0.019165
+TEST N8192 baseline2: PASS max_abs=0.019165
+TEST N8192 optimized: PASS max_abs=0.019165
+UNIT_TEST PASS
+upper_tri_matmul_performance:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0        N64       0.004804          0.004538          0.005403          0.003602
+1       N128       0.005853          0.005861          0.007191          0.004706
+2       N256       0.007984          0.008640          0.010077          0.006447
+3       N512       0.020459          0.020680          0.017011          0.015176
+4      N1024       0.110644          0.089413          0.095935          0.086240
+5      N2048       0.788319          0.661379          0.644782          0.644572
+6  benchmark       5.918863          4.575417          4.616685          5.101467
+7      N8192      47.393326         35.738102         35.957050         40.722172

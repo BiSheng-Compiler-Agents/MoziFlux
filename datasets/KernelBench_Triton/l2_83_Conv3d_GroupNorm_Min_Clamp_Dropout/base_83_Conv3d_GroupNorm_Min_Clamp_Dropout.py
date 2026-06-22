@@ -8,7 +8,6 @@ try:
 except ModuleNotFoundError:
     torch_npu = None
 
-
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_CHANNELS = 3
 DEFAULT_OUT_CHANNELS = 16
@@ -104,7 +103,7 @@ class ModelNew(nn.Module):
         if triton.cdiv(y.numel(), total_program_span) > _MAX_1D_GRID:
             blocks_per_program *= 2
             total_program_span = block_size * blocks_per_program
-        grid = (triton.cdiv(y.numel(), total_program_span),)
+        grid = (triton.cdiv(y.numel(), total_program_span), )
         _fill_const_kernel[grid](
             y,
             self.min_value,
@@ -129,8 +128,7 @@ def _set_deterministic_seed(seed: int) -> None:
 def conv3d_groupnorm_min_clamp_dropout(x: torch.Tensor) -> torch.Tensor:
     if not _is_npu_tensor(x):
         raise RuntimeError(
-            "conv3d_groupnorm_min_clamp_dropout expects an Ascend NPU tensor"
-        )
+            "conv3d_groupnorm_min_clamp_dropout expects an Ascend NPU tensor")
 
     key = (str(x.device), x.dtype)
     model = _MODEL_CACHE.get(key)
@@ -141,6 +139,8 @@ def conv3d_groupnorm_min_clamp_dropout(x: torch.Tensor) -> torch.Tensor:
 
     with torch.no_grad():
         return model(x)
+
+
 batch_size = 128
 in_channels = 3
 out_channels = 16
@@ -151,7 +151,13 @@ min_value = 0.0
 max_value = 1.0
 dropout_p = 0.2
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, depth, height, width)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, groups, min_value, max_value, dropout_p]
+    return [
+        in_channels, out_channels, kernel_size, groups, min_value, max_value,
+        dropout_p
+    ]

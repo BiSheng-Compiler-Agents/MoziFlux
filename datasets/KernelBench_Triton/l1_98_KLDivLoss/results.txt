@@ -1,0 +1,23 @@
+TEST baseline1 small_8x256 PASS got=0.0787606 ref=0.0787606
+TEST baseline2 small_8x256 PASS got=0.0787606 ref=0.0787606
+TEST optimized small_8x256 PASS got=0.0787606 ref=0.0787606
+TEST optimized_fallback small_8x256 PASS got=0.0787606 ref=0.0787606
+TEST baseline1 medium_128x4096 PASS got=0.0818398 ref=0.0818398
+TEST baseline2 medium_128x4096 PASS got=0.0818398 ref=0.0818398
+TEST optimized medium_128x4096 PASS got=0.0818398 ref=0.0818398
+TEST optimized_fallback medium_128x4096 PASS got=0.0818398 ref=0.0818398
+TEST baseline1 irregular_17x3000 PASS got=0.0810141 ref=0.0810141
+TEST baseline2 irregular_17x3000 PASS got=0.0810141 ref=0.0810141
+TEST optimized irregular_17x3000 PASS got=0.0810141 ref=0.0810141
+TEST optimized_fallback irregular_17x3000 PASS got=0.0810141 ref=0.0810141
+TEST baseline1 exact_16384x16384 PASS got=0.220738 ref=0.220738
+TEST baseline2 exact_16384x16384 PASS got=0.220738 ref=0.220738
+TEST optimized exact_16384x16384 PASS got=0.220738 ref=0.220738
+UNIT_TEST PASS
+
+kl_div_loss_perf:
+               label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0        small_8x256       0.011939          0.006834          0.006295          0.002825
+1    medium_128x4096       0.021714          0.014414          0.017670          0.010306
+2  irregular_17x3000       0.014882          0.008362          0.012432          0.004144
+3  exact_16384x16384       5.946422          2.145809          1.648389          2.136712

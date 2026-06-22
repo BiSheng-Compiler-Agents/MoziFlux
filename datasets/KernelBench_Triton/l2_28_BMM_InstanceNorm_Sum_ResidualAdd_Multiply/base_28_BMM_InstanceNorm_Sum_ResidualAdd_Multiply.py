@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,18 +20,18 @@ except ImportError:
 )
 @triton.jit
 def _rownorm_addmul_kernel(
-    x_ptr,      # pointer to [B, F] input (after linear)
-    y_ptr,      # pointer to [B, F] input y
-    out_ptr,    # pointer to [B, F] output
-    B,          # number of rows (batch size)
-    F,          # number of features (out_features)
-    stride_x,   # stride between consecutive rows of x in elements
-    stride_y,   # stride between consecutive rows of y in elements
-    stride_out, # stride between consecutive rows of out in elements
-    eps,        # epsilon for numerical stability
-    inv_F,      # 1.0 / F
-    BLOCK_M: tl.constexpr,
-    BLOCK: tl.constexpr,  # block size (next power of 2 >= F)
+        x_ptr,  # pointer to [B, F] input (after linear)
+        y_ptr,  # pointer to [B, F] input y
+        out_ptr,  # pointer to [B, F] output
+        B,  # number of rows (batch size)
+        F,  # number of features (out_features)
+        stride_x,  # stride between consecutive rows of x in elements
+        stride_y,  # stride between consecutive rows of y in elements
+        stride_out,  # stride between consecutive rows of out in elements
+        eps,  # epsilon for numerical stability
+        inv_F,  # 1.0 / F
+        BLOCK_M: tl.constexpr,
+        BLOCK: tl.constexpr,  # block size (next power of 2 >= F)
 ):
     pid = tl.program_id(0)
     rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -95,21 +94,26 @@ def _fused_linear_instance_norm_sum_residual_add_multiply(
     if x.shape[0] != y.shape[0]:
         raise ValueError("x and y must have matching batch dimensions")
     if x.shape[1] != weight.shape[1]:
-        raise ValueError("x and weight must agree on the input feature dimension")
+        raise ValueError(
+            "x and weight must agree on the input feature dimension")
     if y.shape[1] != weight.shape[0]:
-        raise ValueError("y width must match the weight output feature dimension")
+        raise ValueError(
+            "y width must match the weight output feature dimension")
     if x.dtype != y.dtype or x.dtype != weight.dtype:
         raise TypeError("x, y, and weight must use the same dtype")
     if x.device != y.device or x.device != weight.device:
         raise ValueError("x, y, and weight must be on the same device")
     if bias is not None:
         if bias.ndim != 1 or bias.shape[0] != weight.shape[0]:
-            raise ValueError("bias must be a 1D tensor with length equal to weight.shape[0]")
+            raise ValueError(
+                "bias must be a 1D tensor with length equal to weight.shape[0]"
+            )
         if bias.dtype != x.dtype:
             raise TypeError("bias dtype must match the input dtype")
         if bias.device != x.device:
             raise ValueError("bias must be on the same device as x")
-    if not _is_npu_tensor(x) or not _is_npu_tensor(y) or not _is_npu_tensor(weight):
+    if not _is_npu_tensor(x) or not _is_npu_tensor(y) or not _is_npu_tensor(
+            weight):
         raise RuntimeError("The fused operator requires Ascend NPU tensors")
 
     x_c = x.contiguous()
@@ -121,7 +125,10 @@ def _fused_linear_instance_norm_sum_residual_add_multiply(
     batch_size, features = linear_out.shape
     out = torch.empty_like(y_c)
     block = _next_power_of_2(features)
-    grid = lambda META: (triton.cdiv(batch_size, META["BLOCK_M"]),)
+
+    def grid(META):
+        return (triton.cdiv(batch_size, META["BLOCK_M"]), )
+
     _rownorm_addmul_kernel[grid](
         linear_out,
         y_c,
@@ -144,11 +151,14 @@ class ModelNew(nn.Module):
     summation with y, and elementwise multiplication by y. The InstanceNorm2d in the reference normalizes over the
     last dimension (treated as spatial width with C=1), which is equivalent to per-row normalization here.
     """
+
     def __init__(self, in_features, out_features, eps=1e-5, momentum=0.1):
         super(ModelNew, self).__init__()
         self.bmm = nn.Linear(in_features, out_features)
         # Keep for structural parity; not used in the optimized forward
-        self.instance_norm = nn.InstanceNorm2d(out_features, eps=eps, momentum=momentum)
+        self.instance_norm = nn.InstanceNorm2d(out_features,
+                                               eps=eps,
+                                               momentum=momentum)
         self.eps = float(eps)
 
     def forward(self, x, y):
@@ -186,16 +196,19 @@ def _build_cached_model(
     key = (str(device), dtype, in_features, out_features, float(eps))
     model = _MODEL_CACHE.get(key)
     if model is None:
-        model = ModelNew(in_features, out_features, eps=eps).to(device=device, dtype=dtype)
+        model = ModelNew(in_features, out_features, eps=eps).to(device=device,
+                                                                dtype=dtype)
         seed = _seed_for_shape(in_features, out_features)
         generator = torch.Generator(device="cpu").manual_seed(seed)
         with torch.no_grad():
-            weight = torch.randn(
-                (out_features, in_features), generator=generator, dtype=torch.float32
-            ).to(device=device, dtype=dtype)
-            bias = torch.randn((out_features,), generator=generator, dtype=torch.float32).to(
-                device=device, dtype=dtype
-            )
+            weight = torch.randn((out_features, in_features),
+                                 generator=generator,
+                                 dtype=torch.float32).to(device=device,
+                                                         dtype=dtype)
+            bias = torch.randn((out_features, ),
+                               generator=generator,
+                               dtype=torch.float32).to(device=device,
+                                                       dtype=dtype)
             model.bmm.weight.copy_(weight)
             model.bmm.bias.copy_(bias)
         model.eval()
@@ -203,7 +216,9 @@ def _build_cached_model(
     return model
 
 
-def run_operator(x: torch.Tensor, y: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
+def run_operator(x: torch.Tensor,
+                 y: torch.Tensor,
+                 eps: float = 1e-5) -> torch.Tensor:
     if x.ndim != 2 or y.ndim != 2:
         raise ValueError("run_operator expects 2D x and y tensors")
     if x.shape[0] != y.shape[0]:
@@ -215,13 +230,22 @@ def run_operator(x: torch.Tensor, y: torch.Tensor, eps: float = 1e-5) -> torch.T
     if not _is_npu_tensor(x) or not _is_npu_tensor(y):
         raise RuntimeError("run_operator requires Ascend NPU tensors")
 
-    model = _build_cached_model(x.shape[1], y.shape[1], x.device, x.dtype, float(eps))
+    model = _build_cached_model(x.shape[1], y.shape[1], x.device, x.dtype,
+                                float(eps))
     return model(x, y)
+
+
 batch_size = 1024  # Increased batch size
 in_features = 8192  # Increased input features
 out_features = 8192  # Increased output features
 
+
 def get_inputs():
-    return [torch.rand(batch_size, in_features), torch.rand(batch_size, out_features)]
+    return [
+        torch.rand(batch_size, in_features),
+        torch.rand(batch_size, out_features)
+    ]
+
+
 def get_init_inputs():
     return [in_features, out_features]

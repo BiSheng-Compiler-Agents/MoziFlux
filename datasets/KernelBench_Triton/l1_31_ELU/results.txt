@@ -1,0 +1,22 @@
+TEST direct_1M baseline1 PASS
+TEST direct_1M baseline2 PASS
+TEST direct_1M optimized PASS
+TEST direct_irregular baseline1 PASS
+TEST direct_irregular baseline2 PASS
+TEST direct_irregular optimized PASS
+TEST persistent_original baseline1 INFO SKIP coreDim would exceed 65535 for this provider
+TEST persistent_original baseline2 PASS
+TEST persistent_original optimized PASS
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l1_31_ELU_1782328239/31_ELU.py:67: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x_contig)
+INFO bench persistent_original baseline1: SKIP coreDim would exceed 65535 for this provider
+elu-performance:
+                 label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0            direct_1M       0.009581          0.010896          0.011142          0.010920
+1     direct_irregular       0.009582          0.011070          0.011152          0.011122
+2  persistent_original       8.923337               inf          9.190184          9.377321
+
+/home/s00929845/kernel_verify/l1_31_ELU_1782328239/31_ELU.py:67: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x_contig)

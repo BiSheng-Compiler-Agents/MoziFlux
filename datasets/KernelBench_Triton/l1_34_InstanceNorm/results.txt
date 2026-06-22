@@ -1,0 +1,24 @@
+TEST baseline1 eval small_direct_8x64x32x32 PASS max_err=1.66893e-06
+TEST baseline2 eval small_direct_8x64x32x32 PASS max_err=1.66893e-06
+TEST optimized eval small_direct_8x64x32x32 PASS max_err=1.66893e-06
+TEST baseline1 eval medium_direct_16x64x128x128 PASS max_err=2.6226e-06
+TEST baseline2 eval medium_direct_16x64x128x128 PASS max_err=2.6226e-06
+TEST optimized eval medium_direct_16x64x128x128 PASS max_err=1.54972e-06
+TEST baseline1 eval large_direct_32x64x128x128 PASS max_err=2.98023e-06
+TEST baseline2 eval large_direct_32x64x128x128 PASS max_err=2.98023e-06
+TEST optimized eval large_direct_32x64x128x128 PASS max_err=1.66893e-06
+TEST baseline1 eval irregular_direct_4x64x17x19 PASS max_err=1.43051e-06
+TEST baseline2 eval irregular_direct_4x64x17x19 PASS max_err=1.43051e-06
+TEST optimized eval irregular_direct_4x64x17x19 PASS max_err=1.43051e-06
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l1_34_InstanceNorm_1782333184/34_InstanceNorm.py:119: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x)
+instancenorm2d-performance:
+                         label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small_direct_8x64x32x32       0.012076          0.016130          0.021030          0.017078
+1  medium_direct_16x64x128x128       0.153144          0.156396          0.156305          0.158103
+2   large_direct_32x64x128x128       0.302316          0.257118          0.256977          0.272921
+
+/home/s00929845/kernel_verify/l1_34_InstanceNorm_1782333184/34_InstanceNorm.py:119: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x)

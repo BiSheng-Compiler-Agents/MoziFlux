@@ -27,8 +27,8 @@ def _argmin_row_kernel(
     )[None, :]
     row_bases = row_offsets[:, None] * cols
 
-    best_val = tl.full((BLOCK_M,), float("inf"), dtype=tl.float32)
-    best_idx = tl.zeros((BLOCK_M,), dtype=tl.int32)
+    best_val = tl.full((BLOCK_M, ), float("inf"), dtype=tl.float32)
+    best_idx = tl.zeros((BLOCK_M, ), dtype=tl.int32)
 
     k0 = 0
     while k0 < cols:
@@ -44,12 +44,12 @@ def _argmin_row_kernel(
         tile_min = tl.min(values, axis=1)
         equal_mask = (values == tile_min[:, None]) & mask
         invalid_index = tl.full((BLOCK_M, BLOCK_K), cols, dtype=tl.int32)
-        tile_indices = tl.where(equal_mask, current_k.to(tl.int32), invalid_index)
+        tile_indices = tl.where(equal_mask, current_k.to(tl.int32),
+                                invalid_index)
         tile_first_idx = tl.min(tile_indices, axis=1)
 
-        should_update = (tile_min < best_val) | (
-            (tile_min == best_val) & (tile_first_idx < best_idx)
-        )
+        should_update = (tile_min < best_val) | ((tile_min == best_val) &
+                                                 (tile_first_idx < best_idx))
         best_val = tl.where(should_update, tile_min, best_val)
         best_idx = tl.where(should_update, tile_first_idx, best_idx)
         k0 += BLOCK_K
@@ -72,8 +72,8 @@ def _argmin_row_kernel_full_tiles(
     k_offsets = tl.arange(0, BLOCK_K)[None, :]
     row_bases = row_offsets[:, None] * cols
 
-    best_val = tl.full((BLOCK_M,), float("inf"), dtype=tl.float32)
-    best_idx = tl.zeros((BLOCK_M,), dtype=tl.int32)
+    best_val = tl.full((BLOCK_M, ), float("inf"), dtype=tl.float32)
+    best_idx = tl.zeros((BLOCK_M, ), dtype=tl.int32)
     invalid_index = tl.full((BLOCK_M, BLOCK_K), cols, dtype=tl.int32)
     x_ptrs = x_ptr + row_bases + k_offsets
     tile_offsets = k_offsets.to(tl.int32)
@@ -87,12 +87,12 @@ def _argmin_row_kernel_full_tiles(
         ).to(tl.float32)
 
         tile_min = tl.min(values, axis=1)
-        tile_indices = tl.where(values == tile_min[:, None], tile_offsets, invalid_index)
+        tile_indices = tl.where(values == tile_min[:, None], tile_offsets,
+                                invalid_index)
         tile_first_idx = tl.min(tile_indices, axis=1)
 
-        should_update = (tile_min < best_val) | (
-            (tile_min == best_val) & (tile_first_idx < best_idx)
-        )
+        should_update = (tile_min < best_val) | ((tile_min == best_val) &
+                                                 (tile_first_idx < best_idx))
         best_val = tl.where(should_update, tile_min, best_val)
         best_idx = tl.where(should_update, tile_first_idx, best_idx)
         x_ptrs += BLOCK_K
@@ -118,8 +118,8 @@ def _argmin_row_kernel_4096(
     k_offsets = tl.arange(0, BLOCK_K)[None, :]
     row_bases = row_offsets[:, None] * cols
 
-    best_val = tl.full((BLOCK_M,), float("inf"), dtype=tl.float32)
-    best_idx = tl.zeros((BLOCK_M,), dtype=tl.int32)
+    best_val = tl.full((BLOCK_M, ), float("inf"), dtype=tl.float32)
+    best_idx = tl.zeros((BLOCK_M, ), dtype=tl.int32)
     invalid_index = tl.full((BLOCK_M, BLOCK_K), cols, dtype=tl.int32)
 
     for block_id in tl.static_range(BLOCKS_PER_ROW):
@@ -131,12 +131,12 @@ def _argmin_row_kernel_4096(
         ).to(tl.float32)
 
         tile_min = tl.min(values, axis=1)
-        tile_indices = tl.where(values == tile_min[:, None], tile_offsets, invalid_index)
+        tile_indices = tl.where(values == tile_min[:, None], tile_offsets,
+                                invalid_index)
         tile_first_idx = tl.min(tile_indices, axis=1)
 
-        should_update = (tile_min < best_val) | (
-            (tile_min == best_val) & (tile_first_idx < best_idx)
-        )
+        should_update = (tile_min < best_val) | ((tile_min == best_val) &
+                                                 (tile_first_idx < best_idx))
         best_val = tl.where(should_update, tile_min, best_val)
         best_idx = tl.where(should_update, tile_first_idx, best_idx)
 
@@ -159,8 +159,8 @@ def _argmin_row_kernel_4096_fp32(
     k_offsets = tl.arange(0, BLOCK_K)[None, :]
     row_bases = row_offsets[:, None] * ROW_STRIDE
 
-    best_val = tl.full((BLOCK_M,), float("inf"), dtype=tl.float32)
-    best_idx = tl.zeros((BLOCK_M,), dtype=tl.int32)
+    best_val = tl.full((BLOCK_M, ), float("inf"), dtype=tl.float32)
+    best_idx = tl.zeros((BLOCK_M, ), dtype=tl.int32)
     local_offsets = tl.arange(0, BLOCK_K)[None, :].to(tl.int32)
     invalid_local_index = tl.full((BLOCK_M, BLOCK_K), BLOCK_K, dtype=tl.int32)
 
@@ -172,12 +172,12 @@ def _argmin_row_kernel_4096_fp32(
         )
 
         tile_min = tl.min(values, axis=1)
-        tile_indices = tl.where(values == tile_min[:, None], local_offsets, invalid_local_index)
+        tile_indices = tl.where(values == tile_min[:, None], local_offsets,
+                                invalid_local_index)
         tile_first_idx = tl.min(tile_indices, axis=1) + block_id * BLOCK_K
 
-        should_update = (tile_min < best_val) | (
-            (tile_min == best_val) & (tile_first_idx < best_idx)
-        )
+        should_update = (tile_min < best_val) | ((tile_min == best_val) &
+                                                 (tile_first_idx < best_idx))
         best_val = tl.where(should_update, tile_min, best_val)
         best_idx = tl.where(should_update, tile_first_idx, best_idx)
 
@@ -188,9 +188,11 @@ def argmin_over_a_dimension(x: torch.Tensor, dim: int) -> torch.Tensor:
     if not isinstance(x, torch.Tensor):
         raise TypeError("argmin_over_a_dimension expects a torch.Tensor input")
     if not _is_npu_tensor(x):
-        raise RuntimeError("argmin_over_a_dimension expects an Ascend NPU tensor")
+        raise RuntimeError(
+            "argmin_over_a_dimension expects an Ascend NPU tensor")
     if x.dim() == 0:
-        raise ValueError("argmin_over_a_dimension expects a tensor with rank at least 1")
+        raise ValueError(
+            "argmin_over_a_dimension expects a tensor with rank at least 1")
     if x.dtype not in (torch.float16, torch.float32, torch.bfloat16):
         raise TypeError(
             "argmin_over_a_dimension supports only float16, float32, and bfloat16 inputs"
@@ -200,21 +202,23 @@ def argmin_over_a_dimension(x: torch.Tensor, dim: int) -> torch.Tensor:
     if dim < 0:
         dim += x.dim()
     if dim < 0 or dim >= x.dim():
-        raise ValueError(f"invalid reduction dim {dim} for input rank {x.dim()}")
+        raise ValueError(
+            f"invalid reduction dim {dim} for input rank {x.dim()}")
     if x.shape[dim] == 0:
-        raise ValueError("argmin_over_a_dimension does not support empty reduction axes")
+        raise ValueError(
+            "argmin_over_a_dimension does not support empty reduction axes")
 
     x_last = x.movedim(dim, -1).contiguous()
     rows = x_last.numel() // x_last.shape[-1]
     cols = x_last.shape[-1]
     x_2d = x_last.view(rows, cols)
 
-    out = torch.empty((rows,), device=x.device, dtype=torch.int32)
+    out = torch.empty((rows, ), device=x.device, dtype=torch.int32)
     block_k = 64
     while block_k < cols and block_k < 1024:
         block_k *= 2
     block_m = 8
-    grid = (triton.cdiv(rows, block_m),)
+    grid = (triton.cdiv(rows, block_m), )
     if cols == 4096 and block_k == 1024 and x_2d.dtype == torch.float32:
         _argmin_row_kernel_4096_fp32[grid](
             x_2d,

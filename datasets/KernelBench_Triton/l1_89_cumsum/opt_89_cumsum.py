@@ -34,12 +34,12 @@ built-in vectorized inclusive prefix sum. This:
 Measured result (cannsim, same M=32 N=64 shape):
   Optimized span: 16,133 cy = 6,453 ns  (7.9 cy/element)
   Speedup: 1.91× vs baseline (30,799 cy)
-  
+
   Optimized trace breakdown:
   - PUSHQ: 12.2% (from 50.2%) — 128 VF fences → 24 push events
   - SCALAR: 83.9% — tl.cumsum generates a scalar serial implementation
     (SCALARLDST address loop, 20-cy cadence, 64 iterations)
-  - MTE3: 36.1% — vectorized output store 
+  - MTE3: 36.1% — vectorized output store
 
   Note: tl.cumsum on Ascend 910_9589 compiles to a scalar loop internally
   (not a tree-reduce SIMD implementation). The speedup comes from:
@@ -47,7 +47,7 @@ Measured result (cannsim, same M=32 N=64 shape):
     - Eliminated per-element carry spills (LD_XD_XN + ST_XD_XN)
     - MTE3 now does single 64-element burst vs 64 scalar stores
     - Startup SCALARLDST (DC_PRELOAD + LDP) paid once per program not repeated
-  
+
   Remaining headroom: if tl.cumsum were SIMD on AIV, RVECEX would be ~50%
   of span with MTE2 hidden behind pipelining. On this HW target it's scalar.
 
@@ -67,6 +67,7 @@ import triton.language as tl
 import torch
 import torch.nn as nn
 
+
 @triton.jit
 def _cumsum_vec_kernel(
     x_ptr,
@@ -75,8 +76,10 @@ def _cumsum_vec_kernel(
     carry_out_ptr,
     N,
     chunk_start,
-    stride_x0, stride_x1,
-    stride_y0, stride_y1,
+    stride_x0,
+    stride_x1,
+    stride_y0,
+    stride_y1,
     BLOCK_N: tl.constexpr,
 ):
     """
@@ -132,7 +135,8 @@ def _cumsum_vec_kernel(
     # last_col = chunk_start + BLOCK_N - 1, capped at N - 1 for masked chunks
     last_col = tl.minimum(chunk_start + BLOCK_N - 1, N - 1)
     # tl.sum extracts the one element at last_col position
-    carry_out = tl.sum(tl.where(cols == last_col, x, tl.zeros([BLOCK_N], tl.float32)))
+    carry_out = tl.sum(
+        tl.where(cols == last_col, x, tl.zeros([BLOCK_N], tl.float32)))
     tl.store(carry_out_ptr + row, carry_out)
 
 
@@ -150,49 +154,55 @@ def _get_block_n(chunk_len):
 
 
 class ModelNew(nn.Module):
-  """
+    """
   A simple model that performs a cumulative sum (prefix sum) operation along a specified dimension.
 
   Parameters:
       dim (int): The dimension along which to perform the scan operation.
   """
 
-  def __init__(self, dim=1):
-      """
+    def __init__(self, dim=1):
+        """
       Initialize the Scan model.
 
       Args:
           dim (int): The dimension along which to perform the cumulative sum.
       """
-      super(ModelNew, self).__init__()
-      self.dim = dim
+        super(ModelNew, self).__init__()
+        self.dim = dim
 
-  def forward(self, x):
-    """
+    def forward(self, x):
+        """
     Forward pass for the Scan model, computing the cumulative sum along the specified dimension.
 
     Args:
-        x (torch.Tensor): Input tensor of shape (batch_size, *input_shape), where `*input_shape` 
+        x (torch.Tensor): Input tensor of shape (batch_size, *input_shape), where `*input_shape`
                           can vary depending on the use case.
 
     Returns:
         torch.Tensor: Tensor of the same shape as `x` after applying cumulative sum along `dim`.
     """
-    M, N = x.shape
-    y        = torch.zeros_like(x)
-    carry_in = torch.zeros(M, device=x.device, dtype=torch.float32)
-    carry_out = torch.zeros(M, device=x.device, dtype=torch.float32)
-    BLOCK_N = _get_block_n(N)
-    for chunk_start in range(0, N, BLOCK_N):
-        _cumsum_vec_kernel[(M,)](
-            x, y, carry_in, carry_out,
-            N, chunk_start,
-            x.stride(0), x.stride(1),
-            y.stride(0), y.stride(1),
-            BLOCK_N=BLOCK_N,
-            num_warps=4,
-            num_stages=1,
-        )
-        carry_in.copy_(carry_out)
+        M, N = x.shape
+        y = torch.zeros_like(x)
+        carry_in = torch.zeros(M, device=x.device, dtype=torch.float32)
+        carry_out = torch.zeros(M, device=x.device, dtype=torch.float32)
+        BLOCK_N = _get_block_n(N)
+        for chunk_start in range(0, N, BLOCK_N):
+            _cumsum_vec_kernel[(M, )](
+                x,
+                y,
+                carry_in,
+                carry_out,
+                N,
+                chunk_start,
+                x.stride(0),
+                x.stride(1),
+                y.stride(0),
+                y.stride(1),
+                BLOCK_N=BLOCK_N,
+                num_warps=4,
+                num_stages=1,
+            )
+            carry_in.copy_(carry_out)
 
-    return y
+        return y

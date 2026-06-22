@@ -32,24 +32,28 @@ Trace analysis of v3 (BLOCK_M=4, N=128, C=1000, span=4579 cy):
 
 import triton
 import triton.language as tl
-import torch
 import torch.nn as nn
+
 
 @triton.jit
 def _ce_v4_small(
-    x_ptr, t_ptr, out_ptr,
-    stride_x_row, stride_x_col,
-    N, C,
+    x_ptr,
+    t_ptr,
+    out_ptr,
+    stride_x_row,
+    stride_x_col,
+    N,
+    C,
     BLOCK_M: tl.constexpr,
     BLOCK_C: tl.constexpr,
 ):
-    pid  = tl.program_id(0)
+    pid = tl.program_id(0)
     rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
     rmsk = rows < N
 
     # Issue target-index load early — overlaps with SCALAR preload startup
-    tgt  = tl.load(t_ptr + rows, mask=rmsk, other=0)
-    tgt  = tgt.to(tl.int64)
+    tgt = tl.load(t_ptr + rows, mask=rmsk, other=0)
+    tgt = tgt.to(tl.int64)
 
     # 2D load [BLOCK_M, BLOCK_C] with Pattern 11 hints for MTE2 burst coalescing
     cols = tl.arange(0, BLOCK_C)
@@ -57,38 +61,44 @@ def _ce_v4_small(
     cols = tl.max_contiguous(cols, BLOCK_C)
     cmsk = cols < C
     x = tl.load(
-        x_ptr + rows[:, None].to(tl.int64) * stride_x_row + cols[None, :] * stride_x_col,
+        x_ptr + rows[:, None].to(tl.int64) * stride_x_row +
+        cols[None, :] * stride_x_col,
         mask=rmsk[:, None] & cmsk[None, :],
         other=float("-inf"),
         eviction_policy="evict_first",
     )
 
-    m         = tl.max(x, axis=1)
-    expx      = tl.math.exp(x - m[:, None])
-    sumexp    = tl.sum(expx, axis=1)
+    m = tl.max(x, axis=1)
+    expx = tl.math.exp(x - m[:, None])
+    sumexp = tl.sum(expx, axis=1)
     logsumexp = tl.math.log(sumexp) + m
 
     x_t = tl.load(
         x_ptr + rows.to(tl.int64) * stride_x_row + tgt * stride_x_col,
-        mask=rmsk, other=0.0,
+        mask=rmsk,
+        other=0.0,
     )
     tl.store(out_ptr + rows, logsumexp - x_t, mask=rmsk)
 
 
 @triton.jit
 def _ce_v4_large(
-    x_ptr, t_ptr, out_ptr,
-    stride_x_row, stride_x_col,
-    N, C,
+    x_ptr,
+    t_ptr,
+    out_ptr,
+    stride_x_row,
+    stride_x_col,
+    N,
+    C,
     BLOCK_M: tl.constexpr,
     BLOCK_C: tl.constexpr,
 ):
-    pid  = tl.program_id(0)
+    pid = tl.program_id(0)
     rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
     rmsk = rows < N
 
-    tgt  = tl.load(t_ptr + rows, mask=rmsk, other=0)
-    tgt  = tgt.to(tl.int64)
+    tgt = tl.load(t_ptr + rows, mask=rmsk, other=0)
+    tgt = tgt.to(tl.int64)
 
     row_max = tl.full([BLOCK_M], float("-inf"), dtype=tl.float32)
     row_sum = tl.zeros([BLOCK_M], dtype=tl.float32)
@@ -98,24 +108,26 @@ def _ce_v4_large(
     cols_base = tl.max_contiguous(cols_base, BLOCK_C)
 
     for col_start in tl.range(0, C, BLOCK_C):
-        c    = col_start + cols_base
+        c = col_start + cols_base
         cmsk = c < C
         x = tl.load(
-            x_ptr + rows[:, None].to(tl.int64) * stride_x_row + c[None, :] * stride_x_col,
+            x_ptr + rows[:, None].to(tl.int64) * stride_x_row +
+            c[None, :] * stride_x_col,
             mask=rmsk[:, None] & cmsk[None, :],
             other=float("-inf"),
             eviction_policy="evict_first",
         )
         blk_max = tl.max(x, axis=1)
         new_max = tl.maximum(row_max, blk_max)
-        row_sum = (row_sum * tl.math.exp(row_max - new_max)
-                   + tl.sum(tl.math.exp(x - new_max[:, None]), axis=1))
+        row_sum = (row_sum * tl.math.exp(row_max - new_max) +
+                   tl.sum(tl.math.exp(x - new_max[:, None]), axis=1))
         row_max = new_max
 
     logsumexp = tl.math.log(row_sum) + row_max
     x_t = tl.load(
         x_ptr + rows.to(tl.int64) * stride_x_row + tgt * stride_x_col,
-        mask=rmsk, other=0.0,
+        mask=rmsk,
+        other=0.0,
     )
     tl.store(out_ptr + rows, logsumexp - x_t, mask=rmsk)
 
@@ -127,6 +139,7 @@ class ModelNew(nn.Module):
     Parameters:
         None
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -138,7 +151,7 @@ class ModelNew(nn.Module):
         """
         assert x.is_contiguous()
         N, C = x.shape
-        out  = x.new_empty((N,))
+        out = x.new_empty((N, ))
 
         # Adaptive BLOCK_M: use largest BLOCK_M s.t. grid >= 32 (all AIV cores active)
         # and BLOCK_M * BLOCK_C * 4 bytes fits in ~32 KB UB per core.
@@ -146,14 +159,20 @@ class ModelNew(nn.Module):
         for BLOCK_M in [8, 4, 2, 1]:
             if triton.cdiv(N, BLOCK_M) >= 32:
                 break
-        grid = (triton.cdiv(N, BLOCK_M),)
+        grid = (triton.cdiv(N, BLOCK_M), )
 
         kw = dict(
-            x_ptr=x, t_ptr=t, out_ptr=out,
-            stride_x_row=x.stride(0), stride_x_col=x.stride(1),
-            N=N, C=C,
-            BLOCK_M=BLOCK_M, BLOCK_C=BLOCK_C,
-            num_warps=4, num_stages=2,
+            x_ptr=x,
+            t_ptr=t,
+            out_ptr=out,
+            stride_x_row=x.stride(0),
+            stride_x_col=x.stride(1),
+            N=N,
+            C=C,
+            BLOCK_M=BLOCK_M,
+            BLOCK_C=BLOCK_C,
+            num_warps=4,
+            num_stages=2,
         )
         if C <= 2048:
             _ce_v4_small[grid](**kw)

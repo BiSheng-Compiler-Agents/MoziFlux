@@ -56,6 +56,7 @@ def _groupnorm_hardtanh_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_features=8192,
@@ -72,7 +73,9 @@ class ModelNew(nn.Module):
     def forward(self, x):
         y = self.gemm(x)
         if y.device.type != "npu":
-            raise RuntimeError("ModelNew expects NPU tensors and does not provide a non-NPU fallback.")
+            raise RuntimeError(
+                "ModelNew expects NPU tensors and does not provide a non-NPU fallback."
+            )
 
         y = y.contiguous()
         N, C = y.shape

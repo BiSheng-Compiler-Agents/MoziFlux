@@ -16,7 +16,7 @@ def _tanh_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
         mask = block_offsets < n_elements
 
         x = tl.load(x_ptr + block_offsets, mask=mask, other=0.0)
-        y = tl.tanh(x.to(tl.float32)).to(x.dtype)
+        y = tl.math.tanh(x.to(tl.float32)).to(x.dtype)
         tl.store(y_ptr + block_offsets, y, mask=mask)
 
 
@@ -44,7 +44,8 @@ class ModelNew(nn.Module):
         if x.dtype not in supported_dtypes:
             raise RuntimeError(f"Unsupported dtype for ModelNew: {x.dtype}")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked inputs")
 
         x_contig = x.contiguous()
         n_elements = x_contig.numel()
@@ -54,7 +55,7 @@ class ModelNew(nn.Module):
         y = torch.empty_like(x_contig)
         block_size = 4096
         num_blocks = triton.cdiv(n_elements, block_size)
-        grid = (min(num_blocks, 65535),)
+        grid = (min(num_blocks, 65535), )
         _tanh_kernel[grid](
             x_contig,
             y,

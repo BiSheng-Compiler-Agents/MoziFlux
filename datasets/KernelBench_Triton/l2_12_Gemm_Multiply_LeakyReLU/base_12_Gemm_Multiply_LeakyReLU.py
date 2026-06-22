@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 _WEIGHT_KN_CACHE_KEY = None
 _WEIGHT_KN_CACHE_VALUE = None
 
@@ -35,12 +34,48 @@ def _resolve_weight_kn(weight: torch.Tensor) -> torch.Tensor:
 
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=3, num_warps=8),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=4, num_warps=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64}, num_stages=4, num_warps=8),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 64}, num_stages=4, num_warps=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_stages=3,
+                      num_warps=8),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32
+        },
+                      num_stages=4,
+                      num_warps=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_stages=4,
+                      num_warps=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32
+        },
+                      num_stages=4,
+                      num_warps=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_stages=4,
+                      num_warps=8),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_stages=4,
+                      num_warps=4),
     ],
     key=["M", "N", "K"],
 )
@@ -50,11 +85,17 @@ def _linear_mul_leaky_kernel(
     B_ptr,  # [K, N]
     Bias_ptr,  # [N]
     C_ptr,  # [M, N]
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bn, stride_bk,
-    stride_cm, stride_cn,
-    multiplier, negative_slope,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bn,
+    stride_bk,
+    stride_cm,
+    stride_cn,
+    multiplier,
+    negative_slope,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -94,19 +135,56 @@ def _linear_mul_leaky_kernel(
     out = tl.where(acc >= 0, acc, acc * negative_slope)
 
     # Store
-    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm +
+                      offs_n[None, :] * stride_cn)
     c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
     tl.store(c_ptrs, out, mask=c_mask)
 
 
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=3, num_warps=8),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=4, num_warps=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64}, num_stages=4, num_warps=8),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 64}, num_stages=4, num_warps=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_stages=3,
+                      num_warps=8),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32
+        },
+                      num_stages=4,
+                      num_warps=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_stages=4,
+                      num_warps=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32
+        },
+                      num_stages=4,
+                      num_warps=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_stages=4,
+                      num_warps=8),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_stages=4,
+                      num_warps=4),
     ],
     key=["M", "N", "K"],
 )
@@ -116,11 +194,17 @@ def _linear_mul_leaky_kernel_aligned(
     B_ptr,
     Bias_ptr,
     C_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bn, stride_bk,
-    stride_cm, stride_cn,
-    multiplier, negative_slope,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bn,
+    stride_bk,
+    stride_cm,
+    stride_cn,
+    multiplier,
+    negative_slope,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -135,8 +219,10 @@ def _linear_mul_leaky_kernel_aligned(
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
     for k_start in range(0, tl.cdiv(K, BLOCK_K)):
         k_offset = k_start * BLOCK_K
-        a_ptrs = A_ptr + (offs_m[:, None] * stride_am + (k_offset + offs_k)[None, :] * stride_ak)
-        b_ptrs = B_ptr + ((k_offset + offs_k)[:, None] * stride_bk + offs_n[None, :] * stride_bn)
+        a_ptrs = A_ptr + (offs_m[:, None] * stride_am +
+                          (k_offset + offs_k)[None, :] * stride_ak)
+        b_ptrs = B_ptr + ((k_offset + offs_k)[:, None] * stride_bk +
+                          offs_n[None, :] * stride_bn)
         a = tl.load(a_ptrs)
         b = tl.load(b_ptrs)
         acc += tl.dot(a, b)
@@ -145,7 +231,8 @@ def _linear_mul_leaky_kernel_aligned(
     acc = (acc + bias[None, :]) * multiplier
     out = tl.where(acc >= 0, acc, acc * negative_slope)
 
-    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm +
+                      offs_n[None, :] * stride_cn)
     tl.store(c_ptrs, out)
 
 
@@ -155,11 +242,17 @@ def _linear_mul_leaky_kernel_grouped(
     B_ptr,
     Bias_ptr,
     C_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bn, stride_bk,
-    stride_cm, stride_cn,
-    multiplier, negative_slope,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bn,
+    stride_bk,
+    stride_cm,
+    stride_cn,
+    multiplier,
+    negative_slope,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -193,25 +286,27 @@ def _linear_mul_leaky_kernel_grouped(
     bias = tl.load(Bias_ptr + offs_n)
     acc = (acc + bias[None, :]) * multiplier
     out = tl.where(acc >= 0, acc, acc * negative_slope)
-    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+    c_ptrs = C_ptr + (offs_m[:, None] * stride_cm +
+                      offs_n[None, :] * stride_cn)
     tl.store(c_ptrs, out)
 
 
-def _fused_linear_mul_leaky(x: torch.Tensor,
-                            weight: torch.Tensor,
-                            bias: torch.Tensor,
-                            multiplier: float,
+def _fused_linear_mul_leaky(x: torch.Tensor, weight: torch.Tensor,
+                            bias: torch.Tensor, multiplier: float,
                             negative_slope: float) -> torch.Tensor:
     """Run the fused GEMM, multiply, and LeakyReLU path on Ascend NPU."""
     if x.ndim != 2 or weight.ndim != 2:
-        raise ValueError("_fused_linear_mul_leaky expects 2D input and weight tensors")
+        raise ValueError(
+            "_fused_linear_mul_leaky expects 2D input and weight tensors")
     if x.shape[1] != weight.shape[1]:
         raise ValueError("Input and weight must agree on the K dimension")
     if x.dtype != weight.dtype:
         raise TypeError("Input and weight must use the same dtype")
     if bias is not None:
         if bias.ndim != 1 or bias.shape[0] != weight.shape[0]:
-            raise ValueError("Bias must be a 1D tensor with length equal to weight.shape[0]")
+            raise ValueError(
+                "Bias must be a 1D tensor with length equal to weight.shape[0]"
+            )
         if bias.dtype != x.dtype:
             raise TypeError("Bias dtype must match the input dtype")
     if not _is_npu_tensor(x) or not _is_npu_tensor(weight):
@@ -226,31 +321,40 @@ def _fused_linear_mul_leaky(x: torch.Tensor,
     x_c = x if x.is_contiguous() else x.contiguous()
     weight_c = weight if weight.is_contiguous() else weight.contiguous()
     weight_kn = _resolve_weight_kn(weight_c)
-    bias_buf = bias if bias is not None else torch.zeros(N, device=x.device, dtype=x.dtype)
+    bias_buf = bias if bias is not None else torch.zeros(
+        N, device=x.device, dtype=x.dtype)
     y = torch.empty((M, N), device=x.device, dtype=x.dtype)
-    grid = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]), triton.cdiv(N, meta["BLOCK_N"]))
-    grouped_shape = (
-        x_c.dtype == torch.float16
-        and M == 1024
-        and N == 8192
-        and K == 8192
-        and x_c.stride(1) == 1
-        and weight_kn.stride(1) == 1
-        and y.stride(1) == 1
-    )
+
+    def grid(meta):
+        return (triton.cdiv(M,
+                            meta["BLOCK_M"]), triton.cdiv(N, meta["BLOCK_N"]))
+
+    grouped_shape = (x_c.dtype == torch.float16 and M == 1024 and N == 8192
+                     and K == 8192 and x_c.stride(1) == 1
+                     and weight_kn.stride(1) == 1 and y.stride(1) == 1)
     aligned_shape = (M % 128 == 0) and (N % 128 == 0) and (K % 32 == 0)
     if grouped_shape:
-        grid_grouped = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]) * triton.cdiv(N, meta["BLOCK_N"]),)
+
+        def grid_grouped(meta):
+            return (triton.cdiv(M, meta["BLOCK_M"]) *
+                    triton.cdiv(N, meta["BLOCK_N"]), )
+
         _linear_mul_leaky_kernel_grouped[grid_grouped](
             x_c,
             weight_kn,
             bias_buf,
             y,
-            M, N, K,
-            x_c.stride(0), x_c.stride(1),
-            weight_kn.stride(1), weight_kn.stride(0),
-            y.stride(0), y.stride(1),
-            float(multiplier), float(negative_slope),
+            M,
+            N,
+            K,
+            x_c.stride(0),
+            x_c.stride(1),
+            weight_kn.stride(1),
+            weight_kn.stride(0),
+            y.stride(0),
+            y.stride(1),
+            float(multiplier),
+            float(negative_slope),
             BLOCK_M=128,
             BLOCK_N=128,
             BLOCK_K=64,
@@ -265,11 +369,17 @@ def _fused_linear_mul_leaky(x: torch.Tensor,
             weight_kn,
             bias_buf,
             y,
-            M, N, K,
-            x_c.stride(0), x_c.stride(1),
-            weight_kn.stride(1), weight_kn.stride(0),
-            y.stride(0), y.stride(1),
-            float(multiplier), float(negative_slope),
+            M,
+            N,
+            K,
+            x_c.stride(0),
+            x_c.stride(1),
+            weight_kn.stride(1),
+            weight_kn.stride(0),
+            y.stride(0),
+            y.stride(1),
+            float(multiplier),
+            float(negative_slope),
         )
     return y
 
@@ -278,6 +388,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs a Gemm, multiplies the result, and applies LeakyReLU.
     """
+
     def __init__(self, in_features, out_features, multiplier, negative_slope):
         super(ModelNew, self).__init__()
         self.gemm = nn.Linear(in_features, out_features)
@@ -294,13 +405,18 @@ class ModelNew(nn.Module):
             float(self.multiplier),
             float(self.leaky_relu.negative_slope),
         )
+
+
 batch_size = 1024
-in_features  = 8192  
+in_features = 8192
 out_features = 8192
 multiplier = 2.0
 negative_slope = 0.1
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_features, device='npu')]
+
+
 def get_init_inputs():
     return [in_features, out_features, multiplier, negative_slope]

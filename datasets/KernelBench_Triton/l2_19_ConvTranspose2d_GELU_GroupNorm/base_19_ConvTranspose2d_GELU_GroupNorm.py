@@ -11,7 +11,10 @@ def _gelu_groupnorm_kernel(
     b_ptr,
     z_ptr,
     y_ptr,
-    N, C, H, W,
+    N,
+    C,
+    H,
+    W,
     G,
     eps,
     STATS_BLOCK: tl.constexpr,
@@ -90,22 +93,30 @@ def _gelu_groupnorm_kernel(
             idx_hw = idx_hw
             mask_hw = idx_hw < HW
 
-            z0 = tl.load(z_group_ptr + ch0_base + idx_hw, mask=mask_hw, other=0.0).to(tl.float32)
+            z0 = tl.load(z_group_ptr + ch0_base + idx_hw,
+                         mask=mask_hw,
+                         other=0.0).to(tl.float32)
             y0 = (z0 - mean) * rstd
             y0 = y0 * gamma0 + beta0
             tl.store(y_group_ptr + ch0_base + idx_hw, y0, mask=mask_hw)
 
-            z1 = tl.load(z_group_ptr + ch1_base + idx_hw, mask=mask_hw, other=0.0).to(tl.float32)
+            z1 = tl.load(z_group_ptr + ch1_base + idx_hw,
+                         mask=mask_hw,
+                         other=0.0).to(tl.float32)
             y1 = (z1 - mean) * rstd
             y1 = y1 * gamma1 + beta1
             tl.store(y_group_ptr + ch1_base + idx_hw, y1, mask=mask_hw)
 
-            z2 = tl.load(z_group_ptr + ch2_base + idx_hw, mask=mask_hw, other=0.0).to(tl.float32)
+            z2 = tl.load(z_group_ptr + ch2_base + idx_hw,
+                         mask=mask_hw,
+                         other=0.0).to(tl.float32)
             y2 = (z2 - mean) * rstd
             y2 = y2 * gamma2 + beta2
             tl.store(y_group_ptr + ch2_base + idx_hw, y2, mask=mask_hw)
 
-            z3 = tl.load(z_group_ptr + ch3_base + idx_hw, mask=mask_hw, other=0.0).to(tl.float32)
+            z3 = tl.load(z_group_ptr + ch3_base + idx_hw,
+                         mask=mask_hw,
+                         other=0.0).to(tl.float32)
             y3 = (z3 - mean) * rstd
             y3 = y3 * gamma3 + beta3
             tl.store(y_group_ptr + ch3_base + idx_hw, y3, mask=mask_hw)
@@ -114,9 +125,11 @@ def _gelu_groupnorm_kernel(
         ch += 4
 
 
-def gelu_groupnorm_fused(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, num_groups: int, eps: float):
+def gelu_groupnorm_fused(x: torch.Tensor, weight: torch.Tensor,
+                         bias: torch.Tensor, num_groups: int, eps: float):
     assert x.device.type == "npu", "Triton kernel requires an NPU tensor"
-    assert x.dtype in (torch.float16, torch.bfloat16, torch.float32), "Unsupported input dtype"
+    assert x.dtype in (torch.float16, torch.bfloat16,
+                       torch.float32), "Unsupported input dtype"
     N, C, H, W = x.shape
     assert C % num_groups == 0, "num_groups must divide C"
     z = torch.empty((N, C, H, W), device=x.device, dtype=torch.float32)
@@ -126,12 +139,19 @@ def gelu_groupnorm_fused(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tens
     w = weight.contiguous()
     b = bias.contiguous()
 
-    grid = (N * num_groups,)
+    grid = (N * num_groups, )
     STATS_BLOCK = 4224
     NORM_BLOCK = 4608
     _gelu_groupnorm_kernel[grid](
-        x, w, b, z, y,
-        N, C, H, W,
+        x,
+        w,
+        b,
+        z,
+        y,
+        N,
+        C,
+        H,
+        W,
         num_groups,
         eps,
         STATS_BLOCK=STATS_BLOCK,
@@ -141,10 +161,16 @@ def gelu_groupnorm_fused(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tens
 
 
 class ModelNew(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride, groups, num_groups):
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride, groups,
+                 num_groups):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride=stride)
-        self.group_norm = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
+        self.conv_transpose = nn.ConvTranspose2d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride)
+        self.group_norm = nn.GroupNorm(num_groups=num_groups,
+                                       num_channels=out_channels)
 
     def forward(self, x):
         if x.device.type != "npu":

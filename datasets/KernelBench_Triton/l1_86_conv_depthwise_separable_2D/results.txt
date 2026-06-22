@@ -1,0 +1,20 @@
+TEST baseline1 tiny_32 PASS max_diff=0.000420153
+TEST baseline2 tiny_32 SKIP provider_exception
+TEST optimized tiny_32 PASS max_diff=0
+TEST baseline1 small_64 PASS max_diff=0.000434399
+TEST baseline2 small_64 SKIP provider_exception
+TEST optimized small_64 PASS max_diff=0
+TEST baseline1 medium_128 PASS max_diff=0.000451326
+TEST baseline2 medium_128 SKIP provider_exception
+TEST optimized medium_128 PASS max_diff=0
+TEST baseline1 exact_512 SKIP grid_guard
+TEST baseline2 exact_512 SKIP comparison_preskip
+TEST optimized exact_512 PASS max_diff=0
+UNIT_TEST PASS
+
+depthwise_separable_conv2d:
+        label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0     tiny_32       0.014847          5.653528               inf          0.014978
+1    small_64       0.029521         28.287867               inf          0.029522
+2  medium_128       0.129588        210.440308               inf          0.130726
+3   exact_512       5.507072               inf               inf          5.505593

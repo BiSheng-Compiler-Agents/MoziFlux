@@ -1,0 +1,86 @@
+/home/s00929845/kernel_verify/l1_26_GELU__1782244572/26_GELU_.py:47: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x_contig)
+TEST N1024 baseline1 torch.float16: PASS max_abs=2.38419e-07
+TEST N1024 baseline2 torch.float16: PASS max_abs=2.38419e-07
+TEST N1024 optimized torch.float16: PASS max_abs=2.38419e-07
+TEST N1024 baseline1 torch.float32: PASS max_abs=4.76837e-07
+TEST N1024 baseline2 torch.float32: PASS max_abs=4.76837e-07
+TEST N1024 optimized torch.float32: PASS max_abs=4.76837e-07
+TEST N1024 baseline1 torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N1024 baseline2 torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N1024 optimized torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N65536 baseline1 torch.float16: PASS max_abs=6.10352e-05
+TEST N65536 baseline2 torch.float16: PASS max_abs=6.10352e-05
+TEST N65536 optimized torch.float16: PASS max_abs=6.10352e-05
+TEST N65536 baseline1 torch.float32: PASS max_abs=4.76837e-07
+TEST N65536 baseline2 torch.float32: PASS max_abs=4.76837e-07
+TEST N65536 optimized torch.float32: PASS max_abs=4.76837e-07
+TEST N65536 baseline1 torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N65536 baseline2 torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N65536 optimized torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N524288 baseline1 torch.float16: PASS max_abs=6.10352e-05
+TEST N524288 baseline2 torch.float16: PASS max_abs=6.10352e-05
+TEST N524288 optimized torch.float16: PASS max_abs=6.10352e-05
+TEST N524288 baseline1 torch.float32: PASS max_abs=4.76837e-07
+TEST N524288 baseline2 torch.float32: PASS max_abs=4.76837e-07
+TEST N524288 optimized torch.float32: PASS max_abs=4.76837e-07
+TEST N524288 baseline1 torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N524288 baseline2 torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N524288 optimized torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N4M baseline1 torch.float16: PASS max_abs=6.10352e-05
+TEST N4M baseline2 torch.float16: PASS max_abs=6.10352e-05
+TEST N4M optimized torch.float16: PASS max_abs=6.10352e-05
+TEST N4M baseline1 torch.float32: PASS max_abs=7.15256e-07
+TEST N4M baseline2 torch.float32: PASS max_abs=4.76837e-07
+TEST N4M optimized torch.float32: PASS max_abs=4.76837e-07
+TEST N4M baseline1 torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N4M baseline2 torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N4M optimized torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N16M baseline1 torch.float16: PASS max_abs=6.10352e-05
+TEST N16M baseline2 torch.float16: PASS max_abs=6.10352e-05
+TEST N16M optimized torch.float16: PASS max_abs=6.10352e-05
+TEST N16M baseline1 torch.float32: PASS max_abs=9.53674e-07
+TEST N16M baseline2 torch.float32: PASS max_abs=4.76837e-07
+TEST N16M optimized torch.float32: PASS max_abs=4.76837e-07
+TEST N16M baseline1 torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N16M baseline2 torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N16M optimized torch.bfloat16: PASS max_abs=1.52588e-05
+TEST benchmark baseline1 torch.float16: INFO coreDim would exceed Ascend 65535; benchmark returns inf
+TEST benchmark baseline2 torch.float16: PASS max_abs=6.10352e-05
+TEST benchmark optimized torch.float16: PASS max_abs=6.10352e-05
+TEST benchmark baseline1 torch.float32: INFO coreDim would exceed Ascend 65535; benchmark returns inf
+TEST benchmark baseline2 torch.float32: PASS max_abs=4.76837e-07
+TEST benchmark optimized torch.float32: PASS max_abs=4.76837e-07
+TEST benchmark baseline1 torch.bfloat16: INFO coreDim would exceed Ascend 65535; benchmark returns inf
+TEST benchmark baseline2 torch.bfloat16: PASS max_abs=1.52588e-05
+TEST benchmark optimized torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N127 baseline1 torch.float16: PASS max_abs=2.38419e-07
+TEST N127 baseline2 torch.float16: PASS max_abs=2.38419e-07
+TEST N127 optimized torch.float16: PASS max_abs=2.38419e-07
+TEST N127 baseline1 torch.float32: PASS max_abs=4.76837e-07
+TEST N127 baseline2 torch.float32: PASS max_abs=4.76837e-07
+TEST N127 optimized torch.float32: PASS max_abs=4.76837e-07
+TEST N127 baseline1 torch.bfloat16: PASS max_abs=1.90735e-06
+TEST N127 baseline2 torch.bfloat16: PASS max_abs=1.90735e-06
+TEST N127 optimized torch.bfloat16: PASS max_abs=1.90735e-06
+TEST N4097 baseline1 torch.float16: PASS max_abs=3.05176e-05
+TEST N4097 baseline2 torch.float16: PASS max_abs=3.05176e-05
+TEST N4097 optimized torch.float16: PASS max_abs=3.05176e-05
+TEST N4097 baseline1 torch.float32: PASS max_abs=4.76837e-07
+TEST N4097 baseline2 torch.float32: PASS max_abs=4.76837e-07
+TEST N4097 optimized torch.float32: PASS max_abs=4.76837e-07
+TEST N4097 baseline1 torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N4097 baseline2 torch.bfloat16: PASS max_abs=1.52588e-05
+TEST N4097 optimized torch.bfloat16: PASS max_abs=1.52588e-05
+UNIT_TEST PASS
+BENCH benchmark baseline1: INFO coreDim would exceed Ascend 65535; returning inf
+gelu_performance:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      N1024       0.001563          0.002112          0.002520          0.002534
+1     N65536       0.002178          0.002513          0.050455          0.050884
+2    N524288       0.003899          0.006512          0.397603          0.401179
+3        N4M       0.019893          0.035698          3.169810          3.198128
+4       N16M       0.077725          0.137363         12.735548         12.846490
+5  benchmark       4.525311               inf       1219.351807       1210.080566
+6       N127       0.001362          0.001999          0.002419          0.002428
+7      N4097       0.001782          0.002188          0.005507          0.005527

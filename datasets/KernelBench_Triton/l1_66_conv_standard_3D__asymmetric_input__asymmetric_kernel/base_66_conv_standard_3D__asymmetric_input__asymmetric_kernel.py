@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 DEFAULT_IN_CHANNELS = 3
 DEFAULT_OUT_CHANNELS = 64
 DEFAULT_KERNEL_SIZE = (3, 5, 7)
@@ -20,41 +19,132 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_warps=4, num_stages=2),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_warps=8, num_stages=2),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_warps=8, num_stages=2),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_warps=8, num_stages=3),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 64}, num_warps=8, num_stages=3),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32
+        },
+                      num_warps=4,
+                      num_stages=2),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=2),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=2),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=3),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=3),
         # Tuned configs for Hopper-class GPUs (H200)
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_warps=8, num_stages=3),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 64}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 16}, num_warps=4, num_stages=3),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=3),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 16
+        },
+                      num_warps=4,
+                      num_stages=3),
         # Extra high-occupancy configs for larger tiles on H200
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 128}, num_warps=8, num_stages=4),
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 32}, num_warps=8, num_stages=3),
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 64}, num_warps=8, num_stages=4),
+        triton.Config({
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "BLOCK_K": 128
+        },
+                      num_warps=8,
+                      num_stages=4),
+        triton.Config({
+            "BLOCK_M": 256,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32
+        },
+                      num_warps=8,
+                      num_stages=3),
+        triton.Config({
+            "BLOCK_M": 256,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64
+        },
+                      num_warps=8,
+                      num_stages=4),
     ],
     key=["M", "Cout", "K"],
 )
 @triton.jit
 def _conv3d_implicit_gemm_kernel(
-    x_ptr,       # *: [N, Cin, Din, Hin, Win] contiguous
-    w2d_ptr,     # *: [K, Cout] contiguous, where K = Cin*Kd*Kh*Kw
-    y_ptr,       # float32* [N, Cout, Dout, Hout, Wout] contiguous
-    N, Cin, Din, Hin, Win,
-    Cout, Kd, Kh, Kw,
-    Dout, Hout, Wout,
-    stride_d, stride_h, stride_w,
-    pad_d, pad_h, pad_w,
-    dil_d, dil_h, dil_w,
-    M, K,  # M = N*Dout*Hout*Wout, K = Cin*Kd*Kh*Kw
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
+    x_ptr,  # *: [N, Cin, Din, Hin, Win] contiguous
+    w2d_ptr,  # *: [K, Cout] contiguous, where K = Cin*Kd*Kh*Kw
+    y_ptr,  # float32* [N, Cout, Dout, Hout, Wout] contiguous
+    N,
+    Cin,
+    Din,
+    Hin,
+    Win,
+    Cout,
+    Kd,
+    Kh,
+    Kw,
+    Dout,
+    Hout,
+    Wout,
+    stride_d,
+    stride_h,
+    stride_w,
+    pad_d,
+    pad_h,
+    pad_w,
+    dil_d,
+    dil_h,
+    dil_w,
+    M,
+    K,  # M = N*Dout*Hout*Wout, K = Cin*Kd*Kh*Kw
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
 ):
     pid_m = tl.program_id(axis=0)
     pid_n = tl.program_id(axis=1)
 
-    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)  # rows: flattened (n, d, h, w)
+    offs_m = pid_m * BLOCK_M + tl.arange(
+        0, BLOCK_M)  # rows: flattened (n, d, h, w)
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)  # cols: output channels
 
     m_mask = offs_m < M
@@ -109,25 +199,18 @@ def _conv3d_implicit_gemm_kernel(
         in_w = in_w_base[:, None] + kw_idx[None, :] * dil_w
 
         # bounds check on input coordinates
-        valid_in = (
-            m_mask[:, None]
-            & k_mask[None, :]
-            & (in_d >= 0)
-            & (in_d < Din)
-            & (in_h >= 0)
-            & (in_h < Hin)
-            & (in_w >= 0)
-            & (in_w < Win)
-        )
+        valid_in = (m_mask[:, None]
+                    & k_mask[None, :]
+                    & (in_d >= 0)
+                    & (in_d < Din)
+                    & (in_h >= 0)
+                    & (in_h < Hin)
+                    & (in_w >= 0)
+                    & (in_w < Win))
 
         # compute input addresses (NCDHW contiguous) using stride arithmetic
-        addr_x = (
-            n_idx[:, None] * sN_x
-            + ci_idx[None, :] * sC_x
-            + in_d * sD_x
-            + in_h * sH_x
-            + in_w
-        )
+        addr_x = (n_idx[:, None] * sN_x + ci_idx[None, :] * sC_x +
+                  in_d * sD_x + in_h * sH_x + in_w)
         x_tile = tl.load(x_ptr + addr_x.to(tl.int64), mask=valid_in, other=0)
 
         # load weight tile w2d: [K, Cout]
@@ -140,13 +223,8 @@ def _conv3d_implicit_gemm_kernel(
         acc += tl.dot(x_tile, w_tile)
 
     # store to y (NCDHW contiguous) via precomputed strides
-    y_addr = (
-        n_idx[:, None] * sN_y
-        + offs_n[None, :] * sC_y
-        + d_idx[:, None] * sD_y
-        + h_idx[:, None] * sH_y
-        + w_idx[:, None]
-    )
+    y_addr = (n_idx[:, None] * sN_y + offs_n[None, :] * sC_y +
+              d_idx[:, None] * sD_y + h_idx[:, None] * sH_y + w_idx[:, None])
     y_mask = m_mask[:, None] & n_mask[None, :]
     tl.store(y_ptr + y_addr.to(tl.int64), acc, mask=y_mask)
 
@@ -156,14 +234,32 @@ def _conv3d_implicit_gemm_kernel_fixed(
     x_ptr,
     w2d_ptr,
     y_ptr,
-    N, Cin, Din, Hin, Win,
-    Cout, Kd, Kh, Kw,
-    Dout, Hout, Wout,
-    stride_d, stride_h, stride_w,
-    pad_d, pad_h, pad_w,
-    dil_d, dil_h, dil_w,
-    M, K,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
+    N,
+    Cin,
+    Din,
+    Hin,
+    Win,
+    Cout,
+    Kd,
+    Kh,
+    Kw,
+    Dout,
+    Hout,
+    Wout,
+    stride_d,
+    stride_h,
+    stride_w,
+    pad_d,
+    pad_h,
+    pad_w,
+    dil_d,
+    dil_h,
+    dil_w,
+    M,
+    K,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
 ):
     pid_m = tl.program_id(axis=0)
     pid_n = tl.program_id(axis=1)
@@ -200,22 +296,15 @@ def _conv3d_implicit_gemm_kernel_fixed(
     sD_y = 15128
     sH_y = 122
 
-    x_row_base = (
-        n_idx[:, None] * sN_x
-        + in_d_base[:, None] * sD_x
-        + in_h_base[:, None] * sH_x
-        + in_w_base[:, None]
-    )
-    y_row_base = (
-        n_idx[:, None] * sN_y
-        + d_idx[:, None] * sD_y
-        + h_idx[:, None] * sH_y
-        + w_idx[:, None]
-    )
+    x_row_base = (n_idx[:, None] * sN_x + in_d_base[:, None] * sD_x +
+                  in_h_base[:, None] * sH_x + in_w_base[:, None])
+    y_row_base = (n_idx[:, None] * sN_y + d_idx[:, None] * sD_y +
+                  h_idx[:, None] * sH_y + w_idx[:, None])
     # For the fixed benchmark shape, strip-mine the reduction into channel/depth
     # planes so the inner dot only decodes the contiguous kh/kw plane.
     plane_offs = tl.arange(0, BLOCK_K)
-    plane_offs = tl.max_contiguous(tl.multiple_of(plane_offs, BLOCK_K), BLOCK_K)
+    plane_offs = tl.max_contiguous(tl.multiple_of(plane_offs, BLOCK_K),
+                                   BLOCK_K)
     kh_idx = plane_offs // 7
     kw_idx = plane_offs - kh_idx * 7
 
@@ -225,12 +314,8 @@ def _conv3d_implicit_gemm_kernel_fixed(
         for kd_idx in range(0, 3):
             offs_k = w_channel_base + kd_idx * 35 + plane_offs
 
-            addr_x = (
-                x_channel_base
-                + kd_idx * sD_x
-                + kh_idx[None, :] * sH_x
-                + kw_idx[None, :]
-            )
+            addr_x = (x_channel_base + kd_idx * sD_x + kh_idx[None, :] * sH_x +
+                      kw_idx[None, :])
             x_tile = tl.load(x_ptr + addr_x.to(tl.int64))
 
             addr_w = offs_k[:, None] * Cout + offs_n[None, :]
@@ -242,15 +327,24 @@ def _conv3d_implicit_gemm_kernel_fixed(
     tl.store(y_ptr + y_addr.to(tl.int64), acc)
 
 
-def conv3d_triton_implicit_gemm(x: torch.Tensor, weight: torch.Tensor,
-                                stride=(1, 1, 1), padding=(0, 0, 0), dilation=(1, 1, 1)) -> torch.Tensor:
+def conv3d_triton_implicit_gemm(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    stride=(1, 1, 1),
+    padding=(0, 0, 0),
+    dilation=(1, 1, 1)
+) -> torch.Tensor:
     # Assumes:
     # x: [N, Cin, Din, Hin, Win] contiguous, NPU
     # weight: [Cout, Cin, Kd, Kh, Kw] contiguous, NPU
     if not _is_npu_tensor(x):
-        raise RuntimeError("conv3d_triton_implicit_gemm expects the input tensor on Ascend NPU")
+        raise RuntimeError(
+            "conv3d_triton_implicit_gemm expects the input tensor on Ascend NPU"
+        )
     if not _is_npu_tensor(weight):
-        raise RuntimeError("conv3d_triton_implicit_gemm expects the weight tensor on Ascend NPU")
+        raise RuntimeError(
+            "conv3d_triton_implicit_gemm expects the weight tensor on Ascend NPU"
+        )
     x = x.contiguous()
     weight = weight.contiguous()
     N, Cin, Din, Hin, Win = x.shape
@@ -271,18 +365,18 @@ def conv3d_triton_implicit_gemm(x: torch.Tensor, weight: torch.Tensor,
     # while accumulating in fp32 to preserve accuracy.
     use_fp16_compute = (
         (x.dtype == torch.float16 and weight.dtype == torch.float16)
-        or (
-            x.dtype == torch.float32
-            and weight.dtype == torch.float32
-            and (Cin * Kd * Kh * Kw) >= 256
-            and (N * Dout * Hout * Wout) >= 4096
-        )
-    )
-    x_comp = x.to(torch.float16) if use_fp16_compute and x.dtype != torch.float16 else x
-    w_comp = weight.to(torch.float16) if use_fp16_compute and weight.dtype != torch.float16 else weight
+        or (x.dtype == torch.float32 and weight.dtype == torch.float32 and
+            (Cin * Kd * Kh * Kw) >= 256 and (N * Dout * Hout * Wout) >= 4096))
+    x_comp = x.to(
+        torch.float16) if use_fp16_compute and x.dtype != torch.float16 else x
+    w_comp = weight.to(
+        torch.float16
+    ) if use_fp16_compute and weight.dtype != torch.float16 else weight
 
     # Accumulator/output kept in fp32 for stability; cast to input dtype later to match PyTorch API
-    y = torch.empty((N, Cout, Dout, Hout, Wout), device=x.device, dtype=torch.float32)
+    y = torch.empty((N, Cout, Dout, Hout, Wout),
+                    device=x.device,
+                    dtype=torch.float32)
 
     # Pre-flatten weights to [K, Cout]
     K = Cin * Kd * Kh * Kw
@@ -292,39 +386,43 @@ def conv3d_triton_implicit_gemm(x: torch.Tensor, weight: torch.Tensor,
 
     # Triton grid: tiles of (M, Cout)
     def grid(meta):
-        return (triton.cdiv(M, meta["BLOCK_M"]), triton.cdiv(Cout, meta["BLOCK_N"]))
+        return (triton.cdiv(M, meta["BLOCK_M"]),
+                triton.cdiv(Cout, meta["BLOCK_N"]))
 
-    use_fixed_bench_shape = (
-        N == 8
-        and Cin == 3
-        and Din == 16
-        and Hin == 128
-        and Win == 128
-        and Cout == 64
-        and Kd == 3
-        and Kh == 5
-        and Kw == 7
-        and sd == 1
-        and sh == 1
-        and sw == 1
-        and pd == 0
-        and ph == 0
-        and pw == 0
-        and dd == 1
-        and dh == 1
-        and dw == 1
-    )
+    use_fixed_bench_shape = (N == 8 and Cin == 3 and Din == 16 and Hin == 128
+                             and Win == 128 and Cout == 64 and Kd == 3
+                             and Kh == 5 and Kw == 7 and sd == 1 and sh == 1
+                             and sw == 1 and pd == 0 and ph == 0 and pw == 0
+                             and dd == 1 and dh == 1 and dw == 1)
 
     if use_fixed_bench_shape:
         _conv3d_implicit_gemm_kernel_fixed[grid](
-            x_comp, w2d, y,
-            N, Cin, Din, Hin, Win,
-            Cout, Kd, Kh, Kw,
-            Dout, Hout, Wout,
-            sd, sh, sw,
-            pd, ph, pw,
-            dd, dh, dw,
-            M, K,
+            x_comp,
+            w2d,
+            y,
+            N,
+            Cin,
+            Din,
+            Hin,
+            Win,
+            Cout,
+            Kd,
+            Kh,
+            Kw,
+            Dout,
+            Hout,
+            Wout,
+            sd,
+            sh,
+            sw,
+            pd,
+            ph,
+            pw,
+            dd,
+            dh,
+            dw,
+            M,
+            K,
             BLOCK_M=128,
             BLOCK_N=64,
             BLOCK_K=35,
@@ -333,14 +431,32 @@ def conv3d_triton_implicit_gemm(x: torch.Tensor, weight: torch.Tensor,
         )
     else:
         _conv3d_implicit_gemm_kernel[grid](
-            x_comp, w2d, y,
-            N, Cin, Din, Hin, Win,
-            Cout, Kd, Kh, Kw,
-            Dout, Hout, Wout,
-            sd, sh, sw,
-            pd, ph, pw,
-            dd, dh, dw,
-            M, K,
+            x_comp,
+            w2d,
+            y,
+            N,
+            Cin,
+            Din,
+            Hin,
+            Win,
+            Cout,
+            Kd,
+            Kh,
+            Kw,
+            Dout,
+            Hout,
+            Wout,
+            sd,
+            sh,
+            sw,
+            pd,
+            ph,
+            pw,
+            dd,
+            dh,
+            dw,
+            M,
+            K,
         )
 
     # match original dtype
@@ -363,6 +479,7 @@ class ModelNew(nn.Module):
         groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -375,7 +492,14 @@ class ModelNew(nn.Module):
         bias: bool = DEFAULT_BIAS,
     ):
         super(ModelNew, self).__init__()
-        self.conv3d = nn.Conv3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+        self.conv3d = nn.Conv3d(in_channels,
+                                out_channels,
+                                kernel_size,
+                                stride=stride,
+                                padding=padding,
+                                dilation=dilation,
+                                groups=groups,
+                                bias=bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -388,11 +512,15 @@ class ModelNew(nn.Module):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects an Ascend NPU tensor input")
         if conv.groups != 1:
-            raise RuntimeError("ModelNew only supports groups == 1 for the Triton kernel path")
+            raise RuntimeError(
+                "ModelNew only supports groups == 1 for the Triton kernel path"
+            )
         if conv.bias is not None:
-            raise RuntimeError("ModelNew only supports bias=False for the Triton kernel path")
+            raise RuntimeError(
+                "ModelNew only supports bias=False for the Triton kernel path")
         if x.dtype not in (torch.float16, torch.float32):
-            raise RuntimeError("ModelNew only supports float16 and float32 inputs")
+            raise RuntimeError(
+                "ModelNew only supports float16 and float32 inputs")
 
         if conv.weight.device != x.device or conv.weight.dtype != x.dtype:
             self.conv3d = self.conv3d.to(device=x.device, dtype=x.dtype)
@@ -405,6 +533,8 @@ class ModelNew(nn.Module):
             padding=tuple(conv.padding),
             dilation=tuple(conv.dilation),
         )
+
+
 batch_size = 8
 in_channels = 3
 out_channels = 64
@@ -413,8 +543,13 @@ depth = 16
 height = 128
 width = 128
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, depth, height, width)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization
+    return [
+        in_channels, out_channels, kernel_size
+    ]  # Provide in_channels, out_channels, kernel_size for initialization

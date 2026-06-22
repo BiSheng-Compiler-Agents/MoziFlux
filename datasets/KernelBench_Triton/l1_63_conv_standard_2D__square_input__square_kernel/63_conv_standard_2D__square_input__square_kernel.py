@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 
@@ -97,7 +96,8 @@ def conv2d_nchw_s1p0_vecoc_kernel(
     tl.store(y_ptr + y_offsets, acc, mask=store_mask)
 
 
-def _triton_conv2d_s1p0(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None) -> torch.Tensor:
+def _triton_conv2d_s1p0(x: torch.Tensor, weight: torch.Tensor,
+                        bias: torch.Tensor | None) -> torch.Tensor:
     # Preconditions: stride=1, padding=0, dilation=1, groups=1, NCHW contiguous
     if x.device.type != "npu" or weight.device.type != "npu":
         raise ValueError("conv2d Triton path requires NPU tensors")
@@ -108,7 +108,8 @@ def _triton_conv2d_s1p0(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tenso
     N, C, H, W = x.shape
     OC, Cw, K, Kw = weight.shape
     if C != Cw or K != Kw:
-        raise ValueError("only square kernels with matching input channels are supported")
+        raise ValueError(
+            "only square kernels with matching input channels are supported")
     H_out = H - K + 1
     W_out = W - K + 1
     if H_out <= 0 or W_out <= 0:
@@ -119,10 +120,13 @@ def _triton_conv2d_s1p0(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tenso
         if bias.dtype != x.dtype:
             raise ValueError("bias dtype must match input dtype")
         if bias.ndim != 1 or bias.shape[0] != OC:
-            raise ValueError("bias must be a 1D tensor with shape [out_channels]")
+            raise ValueError(
+                "bias must be a 1D tensor with shape [out_channels]")
 
     # Allocate output (compute in fp32 for stability, cast back later)
-    y = torch.empty((N, OC, H_out, W_out), device=x.device, dtype=torch.float32)
+    y = torch.empty((N, OC, H_out, W_out),
+                    device=x.device,
+                    dtype=torch.float32)
 
     # Tiling configuration: fuse OC in block to reuse input tile
     BLOCK_HO = 4
@@ -136,14 +140,29 @@ def _triton_conv2d_s1p0(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tenso
     # Ensure contiguous memory
     x_c = x.contiguous()
     w_c = weight.contiguous()
-    b_c = bias.contiguous() if (bias is not None) else torch.empty(1, device=x.device, dtype=torch.float32)
+    b_c = bias.contiguous() if (bias is not None) else torch.empty(
+        1, device=x.device, dtype=torch.float32)
 
     conv2d_nchw_s1p0_vecoc_kernel[grid](
-        x_c, w_c, b_c, y,
-        N, H, W, OC, H_out, W_out, tiles_wo,
-        C=C, K=K, BIAS=1 if bias is not None else 0,
-        BLOCK_HO=BLOCK_HO, BLOCK_WO=BLOCK_WO, BLOCK_OC=BLOCK_OC,
-        num_warps=8, num_stages=2,
+        x_c,
+        w_c,
+        b_c,
+        y,
+        N,
+        H,
+        W,
+        OC,
+        H_out,
+        W_out,
+        tiles_wo,
+        C=C,
+        K=K,
+        BIAS=1 if bias is not None else 0,
+        BLOCK_HO=BLOCK_HO,
+        BLOCK_WO=BLOCK_WO,
+        BLOCK_OC=BLOCK_OC,
+        num_warps=8,
+        num_stages=2,
     )
     # Match input dtype
     if y.dtype != x.dtype:
@@ -173,10 +192,25 @@ class ModelNew(nn.Module):
         groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, stride: int = 1, padding: int = 0, dilation: int = 1, groups: int = 1, bias: bool = False):
+
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 kernel_size: int,
+                 stride: int = 1,
+                 padding: int = 0,
+                 dilation: int = 1,
+                 groups: int = 1,
+                 bias: bool = False):
         super(ModelNew, self).__init__()
         # Keep a reference PyTorch module for parameter management and fallback
-        self.conv2d = nn.Conv2d(in_channels, out_channels, (kernel_size, kernel_size), stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+        self.conv2d = nn.Conv2d(in_channels,
+                                out_channels, (kernel_size, kernel_size),
+                                stride=stride,
+                                padding=padding,
+                                dilation=dilation,
+                                groups=groups,
+                                bias=bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -199,19 +233,24 @@ class ModelNew(nn.Module):
         if self.conv2d.groups != 1:
             raise NotImplementedError("only groups=1 is supported")
         if x.requires_grad:
-            raise NotImplementedError("autograd is not supported for this Triton path")
+            raise NotImplementedError(
+                "autograd is not supported for this Triton path")
 
         w = self.conv2d.weight
         b = self.conv2d.bias
         if w.device.type != "npu":
-            raise ValueError("model weights must be placed on NPU before calling forward")
+            raise ValueError(
+                "model weights must be placed on NPU before calling forward")
         if b is not None and b.device.type != "npu":
-            raise ValueError("model bias must be placed on NPU before calling forward")
+            raise ValueError(
+                "model bias must be placed on NPU before calling forward")
         if w.dtype != x.dtype:
             w = w.to(dtype=x.dtype)
         if b is not None and b.dtype != x.dtype:
             b = b.to(dtype=x.dtype)
         return conv2d_standard_2d_square_input_square_kernel(x, w, b)
+
+
 batch_size = 16
 in_channels = 16
 out_channels = 128
@@ -219,8 +258,13 @@ kernel_size = 3
 width = 1024
 height = 1024
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, height, width)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization
+    return [
+        in_channels, out_channels, kernel_size
+    ]  # Provide in_channels, out_channels, kernel_size for initialization

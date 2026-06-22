@@ -130,6 +130,7 @@ class ModelNew(nn.Module):
     """
     Performs row-wise L1 normalization with a Triton kernel on Ascend NPU.
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -139,7 +140,8 @@ class ModelNew(nn.Module):
         if x.ndim != 2:
             raise ValueError("ModelNew expects a 2D tensor")
         if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-            raise TypeError("ModelNew supports float16, bfloat16, and float32 inputs")
+            raise TypeError(
+                "ModelNew supports float16, bfloat16, and float32 inputs")
 
         B, N = x.shape
         x_contig = x.contiguous()
@@ -167,21 +169,30 @@ class ModelNew(nn.Module):
             num_warps = 2 if BLOCK_SIZE < 512 else 4
             num_stages = 4
 
-        _l1norm_row_kernel[(B,)](
-            x_contig, y,
-            B, N,
-            stride_xm, stride_xn,
-            stride_ym, stride_yn,
+        _l1norm_row_kernel[(B, )](
+            x_contig,
+            y,
+            B,
+            N,
+            stride_xm,
+            stride_xn,
+            stride_ym,
+            stride_yn,
             BLOCK_SIZE=BLOCK_SIZE,
             num_warps=num_warps,
             num_stages=num_stages,
         )
         return y
+
+
 batch_size = 32768
 dim = 65535
+
 
 def get_inputs():
     x = torch.rand(batch_size, dim)
     return [x]
+
+
 def get_init_inputs():
     return []

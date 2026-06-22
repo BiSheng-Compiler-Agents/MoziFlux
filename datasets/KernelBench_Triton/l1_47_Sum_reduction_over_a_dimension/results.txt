@@ -1,0 +1,22 @@
+TEST baseline1 dim1_target PASS
+TEST baseline2 dim1_target PASS
+TEST optimized dim1_target PASS
+TEST baseline1 dim1_irregular PASS
+TEST baseline2 dim1_irregular PASS
+TEST optimized dim1_irregular PASS
+TEST baseline1 dim0_small INFO_EXCEPTION UnsupportedLanguageConstruct
+TEST baseline2 dim0_small INFO_EXCEPTION UnsupportedLanguageConstruct
+TEST optimized dim0_small PASS
+TEST baseline1 dim2_small PASS
+TEST baseline2 dim2_small PASS
+TEST optimized dim2_small PASS
+UNIT_TEST PASS
+
+INFO bench baseline1 dim0_small UnsupportedLanguageConstruct
+INFO bench baseline2 dim0_small UnsupportedLanguageConstruct
+sum_reduction_dim_benchmark:
+            label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0     dim1_target       6.676604         21.039068         10.482754          8.159059
+1  dim1_irregular       0.005149          0.022781          0.011199          0.011612
+2      dim0_small       0.003826               inf               inf          0.005197
+3      dim2_small       0.004948          0.006401          0.006352          0.004992

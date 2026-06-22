@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_CHANNELS = 8
 DEFAULT_OUT_CHANNELS = 64
@@ -11,7 +10,7 @@ DEFAULT_DEPTH = 16
 DEFAULT_HEIGHT = 64
 DEFAULT_WIDTH = 64
 DEFAULT_KERNEL_SIZE = 3
-DEFAULT_SUM_TENSOR_SHAPE = (out_channels, 1, 1, 1)
+DEFAULT_SUM_TENSOR_SHAPE = (DEFAULT_OUT_CHANNELS, 1, 1, 1)
 
 
 @triton.autotune(
@@ -26,12 +25,12 @@ DEFAULT_SUM_TENSOR_SHAPE = (out_channels, 1, 1, 1)
 )
 @triton.jit
 def _fused_post_conv_kernel(
-    x_ptr,          # *float32, input from conv: [N, C, D, H, W] flattened
-    sum_ptr,        # *float32, per-channel bias: [C]
-    y_ptr,          # *float32, output buffer (same shape as x)
-    inner,          # int32, D*H*W
-    C,              # int32, number of channels
-    n_elements,     # int32, total number of elements in x
+    x_ptr,  # *float32, input from conv: [N, C, D, H, W] flattened
+    sum_ptr,  # *float32, per-channel bias: [C]
+    y_ptr,  # *float32, output buffer (same shape as x)
+    inner,  # int32, D*H*W
+    C,  # int32, number of channels
+    n_elements,  # int32, total number of elements in x
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -75,6 +74,7 @@ class ModelNew(nn.Module):
     Model that performs a 3D convolution, applies LeakyReLU, sums with a tensor, clamps, and applies GELU activation.
     Fuses the elementwise ops after convolution into a single Triton kernel for better performance.
     """
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -101,12 +101,20 @@ class ModelNew(nn.Module):
         bias = self.sum_tensor.view(C).contiguous()
         out = torch.empty_like(x_contig)
 
-        grid = lambda META: (triton.cdiv(n_elements, META["BLOCK_SIZE"]),)
+        def grid(META):
+            return (triton.cdiv(n_elements, META["BLOCK_SIZE"]), )
+
         _fused_post_conv_kernel[grid](
-            x_contig, bias, out,
-            inner, C, n_elements,
+            x_contig,
+            bias,
+            out,
+            inner,
+            C,
+            n_elements,
         )
         return out
+
+
 batch_size = 128
 in_channels = 8
 out_channels = 64
@@ -114,7 +122,10 @@ depth, height, width = 16, 64, 64
 kernel_size = 3
 sum_tensor_shape = (out_channels, 1, 1, 1)
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, depth, height, width)]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, sum_tensor_shape]

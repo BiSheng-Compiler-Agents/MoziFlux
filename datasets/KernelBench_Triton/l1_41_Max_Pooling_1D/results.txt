@@ -1,0 +1,21 @@
+TEST baseline1 direct_small PASS
+TEST baseline2 direct_small PASS
+TEST optimized direct_small PASS
+TEST baseline1 persistent_synthetic SKIP coreDim_guard
+TEST baseline2 persistent_synthetic SKIP coreDim_guard
+TEST optimized persistent_synthetic PASS
+TEST baseline1 target_original SKIP coreDim_guard
+TEST baseline2 target_original SKIP coreDim_guard
+TEST optimized target_original PASS
+TEST optimized index_direct PASS
+UNIT_TEST PASS
+
+INFO baseline1 persistent_synthetic INF coreDim_guard
+INFO baseline2 persistent_synthetic INF coreDim_guard
+INFO baseline1 target_original INF coreDim_guard
+INFO baseline2 target_original INF coreDim_guard
+maxpool1d-performance:
+                  label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0          direct_small       0.002732          0.008886          0.009462          0.111660
+1  persistent_synthetic       1.243711               inf               inf        217.329910
+2       target_original      62.552849               inf               inf        230.586624

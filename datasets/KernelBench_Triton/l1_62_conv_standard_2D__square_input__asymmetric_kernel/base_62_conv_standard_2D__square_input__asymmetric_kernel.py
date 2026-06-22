@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,9 +7,15 @@ import triton.language as tl
 
 @triton.jit
 def _gemm_kernel(
-    a_ptr, b_ptr, c_ptr,
-    M: tl.constexpr, N: tl.constexpr, K: tl.constexpr,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    M: tl.constexpr,
+    N: tl.constexpr,
+    K: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
     A_ROW_MAJOR: tl.constexpr,
 ):
     pid_m = tl.program_id(axis=0)
@@ -54,7 +59,9 @@ def conv2d_triton(
     groups: int = 1,
 ) -> torch.Tensor:
     if x.device.type != "npu":
-        raise ValueError(f"conv2d_triton requires an Ascend NPU tensor, got {x.device.type!r}")
+        raise ValueError(
+            f"conv2d_triton requires an Ascend NPU tensor, got {x.device.type!r}"
+        )
     if groups != 1:
         raise NotImplementedError("conv2d_triton only supports groups=1")
     if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
@@ -85,8 +92,11 @@ def conv2d_triton(
 
     # im2col on NPU via unfold
     x_c = x.contiguous()
-    x_unfold = F.unfold(x_c, kernel_size=(KH, KW), dilation=(DILH, DILW),
-                         padding=(PADH, PADW), stride=(STRH, STRW))
+    x_unfold = F.unfold(x_c,
+                        kernel_size=(KH, KW),
+                        dilation=(DILH, DILW),
+                        padding=(PADH, PADW),
+                        stride=(STRH, STRW))
     # x_unfold: (B, Kdim, OH*OW) -> (Mdim, Kdim) row-major
     x_mat = x_unfold.permute(0, 2, 1).reshape(Mdim, Kdim).contiguous()
 
@@ -101,14 +111,22 @@ def conv2d_triton(
     NUM_STAGES = 2
 
     def grid(meta):
-        return (triton.cdiv(Mdim, meta["BLOCK_M"]), triton.cdiv(Ndim, meta["BLOCK_N"]))
+        return (triton.cdiv(Mdim, meta["BLOCK_M"]),
+                triton.cdiv(Ndim, meta["BLOCK_N"]))
 
     _gemm_kernel[grid](
-        x_mat, w_mat, y_flat,
-        M=Mdim, N=Ndim, K=Kdim,
-        BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N, BLOCK_K=BLOCK_K,
+        x_mat,
+        w_mat,
+        y_flat,
+        M=Mdim,
+        N=Ndim,
+        K=Kdim,
+        BLOCK_M=BLOCK_M,
+        BLOCK_N=BLOCK_N,
+        BLOCK_K=BLOCK_K,
         A_ROW_MAJOR=True,
-        num_warps=8, num_stages=NUM_STAGES,
+        num_warps=8,
+        num_stages=NUM_STAGES,
     )
 
     # Reshape back to NCHW (already in out_dtype, no final cast needed)
@@ -133,13 +151,25 @@ class ModelNew(nn.Module):
         groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: tuple, stride: int = 1, padding: int = 0, dilation: int = 1, groups: int = 1, bias: bool = False):
+
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 kernel_size: tuple,
+                 stride: int = 1,
+                 padding: int = 0,
+                 dilation: int = 1,
+                 groups: int = 1,
+                 bias: bool = False):
         super(ModelNew, self).__init__()
-        self.conv2d = nn.Conv2d(
-            in_channels, out_channels, kernel_size,
-            stride=stride, padding=padding, dilation=dilation,
-            groups=groups, bias=bias
-        )
+        self.conv2d = nn.Conv2d(in_channels,
+                                out_channels,
+                                kernel_size,
+                                stride=stride,
+                                padding=padding,
+                                dilation=dilation,
+                                groups=groups,
+                                bias=bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -160,6 +190,8 @@ class ModelNew(nn.Module):
             dilation=self.conv2d.dilation,
             groups=self.conv2d.groups,
         )
+
+
 batch_size = 8
 in_channels = 32
 out_channels = 64
@@ -167,8 +199,13 @@ kernel_size = (5, 9)
 width = 512
 height = 512
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, height, width)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization
+    return [
+        in_channels, out_channels, kernel_size
+    ]  # Provide in_channels, out_channels, kernel_size for initialization

@@ -1,0 +1,29 @@
+TEST PyTorch / ACL small_singlepass PASS
+TEST baseline1 small_singlepass PASS max_abs=1.117587e-08
+TEST baseline2 small_singlepass PASS max_abs=1.117587e-08
+TEST optimized small_singlepass PASS max_abs=7.450581e-09
+TEST PyTorch / ACL irregular_medium PASS
+TEST baseline1 irregular_medium PASS max_abs=3.725290e-09
+TEST baseline2 irregular_medium PASS max_abs=3.725290e-09
+TEST optimized irregular_medium PASS max_abs=3.725290e-09
+TEST PyTorch / ACL overflow_rows PASS
+TEST baseline1 overflow_rows SKIP coreDim_guard rows=70000
+TEST baseline2 overflow_rows SKIP coreDim_guard rows=70000
+TEST optimized overflow_rows PASS max_abs=1.192093e-07
+TEST PyTorch / ACL target_32768x65535 PASS
+TEST baseline1 target_32768x65535 PASS max_abs=1.862645e-09
+TEST baseline2 target_32768x65535 PASS max_abs=1.862645e-09
+TEST optimized target_32768x65535 PASS max_abs=1.862645e-09
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l1_39_L2Norm__1782338823/39_L2Norm_.py:108: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x_c)
+l2norm_rowwise:
+                label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    small_singlepass       0.010601          0.011600          0.011024          0.004830
+1    irregular_medium       0.050221          0.066155          0.056074          0.055870
+2       overflow_rows       0.016581               inf               inf          1.201293
+3  target_32768x65535      17.361588         15.572003         17.040531         15.493136
+
+/home/s00929845/kernel_verify/l1_39_L2Norm__1782338823/39_L2Norm_.py:108: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x_c)

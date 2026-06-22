@@ -25,7 +25,8 @@ def _scale_kernel(x_ptr, y_ptr, s, n_elements, BLOCK_SIZE: tl.constexpr):
 
 
 @triton.jit
-def _scale_kernel_fallback(x_ptr, y_ptr, s, n_elements, BLOCK_SIZE: tl.constexpr):
+def _scale_kernel_fallback(x_ptr, y_ptr, s, n_elements,
+                           BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(0)
     block_start = pid * BLOCK_SIZE
     offsets = block_start + tl.arange(0, BLOCK_SIZE)
@@ -34,7 +35,9 @@ def _scale_kernel_fallback(x_ptr, y_ptr, s, n_elements, BLOCK_SIZE: tl.constexpr
     s_cast = tl.full((), s, x.dtype)
     tl.store(y_ptr + offsets, x * s_cast, mask=mask)
 
+
 class ModelNew(nn.Module):
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -48,26 +51,44 @@ class ModelNew(nn.Module):
         if n_elements == 0:
             return C
 
-        if A.ndim == 2 and A.shape == (TARGET_M, TARGET_N) and A.dtype == torch.float32:
+        if A.ndim == 2 and A.shape == (TARGET_M,
+                                       TARGET_N) and A.dtype == torch.float32:
+
             def grid(meta):
                 exact_blocks = TARGET_NUMEL // meta["BLOCK_SIZE"]
-                return (min(exact_blocks, 32768),)
+                return (min(exact_blocks, 32768), )
 
-            _scale_kernel[grid](A, C, float(s), TARGET_NUMEL, BLOCK_SIZE=16384, num_warps=8, num_stages=1)
+            _scale_kernel[grid](A,
+                                C,
+                                float(s),
+                                TARGET_NUMEL,
+                                BLOCK_SIZE=16384,
+                                num_warps=8,
+                                num_stages=1)
             return C
 
         def grid(meta):
-            return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-        _scale_kernel_fallback[grid](A, C, float(s), n_elements, BLOCK_SIZE=FALLBACK_BLOCK_SIZE, num_warps=8, num_stages=1)
+            return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]), )
+
+        _scale_kernel_fallback[grid](A,
+                                     C,
+                                     float(s),
+                                     n_elements,
+                                     BLOCK_SIZE=FALLBACK_BLOCK_SIZE,
+                                     num_warps=8,
+                                     num_stages=1)
         return C
+
 
 M = 16384 * 4
 N = 4096 * 4
+
 
 def get_inputs():
     A = torch.rand(M, N)
     s = 3.14
     return [A, s]
+
 
 def get_init_inputs():
     return []

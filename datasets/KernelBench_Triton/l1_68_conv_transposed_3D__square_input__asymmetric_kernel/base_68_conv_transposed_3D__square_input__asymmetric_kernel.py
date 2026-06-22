@@ -19,6 +19,7 @@ PERM_FLIP_NUM_STAGES = 0
 # Mapping:
 #   out[co, ci, kd, kh, kw] = inp[ci, co, KD-1-kd, KH-1-kh, KW-1-kw]
 if TRITON_AVAILABLE:
+
     @triton.jit
     def _perm_flip_w_kernel(
         inp_ptr,  # *T [CI, CO, KD, KH, KW]
@@ -48,7 +49,9 @@ if TRITON_AVAILABLE:
             mask=mask,
             other=0,
         )
-        tl.store(out_ptr + out_base[:, None] + spatial_offs[None, :], vals, mask=mask)
+        tl.store(out_ptr + out_base[:, None] + spatial_offs[None, :],
+                 vals,
+                 mask=mask)
 
     # Grouped variant: inp [CI, COG, KD, KH, KW] -> out [CO, CIG, KD, KH, KW] with spatial flip
     # where CIG = CI // G and COG = CO // G
@@ -87,7 +90,9 @@ if TRITON_AVAILABLE:
             mask=mask,
             other=0,
         )
-        tl.store(out_ptr + out_base[:, None] + spatial_offs[None, :], vals, mask=mask)
+        tl.store(out_ptr + out_base[:, None] + spatial_offs[None, :],
+                 vals,
+                 mask=mask)
 
 
 class ModelNew(nn.Module):
@@ -97,7 +102,7 @@ class ModelNew(nn.Module):
     Args:
         in_channels (int): Number of channels in the input tensor.
         out_channels (int): Number of channels produced by the convolution.
-        kernel_size (tuple): Size of the convolution kernel (kernel_depth, kernel_width, kernel_height), 
+        kernel_size (tuple): Size of the convolution kernel (kernel_depth, kernel_width, kernel_height),
                              where kernel_width == kernel_height.
         stride (tuple, optional): Stride of the convolution. Defaults to (1, 1, 1).
         padding (tuple, optional): Padding applied to the input. Defaults to (0, 0, 0).
@@ -105,6 +110,7 @@ class ModelNew(nn.Module):
         groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
+
     def __init__(
         self,
         in_channels: int = 32,
@@ -132,11 +138,9 @@ class ModelNew(nn.Module):
         ct = self.conv_transpose3d
         # Map ConvTranspose3d to Conv3d when stride == 1, dilation == 1, output_padding == 0
         # and derived conv padding is non-negative. Supports groups.
-        if not (
-            ct.stride == (1, 1, 1)
-            and getattr(ct, "dilation", (1, 1, 1)) == (1, 1, 1)
-            and ct.output_padding == (0, 0, 0)
-        ):
+        if not (ct.stride == (1, 1, 1) and getattr(ct, "dilation",
+                                                   (1, 1, 1)) == (1, 1, 1)
+                and ct.output_padding == (0, 0, 0)):
             return False
         KD, KH, KW = ct.weight.shape[2], ct.weight.shape[3], ct.weight.shape[4]
         pd, ph, pw = ct.padding
@@ -154,9 +158,11 @@ class ModelNew(nn.Module):
             launch_kwargs["num_stages"] = PERM_FLIP_NUM_STAGES
         if G == 1:
             CI, CO, KD, KH, KW = w.shape
-            out = torch.empty((CO, CI, KD, KH, KW), device=w.device, dtype=w.dtype)
+            out = torch.empty((CO, CI, KD, KH, KW),
+                              device=w.device,
+                              dtype=w.dtype)
             total_pairs = CO * CI
-            grid = (triton.cdiv(total_pairs, PERM_FLIP_BLOCK_PAIRS),)
+            grid = (triton.cdiv(total_pairs, PERM_FLIP_BLOCK_PAIRS), )
             _perm_flip_w_kernel[grid](
                 w,
                 out,
@@ -174,9 +180,11 @@ class ModelNew(nn.Module):
             CI, COG, KD, KH, KW = w.shape
             CO = self.conv_transpose3d.out_channels
             CIG = CI // G
-            out = torch.empty((CO, CIG, KD, KH, KW), device=w.device, dtype=w.dtype)
+            out = torch.empty((CO, CIG, KD, KH, KW),
+                              device=w.device,
+                              dtype=w.dtype)
             total_pairs = CO * CIG
-            grid = (triton.cdiv(total_pairs, PERM_FLIP_BLOCK_PAIRS),)
+            grid = (triton.cdiv(total_pairs, PERM_FLIP_BLOCK_PAIRS), )
             _perm_flip_w_kernel_grouped[grid](
                 w,
                 out,
@@ -196,7 +204,9 @@ class ModelNew(nn.Module):
         # PyTorch fallback handling groups correctly
         ct = self.conv_transpose3d
         G = ct.groups
-        CI, COG, KD, KH, KW = w.shape if G > 1 else (w.shape[0], w.shape[1], w.shape[2], w.shape[3], w.shape[4])
+        CI, COG, KD, KH, KW = w.shape if G > 1 else (w.shape[0], w.shape[1],
+                                                     w.shape[2], w.shape[3],
+                                                     w.shape[4])
         if G == 1:
             # [CI, CO, KD, KH, KW] -> [CO, CI, KD, KH, KW] with spatial flip
             return w.permute(1, 0, 2, 3, 4).flip(dims=(2, 3, 4)).contiguous()
@@ -205,9 +215,9 @@ class ModelNew(nn.Module):
             w_view = w.view(G, CIG, COG, KD, KH, KW)
             w_rot = (
                 w_view.permute(0, 2, 1, 3, 4, 5)  # [G, COG, CIG, KD, KH, KW]
-                .flip(dims=(3, 4, 5))             # spatial flip
-                .contiguous()
-                .view(G * COG, CIG, KD, KH, KW)   # [CO, CIG, KD, KH, KW]
+                .flip(dims=(3, 4, 5))  # spatial flip
+                .contiguous().view(G * COG, CIG, KD, KH,
+                                   KW)  # [CO, CIG, KD, KH, KW]
             )
             return w_rot
 
@@ -224,9 +234,13 @@ class ModelNew(nn.Module):
         ct = self.conv_transpose3d
 
         if x.device.type != "npu":
-            raise RuntimeError(f"ModelNew requires NPU inputs, but received device={x.device}.")
+            raise RuntimeError(
+                f"ModelNew requires NPU inputs, but received device={x.device}."
+            )
         if not TRITON_AVAILABLE:
-            raise RuntimeError("Triton is required for ModelNew, but it is not available in this environment.")
+            raise RuntimeError(
+                "Triton is required for ModelNew, but it is not available in this environment."
+            )
         if not self._fastpath_available():
             raise RuntimeError(
                 "ModelNew only supports the Triton fast path "
@@ -250,6 +264,8 @@ class ModelNew(nn.Module):
             dilation=1,
             groups=ct.groups,
         )
+
+
 batch_size = 16
 in_channels = 32
 out_channels = 64
@@ -260,8 +276,13 @@ depth = 64
 width = 64
 height = 64
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, depth, width, height)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, (kernel_depth, kernel_width, kernel_height)]  # Provide in_channels, out_channels, kernel_size for initialization
+    return [
+        in_channels, out_channels, (kernel_depth, kernel_width, kernel_height)
+    ]  # Provide in_channels, out_channels, kernel_size for initialization

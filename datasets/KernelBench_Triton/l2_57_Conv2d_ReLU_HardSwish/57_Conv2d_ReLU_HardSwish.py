@@ -44,7 +44,7 @@ def fused_relu_hardswish(x: torch.Tensor) -> torch.Tensor:
         num_warps = 4
         num_stages = 1
 
-    grid = (triton.cdiv(n_elements, block_size),)
+    grid = (triton.cdiv(n_elements, block_size), )
     _relu_hswish_inplace_kernel[grid](
         x,
         n_elements,
@@ -59,6 +59,7 @@ class ModelNew(nn.Module):
     """
     Simple model that performs a convolution, applies ReLU, and applies HardSwish activation.
     """
+
     def __init__(self, in_channels, out_channels, kernel_size):
         super(ModelNew, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
@@ -83,24 +84,31 @@ def _set_deterministic_seed(seed: int) -> None:
 
 def conv2d_relu_hardswish(x: torch.Tensor) -> torch.Tensor:
     if x.device.type != "npu":
-        raise RuntimeError("conv2d_relu_hardswish expects an Ascend NPU tensor")
+        raise RuntimeError(
+            "conv2d_relu_hardswish expects an Ascend NPU tensor")
 
     key = (str(x.device), x.dtype)
     model = _MODEL_CACHE.get(key)
     if model is None:
         _set_deterministic_seed(0)
-        model = ModelNew(*get_init_inputs()).eval().to(device=x.device, dtype=x.dtype)
+        model = ModelNew(*get_init_inputs()).eval().to(device=x.device,
+                                                       dtype=x.dtype)
         _MODEL_CACHE[key] = model
 
     with torch.no_grad():
         return model(x)
+
+
 batch_size = 128
 in_channels = 8
 out_channels = 64
 height, width = 128, 128
 kernel_size = 3
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size]

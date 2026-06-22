@@ -1,0 +1,16 @@
+TEST baseline1 small_direct SKIP comparison_provider
+TEST baseline2 small_direct SKIP comparison_provider
+TEST optimized small_direct PASS
+TEST baseline1 medium_direct SKIP comparison_provider
+TEST baseline2 medium_direct SKIP comparison_provider
+TEST optimized medium_direct PASS
+TEST baseline1 target_direct SKIP comparison_provider
+TEST baseline2 target_direct SKIP comparison_provider
+TEST optimized target_direct PASS
+UNIT_TEST PASS
+
+convtranspose3d_mean_add_softmax_tanh_scaling:
+           label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   small_direct       0.001599               inf               inf          0.001044
+1  medium_direct       0.001953               inf               inf          0.001278
+2  target_direct       0.023348               inf               inf          0.022468

@@ -29,8 +29,8 @@ def _groupnorm_stats_kernel(
     c_idx = g * channels_per_group + offs_c
     base = (n * C + c_idx)[:, None] * HW
 
-    sums = tl.zeros((BLOCK_C,), dtype=tl.float32)
-    sums_sq = tl.zeros((BLOCK_C,), dtype=tl.float32)
+    sums = tl.zeros((BLOCK_C, ), dtype=tl.float32)
+    sums_sq = tl.zeros((BLOCK_C, ), dtype=tl.float32)
 
     start = 0
     while start < HW:
@@ -38,7 +38,8 @@ def _groupnorm_stats_kernel(
         if USE_HINTS:
             hw = tl.max_contiguous(hw, BLOCK_HW)
         mask = valid_c[:, None] & (hw[None, :] < HW)
-        x = tl.load(x_ptr + base + hw[None, :], mask=mask, other=0.0).to(tl.float32)
+        x = tl.load(x_ptr + base + hw[None, :], mask=mask,
+                    other=0.0).to(tl.float32)
         sums += tl.sum(x, axis=1)
         sums_sq += tl.sum(x * x, axis=1)
         start += BLOCK_HW
@@ -119,8 +120,8 @@ def _groupnorm_fused_kernel(
     c_idx = g * channels_per_group + offs_c
     base = (n * C + c_idx)[:, None] * HW
 
-    sums = tl.zeros((BLOCK_C,), dtype=tl.float32)
-    sums_sq = tl.zeros((BLOCK_C,), dtype=tl.float32)
+    sums = tl.zeros((BLOCK_C, ), dtype=tl.float32)
+    sums_sq = tl.zeros((BLOCK_C, ), dtype=tl.float32)
 
     start = 0
     while start < HW:
@@ -128,7 +129,8 @@ def _groupnorm_fused_kernel(
         if USE_HINTS:
             hw = tl.max_contiguous(hw, BLOCK_HW)
         mask = valid_c[:, None] & (hw[None, :] < HW)
-        x = tl.load(x_ptr + base + hw[None, :], mask=mask, other=0.0).to(tl.float32)
+        x = tl.load(x_ptr + base + hw[None, :], mask=mask,
+                    other=0.0).to(tl.float32)
         sums += tl.sum(x, axis=1)
         sums_sq += tl.sum(x * x, axis=1)
         start += BLOCK_HW
@@ -149,7 +151,8 @@ def _groupnorm_fused_kernel(
         if USE_HINTS:
             hw = tl.max_contiguous(hw, BLOCK_HW)
         mask = valid_c[:, None] & (hw[None, :] < HW)
-        x = tl.load(x_ptr + base + hw[None, :], mask=mask, other=0.0).to(tl.float32)
+        x = tl.load(x_ptr + base + hw[None, :], mask=mask,
+                    other=0.0).to(tl.float32)
         y = ((x - mean) * rstd) * gamma[:, None] + beta[:, None]
         tl.store(y_ptr + base + hw[None, :], y, mask=mask)
         start += BLOCK_HW
@@ -163,11 +166,14 @@ def group_norm_triton(
     eps: float,
 ):
     if not getattr(x, "is_npu", False):
-        raise RuntimeError("group_norm_triton expects an input tensor on Ascend NPU")
+        raise RuntimeError(
+            "group_norm_triton expects an input tensor on Ascend NPU")
     if x.requires_grad:
-        raise RuntimeError("group_norm_triton does not support autograd-enabled inputs")
+        raise RuntimeError(
+            "group_norm_triton does not support autograd-enabled inputs")
     if x.ndim < 3:
-        raise ValueError("group_norm_triton expects input with shape (N, C, ...)")
+        raise ValueError(
+            "group_norm_triton expects input with shape (N, C, ...)")
 
     x = x.contiguous()
     N, C = x.shape[:2]
@@ -193,9 +199,13 @@ def group_norm_triton(
     use_hints = True
 
     if "fused" == "two_stage":
-        mean = torch.empty((N, num_groups), device=x.device, dtype=torch.float32)
-        rstd = torch.empty((N, num_groups), device=x.device, dtype=torch.float32)
-        _groupnorm_stats_kernel[(N * num_groups,)](
+        mean = torch.empty((N, num_groups),
+                           device=x.device,
+                           dtype=torch.float32)
+        rstd = torch.empty((N, num_groups),
+                           device=x.device,
+                           dtype=torch.float32)
+        _groupnorm_stats_kernel[(N * num_groups, )](
             x_flat,
             mean,
             rstd,
@@ -212,7 +222,7 @@ def group_norm_triton(
             num_warps=8,
             num_stages=4,
         )
-        _groupnorm_fwd_kernel[(N * C,)](
+        _groupnorm_fwd_kernel[(N * C, )](
             x_flat,
             y_flat,
             mean,
@@ -230,7 +240,7 @@ def group_norm_triton(
             num_stages=4,
         )
     else:
-        _groupnorm_fused_kernel[(N * num_groups,)](
+        _groupnorm_fused_kernel[(N * num_groups, )](
             x_flat,
             y_flat,
             w,
@@ -252,15 +262,19 @@ def group_norm_triton(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self, num_features: int = 64, num_groups: int = 8):
         super(ModelNew, self).__init__()
-        self.gn = nn.GroupNorm(num_groups=num_groups, num_channels=num_features)
+        self.gn = nn.GroupNorm(num_groups=num_groups,
+                               num_channels=num_features)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if not getattr(x, "is_npu", False):
-            raise RuntimeError("ModelNew expects an input tensor on Ascend NPU")
+            raise RuntimeError(
+                "ModelNew expects an input tensor on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
         return group_norm_triton(
             x,
             self.gn.weight,

@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 batch_size = 16
 in_channels = 32
 out_channels = 64
@@ -36,7 +35,10 @@ def _touch_triton_path(y: torch.Tensor) -> None:
     n_elements = y.numel()
     if n_elements == 0:
         return
-    grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+    def grid(meta):
+        return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]), )
+
     _touch_inplace_kernel[grid](y, n_elements, BLOCK_SIZE=256)
 
 
@@ -87,6 +89,8 @@ def run_operator(x: torch.Tensor) -> torch.Tensor:
         model.eval()
         _MODEL_CACHE[key] = model
     return model(x)
+
+
 batch_size = 4
 in_channels = 32
 out_channels = 32
@@ -98,8 +102,11 @@ stride = 2
 padding = 1
 groups = 4
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, depth, height, width, device='npu')
     return [x]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, stride, padding, groups]

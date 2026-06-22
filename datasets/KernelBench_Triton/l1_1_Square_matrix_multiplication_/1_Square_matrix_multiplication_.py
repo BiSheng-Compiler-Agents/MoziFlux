@@ -63,15 +63,21 @@ def _require_supported_runtime(tensor: torch.Tensor) -> None:
     )
 
 
-def _validate_inputs(a: torch.Tensor, b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def _validate_inputs(a: torch.Tensor,
+                     b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     if a.ndim != 2 or b.ndim != 2:
         raise ValueError("ModelNew expects two 2D tensors.")
     if a.shape[1] != b.shape[0]:
-        raise ValueError(f"Incompatible shapes for matmul: {tuple(a.shape)} and {tuple(b.shape)}.")
+        raise ValueError(
+            f"Incompatible shapes for matmul: {tuple(a.shape)} and {tuple(b.shape)}."
+        )
     if a.shape[0] != a.shape[1] or b.shape[0] != b.shape[1]:
-        raise ValueError("This operator is defined for square matrix multiplication inputs.")
+        raise ValueError(
+            "This operator is defined for square matrix multiplication inputs."
+        )
     if a.shape[1] != b.shape[0]:
-        raise ValueError("Square matrices must share the same inner dimension.")
+        raise ValueError(
+            "Square matrices must share the same inner dimension.")
     if a.device != b.device:
         raise ValueError("Inputs must be on the same device.")
     if a.dtype != b.dtype:
@@ -128,12 +134,18 @@ class ModelNew(nn.Module):
             torch.Tensor: Output matrix C of shape (N, N).
         """
         return _triton_square_matmul(A, B)
+
+
 N = 2048 * 2
 
+
 def get_inputs():
-    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    device = "npu" if hasattr(torch,
+                              "npu") and torch.npu.is_available() else "cpu"
     A = torch.rand(N, N, device=device)
     B = torch.rand(N, N, device=device)
     return [A, B]
+
+
 def get_init_inputs():
     return []  # No special initialization inputs needed

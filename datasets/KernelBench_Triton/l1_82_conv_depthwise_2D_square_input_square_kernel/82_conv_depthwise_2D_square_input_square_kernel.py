@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 import triton
@@ -12,25 +11,37 @@ DEFAULT_PADDING = 0
 
 @triton.jit
 def _dwconv2d_kernel(
-    x_ptr,        # *f32 [N, C, H, W]
-    w_ptr,        # *f32 [C, 1, K, K]
-    b_ptr,        # *f32 [C] or dummy
-    y_ptr,        # *f32 [N, C, H_OUT, W_OUT]
-    N, C, H, W,
-    H_OUT, W_OUT,
-    S: tl.constexpr,     # stride (square)
-    P: tl.constexpr,     # padding (square)
-    K: tl.constexpr,     # kernel size (square)
-    stride_xN, stride_xC, stride_xH, stride_xW,
-    stride_wC, stride_wH, stride_wW,
-    stride_yN, stride_yC, stride_yH, stride_yW,
+    x_ptr,  # *f32 [N, C, H, W]
+    w_ptr,  # *f32 [C, 1, K, K]
+    b_ptr,  # *f32 [C] or dummy
+    y_ptr,  # *f32 [N, C, H_OUT, W_OUT]
+    N,
+    C,
+    H,
+    W,
+    H_OUT,
+    W_OUT,
+    S: tl.constexpr,  # stride (square)
+    P: tl.constexpr,  # padding (square)
+    K: tl.constexpr,  # kernel size (square)
+    stride_xN,
+    stride_xC,
+    stride_xH,
+    stride_xW,
+    stride_wC,
+    stride_wH,
+    stride_wW,
+    stride_yN,
+    stride_yC,
+    stride_yH,
+    stride_yW,
     HAS_BIAS: tl.constexpr,
     BLOCK_W: tl.constexpr,
 ):
     # program ids
-    pid_nc = tl.program_id(0)      # over N*C
-    pid_h = tl.program_id(1)       # over H_OUT
-    pid_w = tl.program_id(2)       # over W_OUT tiles
+    pid_nc = tl.program_id(0)  # over N*C
+    pid_h = tl.program_id(1)  # over H_OUT
+    pid_w = tl.program_id(2)  # over W_OUT tiles
 
     # derive n, c from pid_nc
     n = pid_nc // C
@@ -113,6 +124,7 @@ class ModelNew(nn.Module):
         padding (int, optional): Padding applied to the input. Defaults to 0.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -185,19 +197,39 @@ class ModelNew(nn.Module):
         num_warps = 8 if BLOCK_W >= 256 else 4
 
         _dwconv2d_kernel[grid](
-            x, w, (b if b is not None else y), y,
-            N, C, H, W,
-            H_OUT, W_OUT,
-            S=S, P=P, K=K,
-            stride_xN=stride_xN, stride_xC=stride_xC, stride_xH=stride_xH, stride_xW=stride_xW,
-            stride_wC=stride_wC, stride_wH=stride_wH, stride_wW=stride_wW,
-            stride_yN=stride_yN, stride_yC=stride_yC, stride_yH=stride_yH, stride_yW=stride_yW,
+            x,
+            w,
+            (b if b is not None else y),
+            y,
+            N,
+            C,
+            H,
+            W,
+            H_OUT,
+            W_OUT,
+            S=S,
+            P=P,
+            K=K,
+            stride_xN=stride_xN,
+            stride_xC=stride_xC,
+            stride_xH=stride_xH,
+            stride_xW=stride_xW,
+            stride_wC=stride_wC,
+            stride_wH=stride_wH,
+            stride_wW=stride_wW,
+            stride_yN=stride_yN,
+            stride_yC=stride_yC,
+            stride_yH=stride_yH,
+            stride_yW=stride_yW,
             HAS_BIAS=(1 if b is not None else 0),
             BLOCK_W=BLOCK_W,
             num_warps=num_warps,
-            num_stages=2,  # leaner pipeline for better occupancy on memory-bound kernel
+            num_stages=
+            2,  # leaner pipeline for better occupancy on memory-bound kernel
         )
         return y
+
+
 batch_size = 16
 in_channels = 64
 kernel_size = 3
@@ -206,8 +238,11 @@ height = 512
 stride = 1
 padding = 0
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, height, width)
     return [x]
+
+
 def get_init_inputs():
     return [in_channels, kernel_size, stride, padding]

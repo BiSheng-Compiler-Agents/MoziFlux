@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 BLOCK_N = 2048
 MAX_TILES = 4
 BLOCK_M = 4
@@ -39,7 +38,7 @@ def _row_max_kernel(
     row_mask = rows < B
     offs = tl.arange(0, BLOCK_SIZE)
     row_ptrs = x_ptr + rows[:, None] * stride_xm + offs[None, :] * stride_xn
-    row_max = tl.full((BLOCK_M,), -float("inf"), tl.float32)
+    row_max = tl.full((BLOCK_M, ), -float("inf"), tl.float32)
 
     if not HAS_VECTOR_SCALE:
         scalar_scale = tl.load(s_ptr).to(tl.float32)
@@ -102,9 +101,10 @@ def _row_exp_sum_store_kernel(
     row_mask = rows < B
     offs = tl.arange(0, BLOCK_SIZE)
     row_x_ptrs = x_ptr + rows[:, None] * stride_xm + offs[None, :] * stride_xn
-    row_o_ptrs = out_ptr + rows[:, None] * stride_om + offs[None, :] * stride_on
+    row_o_ptrs = out_ptr + rows[:,
+                                None] * stride_om + offs[None, :] * stride_on
     row_max = tl.load(max_ptr + rows, mask=row_mask, other=-float("inf"))
-    row_sum = tl.zeros((BLOCK_M,), dtype=tl.float32)
+    row_sum = tl.zeros((BLOCK_M, ), dtype=tl.float32)
 
     if not HAS_VECTOR_SCALE:
         scalar_scale = tl.load(s_ptr).to(tl.float32)
@@ -158,16 +158,21 @@ def _row_exp_sum_store_kernel(
         exp_z = tl.exp(z - row_max[:, None])
         rounded_exp = exp_z.to(x_raw.dtype)
         out = rounded_exp.to(tl.float32) * inv_sum[:, None]
-        tl.store(row_o_ptrs + tile_idx * BLOCK_SIZE * stride_on, out, mask=mask)
+        tl.store(row_o_ptrs + tile_idx * BLOCK_SIZE * stride_on,
+                 out,
+                 mask=mask)
 
 
 def _fused_scale_softmax(x: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
     if x.device.type != "npu":
         raise RuntimeError("_fused_scale_softmax expects inputs on Ascend NPU")
     if x.ndim != 2:
-        raise RuntimeError(f"_fused_scale_softmax expects a 2D tensor, got shape {tuple(x.shape)}")
+        raise RuntimeError(
+            f"_fused_scale_softmax expects a 2D tensor, got shape {tuple(x.shape)}"
+        )
     if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-        raise RuntimeError(f"Unsupported dtype for _fused_scale_softmax: {x.dtype}")
+        raise RuntimeError(
+            f"Unsupported dtype for _fused_scale_softmax: {x.dtype}")
 
     batch, cols = x.shape
     if cols > BLOCK_N * MAX_TILES:
@@ -177,19 +182,20 @@ def _fused_scale_softmax(x: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
 
     x_contig = x.contiguous()
     out = torch.empty_like(x_contig)
-    row_max = torch.empty((batch,), device=x.device, dtype=torch.float32)
+    row_max = torch.empty((batch, ), device=x.device, dtype=torch.float32)
     if scale.numel() == 1:
         has_vector_scale = 0
         scale_buf = scale.to(device=x.device, dtype=x.dtype).contiguous()
     elif scale.numel() == cols:
         has_vector_scale = 1
-        scale_buf = scale.reshape(cols).to(device=x.device, dtype=x.dtype).contiguous()
+        scale_buf = scale.reshape(cols).to(device=x.device,
+                                           dtype=x.dtype).contiguous()
     else:
         raise RuntimeError(
             f"_fused_scale_softmax only supports scalar or length-{cols} scale tensors, got {tuple(scale.shape)}"
         )
 
-    grid = (triton.cdiv(batch, BLOCK_M),)
+    grid = (triton.cdiv(batch, BLOCK_M), )
     _row_max_kernel[grid](
         x_contig,
         scale_buf,
@@ -223,30 +229,42 @@ def _fused_scale_softmax(x: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
 
 
 class ModelNew(nn.Module):
+
     def __init__(
-        self,
-        in_features=1024,
-        out_features=512,
-        bn_eps=1e-5,
-        bn_momentum=0.1,
-        scale_shape=(1,),
-        device="npu",
-        dtype=torch.float32,
+            self,
+            in_features=1024,
+            out_features=512,
+            bn_eps=1e-5,
+            bn_momentum=0.1,
+            scale_shape=(1, ),
+            device="npu",
+            dtype=torch.float32,
     ):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.gemm = nn.Linear(in_features, out_features, device=device, dtype=dtype)
-        self.bn = nn.BatchNorm1d(out_features, eps=bn_eps, momentum=bn_momentum, device=device, dtype=dtype)
-        self.scale = nn.Parameter(torch.ones(scale_shape, device=device, dtype=dtype))
+        self.gemm = nn.Linear(in_features,
+                              out_features,
+                              device=device,
+                              dtype=dtype)
+        self.bn = nn.BatchNorm1d(out_features,
+                                 eps=bn_eps,
+                                 momentum=bn_momentum,
+                                 device=device,
+                                 dtype=dtype)
+        self.scale = nn.Parameter(
+            torch.ones(scale_shape, device=device, dtype=dtype))
 
     def forward(self, x):
         if x.device.type != "npu":
             raise RuntimeError("ModelNew expects inputs on Ascend NPU")
         if x.ndim != 2 or x.shape[1] != self.in_features:
-            raise RuntimeError(f"ModelNew expects shape [batch, {self.in_features}], got {tuple(x.shape)}")
+            raise RuntimeError(
+                f"ModelNew expects shape [batch, {self.in_features}], got {tuple(x.shape)}"
+            )
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
 
         param = next(self.parameters())
         if param.device != x.device or param.dtype != x.dtype:
@@ -262,7 +280,7 @@ in_features = 8192
 out_features = 8192
 bn_eps = 1e-5
 bn_momentum = 0.1
-scale_shape = (1,)
+scale_shape = (1, )
 
 
 def get_inputs():

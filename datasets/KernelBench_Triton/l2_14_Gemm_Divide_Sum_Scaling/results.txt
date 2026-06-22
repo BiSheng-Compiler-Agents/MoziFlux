@@ -1,0 +1,20 @@
+TEST torch_ref small PASS
+TEST baseline1 small SKIP source_cache_modifier_cg
+TEST baseline2 small PASS
+TEST optimized small PASS
+TEST optimized_triton_fallback small PASS
+TEST torch_ref medium PASS
+TEST baseline1 medium SKIP source_cache_modifier_cg
+TEST baseline2 medium PASS
+TEST optimized medium PASS
+TEST torch_ref target PASS
+TEST baseline1 target SKIP source_cache_modifier_cg
+TEST baseline2 target SKIP value_mismatch max_abs=0.00610352
+TEST optimized target PASS
+UNIT_TEST PASS
+
+l2_14_gemm_divide_sum_scaling:
+    label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   small       0.026292               inf          0.004609          0.005132
+1  medium       0.787538               inf          0.017970          0.016015
+2  target       6.406435               inf          0.054942          6.408098

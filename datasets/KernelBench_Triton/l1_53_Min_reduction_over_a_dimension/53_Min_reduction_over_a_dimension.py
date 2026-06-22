@@ -173,6 +173,7 @@ class ModelNew(nn.Module):
     Simple model that performs min reduction over a specific dimension.
     Accelerated with Triton on Ascend NPU for 3D inputs.
     """
+
     def __init__(self, dim: int):
         """
         Initializes the model with the dimension to reduce over.
@@ -205,7 +206,8 @@ class ModelNew(nn.Module):
             torch.Tensor: Output tensor after min reduction over the specified dimension.
         """
         if x.ndim != 3:
-            raise ValueError(f"ModelNew expects a 3D tensor, got shape {tuple(x.shape)}")
+            raise ValueError(
+                f"ModelNew expects a 3D tensor, got shape {tuple(x.shape)}")
         if not hasattr(torch, "npu") or x.device.type != "npu":
             raise ValueError("ModelNew requires an Ascend NPU tensor input")
 
@@ -213,7 +215,8 @@ class ModelNew(nn.Module):
         if dim < 0:
             dim += x.ndim
         if dim not in (0, 1, 2):
-            raise ValueError(f"Unsupported reduction dim {self.dim} for 3D input")
+            raise ValueError(
+                f"Unsupported reduction dim {self.dim} for 3D input")
 
         B, M, N = x.shape
         sb, sm, sn = x.stride()
@@ -222,49 +225,71 @@ class ModelNew(nn.Module):
             raise ValueError("Zero-sized reductions are not supported")
 
         if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-            raise TypeError(f"Unsupported dtype for Triton reduction: {x.dtype}")
+            raise TypeError(
+                f"Unsupported dtype for Triton reduction: {x.dtype}")
 
         if dim == 2 and sn == 1:
             # reduce over last dim -> output [B, M]
             out = torch.empty((B, M), device=x.device, dtype=x.dtype)
             ob, om = out.stride()
-            grid = (B * M,)
+            grid = (B * M, )
             BK, NW = self._choose_block_and_warps(N)
             _min_reduce_last_kernel[grid](
-                x, out,
-                B, M, N,
-                sb, sm, sn,
-                ob, om,
+                x,
+                out,
+                B,
+                M,
+                N,
+                sb,
+                sm,
+                sn,
+                ob,
+                om,
                 BLOCK_K=BK,
-                num_warps=NW, num_stages=4,
+                num_warps=NW,
+                num_stages=4,
             )
             return out
         elif dim == 1:
             out = torch.empty((B, N), device=x.device, dtype=x.dtype)
             ob, on = out.stride()
-            grid = (B * N,)
+            grid = (B * N, )
             BK, NW = self._choose_block_and_warps(M)
             _min_reduce_mid_kernel[grid](
-                x, out,
-                B, M, N,
-                sb, sm, sn,
-                ob, on,
+                x,
+                out,
+                B,
+                M,
+                N,
+                sb,
+                sm,
+                sn,
+                ob,
+                on,
                 BLOCK_K=BK,
-                num_warps=NW, num_stages=4,
+                num_warps=NW,
+                num_stages=4,
             )
             return out
         elif dim == 0:
             out = torch.empty((M, N), device=x.device, dtype=x.dtype)
             om, on = out.stride()
-            grid = (M * N,)
+            grid = (M * N, )
             BK, NW = self._choose_block_and_warps(B)
             _min_reduce_first_kernel[grid](
-                x, out,
-                B, M, N,
-                sb, sm, sn,
-                om, on,
+                x,
+                out,
+                B,
+                M,
+                N,
+                sb,
+                sm,
+                sn,
+                om,
+                on,
                 BLOCK_K=BK,
-                num_warps=NW, num_stages=4,
+                num_warps=NW,
+                num_stages=4,
             )
             return out
         else:
@@ -275,12 +300,17 @@ class ModelNew(nn.Module):
 
 def min_reduce_triton(x: torch.Tensor, dim: int) -> torch.Tensor:
     return ModelNew(dim)(x)
+
+
 batch_size = 128
 dim1 = 4096
 dim2 = 4095
 
+
 def get_inputs():
     x = torch.rand(batch_size, dim1, dim2)
     return [x]
+
+
 def get_init_inputs():
-    return [1] # Example, change to desired dimension
+    return [1]  # Example, change to desired dimension

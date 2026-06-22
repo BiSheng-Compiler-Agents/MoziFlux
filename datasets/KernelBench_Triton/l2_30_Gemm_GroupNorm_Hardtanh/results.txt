@@ -1,0 +1,30 @@
+TEST torch small PASS shape=(16,1024,512,8)
+TEST baseline1 small PASS max_abs=3.576279e-07
+TEST baseline2 small PASS max_abs=3.576279e-07
+TEST optimized small PASS max_abs=2.384186e-07
+TEST torch medium PASS shape=(128,2048,2048,16)
+TEST baseline1 medium PASS max_abs=4.768372e-07
+TEST baseline2 medium PASS max_abs=4.768372e-07
+TEST optimized medium PASS max_abs=3.576279e-07
+TEST torch irregular PASS shape=(33,1536,768,12)
+TEST baseline1 irregular PASS max_abs=3.576279e-07
+TEST baseline2 irregular PASS max_abs=3.576279e-07
+TEST optimized irregular PASS max_abs=2.384186e-07
+TEST torch target PASS shape=(1024,8192,8192,16)
+TEST baseline1 target PASS max_abs=5.960464e-07
+TEST baseline2 target PASS max_abs=5.960464e-07
+TEST optimized target PASS max_abs=5.960464e-07
+TEST optimized persistent_dispatch PASS max_abs=0.000000e+00
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l2_30_Gemm_GroupNorm_Hardtanh_1782396834/30_Gemm_GroupNorm_Hardtanh.py:105: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out = torch.empty_like(y)
+gemm_groupnorm_hardtanh:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small       0.012839          0.010173          0.008387          0.008422
+1     medium       0.067867          0.096800          0.061993          0.067865
+2  irregular       0.019721          0.022004          0.014860          0.016385
+3     target       6.431207          6.787034          6.437325          6.499175
+
+/home/s00929845/kernel_verify/l2_30_Gemm_GroupNorm_Hardtanh_1782396834/30_Gemm_GroupNorm_Hardtanh.py:105: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out = torch.empty_like(y)

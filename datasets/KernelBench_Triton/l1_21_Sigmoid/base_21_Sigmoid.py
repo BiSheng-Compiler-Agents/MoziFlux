@@ -3,8 +3,10 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
+
 @triton.jit
-def _sigmoid_kernel_generic(x_ptr, y_ptr, n_elements, n_programs, BLOCK_SIZE: tl.constexpr):
+def _sigmoid_kernel_generic(x_ptr, y_ptr, n_elements, n_programs,
+                            BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     stride = n_programs * BLOCK_SIZE
     block_start = pid * BLOCK_SIZE
@@ -18,7 +20,9 @@ def _sigmoid_kernel_generic(x_ptr, y_ptr, n_elements, n_programs, BLOCK_SIZE: tl
         tl.store(y_ptr + offsets, out, mask=mask)
         block_start += stride
 
+
 class ModelNew(nn.Module):
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
@@ -29,7 +33,8 @@ class ModelNew(nn.Module):
         if x.dtype not in supported_dtypes:
             raise RuntimeError(f"Unsupported dtype for ModelNew: {x.dtype}")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked inputs")
 
         x_contig = x.contiguous()
         n_elements = x_contig.numel()
@@ -40,7 +45,7 @@ class ModelNew(nn.Module):
         block_size = 8192
         max_programs = 32768
         n_programs = min(triton.cdiv(n_elements, block_size), max_programs)
-        grid = (n_programs,)
+        grid = (n_programs, )
         _sigmoid_kernel_generic[grid](
             x_contig,
             y,
@@ -52,12 +57,15 @@ class ModelNew(nn.Module):
         )
         return y
 
+
 batch_size = 4096
 dim = 393216
+
 
 def get_inputs():
     x = torch.rand(batch_size, dim)
     return [x]
+
 
 def get_init_inputs():
     return []

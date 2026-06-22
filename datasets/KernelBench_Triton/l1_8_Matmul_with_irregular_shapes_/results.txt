@@ -1,0 +1,35 @@
+TEST benchmark baseline1: PASS max_abs=0
+TEST benchmark baseline2: PASS max_abs=0
+TEST benchmark optimized: PASS max_abs=0
+TEST M257_K113_N509 baseline1: PASS max_abs=0
+TEST M257_K113_N509 baseline2: PASS max_abs=0
+TEST M257_K113_N509 optimized: PASS max_abs=0
+TEST M511_K257_N769 baseline1: PASS max_abs=0
+TEST M511_K257_N769 baseline2: PASS max_abs=0
+TEST M511_K257_N769 optimized: PASS max_abs=0
+TEST M777_K37_N913 baseline1: PASS max_abs=0
+TEST M777_K37_N913 baseline2: PASS max_abs=0
+TEST M777_K37_N913 optimized: PASS max_abs=0
+TEST M1025_K513_N1537 baseline1: PASS max_abs=0
+TEST M1025_K513_N1537 baseline2: PASS max_abs=0
+TEST M1025_K513_N1537 optimized: PASS max_abs=0
+TEST M2049_K997_N3073 baseline1: PASS max_abs=0
+TEST M2049_K997_N3073 baseline2: PASS max_abs=0
+TEST M2049_K997_N3073 optimized: PASS max_abs=0
+TEST M128_K2949_N127 baseline1: PASS max_abs=0
+TEST M128_K2949_N127 baseline2: PASS max_abs=0
+TEST M128_K2949_N127 optimized: PASS max_abs=0
+TEST M4097_K1021_N4099 baseline1: PASS max_abs=0
+TEST M4097_K1021_N4099 baseline2: PASS max_abs=0
+TEST M4097_K1021_N4099 optimized: PASS max_abs=0
+UNIT_TEST PASS
+matmul_irregular_shapes_performance:
+               label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0          benchmark       0.902723          5.579384          1.671334          6.009621
+1     M257_K113_N509       0.004229          0.006545          0.004925          0.006836
+2     M511_K257_N769       0.006886          0.013812          0.008491          0.018921
+3      M777_K37_N913       0.005844          0.010978          0.008018          0.027374
+4   M1025_K513_N1537       0.017971          0.056134          0.026893          0.083397
+5   M2049_K997_N3073       0.061995          0.293336          0.113509          0.393144
+6    M128_K2949_N127       0.011129          0.105700          0.032936          0.023756
+7  M4097_K1021_N4099       0.135403          0.772936          0.270631          1.004144

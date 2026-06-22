@@ -1,0 +1,23 @@
+TEST baseline1 direct_1M PASS path=direct
+TEST baseline2 direct_1M PASS path=direct
+TEST optimized direct_1M PASS path=direct
+TEST baseline1 direct_irregular PASS path=direct
+TEST baseline2 direct_irregular PASS path=direct
+TEST optimized direct_irregular PASS path=direct
+TEST baseline1 original_persistent SKIP baseline1 direct grid would exceed Ascend cap: tiles=393216
+TEST baseline2 original_persistent SKIP read-only baseline2 is not launched on original_persistent to avoid possible coreDim poisoning
+TEST optimized original_persistent PASS path=persistent
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l1_32_HardTanh_1782329195/32_HardTanh.py:21: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x)
+INFO baseline1 original_persistent SKIP baseline1 direct grid would exceed Ascend cap: tiles=393216
+INFO baseline2 original_persistent SKIP read-only baseline2 is not launched on original_persistent to avoid possible coreDim poisoning
+hardtanh-performance:
+                 label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0            direct_1M       0.009652          0.010596          0.011201          0.011207
+1     direct_irregular       0.009764          0.010537          0.011225          0.011098
+2  original_persistent       8.922421               inf               inf          8.981164
+
+/home/s00929845/kernel_verify/l1_32_HardTanh_1782329195/32_HardTanh.py:21: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x)

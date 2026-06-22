@@ -5,7 +5,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_IN_CHANNELS = 32
 DEFAULT_OUT_CHANNELS = 64
 DEFAULT_KERNEL_SIZE = 3
@@ -21,13 +20,15 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 def _normalize_square_param(value, name: str) -> int:
     if isinstance(value, tuple):
         if len(value) != 2 or value[0] != value[1]:
-            raise RuntimeError(f"ModelNew only supports symmetric {name} values, got {value}")
+            raise RuntimeError(
+                f"ModelNew only supports symmetric {name} values, got {value}")
         value = value[0]
     value = int(value)
     if value <= 0 and name in {"kernel_size", "stride", "dilation"}:
         raise RuntimeError(f"ModelNew requires positive {name}, got {value}")
     if value < 0 and name == "padding":
-        raise RuntimeError(f"ModelNew requires non-negative padding, got {value}")
+        raise RuntimeError(
+            f"ModelNew requires non-negative padding, got {value}")
     return value
 
 
@@ -46,7 +47,6 @@ def _flip_transpose_4d_kernel(
     offs = base + tl.arange(0, BLOCK)
     mask = offs < n_elements
 
-    stride_out_kw = 1
     stride_out_kh = K
     stride_out_ci = K * K
     stride_out_co = Cin * stride_out_ci
@@ -66,12 +66,8 @@ def _flip_transpose_4d_kernel(
     stride_in_co = K * K
     stride_in_ci = Cout * stride_in_co
 
-    in_idx = (
-        ci * stride_in_ci
-        + co * stride_in_co
-        + in_ky * stride_in_kh
-        + in_kx * stride_in_kw
-    )
+    in_idx = (ci * stride_in_ci + co * stride_in_co + in_ky * stride_in_kh +
+              in_kx * stride_in_kw)
     vals = tl.load(inp_ptr + in_idx, mask=mask, other=0.0)
     tl.store(out_ptr + offs, vals, mask=mask)
 
@@ -102,7 +98,6 @@ def _stride_insert_zeros_2d_kernel(
     offs = base + tl.arange(0, BLOCK)
     mask = offs < n_elements
 
-    stride_w_linear = 1
     stride_h_linear = W
     stride_c_linear = H * W
     stride_n_linear = C * stride_c_linear
@@ -115,20 +110,14 @@ def _stride_insert_zeros_2d_kernel(
     w = rem - h * stride_h_linear
 
     vals = tl.load(
-        inp_ptr
-        + n * stride_in_n
-        + c * stride_in_c
-        + h * stride_in_h
-        + w * stride_in_w,
+        inp_ptr + n * stride_in_n + c * stride_in_c + h * stride_in_h +
+        w * stride_in_w,
         mask=mask,
         other=0.0,
     )
     tl.store(
-        out_ptr
-        + n * stride_out_n
-        + c * stride_out_c
-        + (h * STRIDE_H) * stride_out_h
-        + (w * STRIDE_W) * stride_out_w,
+        out_ptr + n * stride_out_n + c * stride_out_c +
+        (h * STRIDE_H) * stride_out_h + (w * STRIDE_W) * stride_out_w,
         vals,
         mask=mask,
     )
@@ -182,26 +171,31 @@ class ModelNew(nn.Module):
             )
         return kernel_size, stride, padding, dilation, effective_padding
 
-    def _maybe_get_transformed_weight(self, target_dtype: torch.dtype, kernel_size: int) -> torch.Tensor:
+    def _maybe_get_transformed_weight(self, target_dtype: torch.dtype,
+                                      kernel_size: int) -> torch.Tensor:
         source_w = self.conv_transpose2d.weight
         cin, cout, _, _ = source_w.shape
         device = source_w.device
         version = getattr(source_w, "_version", None)
         meta = (device, target_dtype, cin, cout, kernel_size)
-        rebuild = (
-            self._cached_conv_weight is None
-            or self._cached_version != version
-            or self._cached_meta != meta
-        )
+        rebuild = (self._cached_conv_weight is None
+                   or self._cached_version != version
+                   or self._cached_meta != meta)
         if rebuild:
             if device.type != "npu":
-                raise RuntimeError("ModelNew requires ConvTranspose2d weights on Ascend NPU")
+                raise RuntimeError(
+                    "ModelNew requires ConvTranspose2d weights on Ascend NPU")
             weight = source_w.to(dtype=target_dtype).contiguous()
-            flipped = torch.empty((cout, cin, kernel_size, kernel_size), device=device, dtype=target_dtype)
+            flipped = torch.empty((cout, cin, kernel_size, kernel_size),
+                                  device=device,
+                                  dtype=target_dtype)
             n_elements = flipped.numel()
             if n_elements > 0:
                 block = 1024
-                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK"]),)
+
+                def grid(meta):
+                    return (triton.cdiv(n_elements, meta["BLOCK"]), )
+
                 _flip_transpose_4d_kernel[grid](
                     weight,
                     flipped,
@@ -220,11 +214,16 @@ class ModelNew(nn.Module):
         n, c, h, w = x.shape
         out_h = (h - 1) * stride + 1
         out_w = (w - 1) * stride + 1
-        expanded = torch.zeros((n, c, out_h, out_w), device=x.device, dtype=x.dtype)
+        expanded = torch.zeros((n, c, out_h, out_w),
+                               device=x.device,
+                               dtype=x.dtype)
         n_elements = x.numel()
         if n_elements > 0:
             block = 1024
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK"]),)
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK"]), )
+
             _stride_insert_zeros_2d_kernel[grid](
                 x,
                 expanded,
@@ -249,20 +248,28 @@ class ModelNew(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.ndim != 4:
-            raise RuntimeError(f"ModelNew expects a 4D input tensor, got shape {tuple(x.shape)}")
+            raise RuntimeError(
+                f"ModelNew expects a 4D input tensor, got shape {tuple(x.shape)}"
+            )
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if not _is_npu_tensor(self.conv_transpose2d.weight):
-            raise RuntimeError("ModelNew expects ConvTranspose2d weights on Ascend NPU")
+            raise RuntimeError(
+                "ModelNew expects ConvTranspose2d weights on Ascend NPU")
         if x.dtype not in (torch.float16, torch.float32):
-            raise TypeError(f"ModelNew only supports float16/float32 inputs, got {x.dtype}")
+            raise TypeError(
+                f"ModelNew only supports float16/float32 inputs, got {x.dtype}"
+            )
 
-        kernel_size, stride, _padding, dilation, effective_padding = self._resolve_runtime_params()
+        kernel_size, stride, _padding, dilation, effective_padding = self._resolve_runtime_params(
+        )
         x = x.contiguous()
-        flipped_weight = self._maybe_get_transformed_weight(x.dtype, kernel_size)
+        flipped_weight = self._maybe_get_transformed_weight(
+            x.dtype, kernel_size)
         expanded = self._upsample_input(x, stride)
         bias = self.conv_transpose2d.bias
-        bias_term = None if bias is None else bias.to(device=x.device, dtype=x.dtype).contiguous()
+        bias_term = None if bias is None else bias.to(
+            device=x.device, dtype=x.dtype).contiguous()
         return F.conv2d(
             expanded,
             flipped_weight,
@@ -272,6 +279,8 @@ class ModelNew(nn.Module):
             dilation=dilation,
             groups=1,
         )
+
+
 batch_size = 16
 in_channels = 32
 out_channels = 64
@@ -282,8 +291,11 @@ stride = 5
 padding = 1
 dilation = 2
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, height_in, width_in)
     return [x]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, stride, padding, dilation]

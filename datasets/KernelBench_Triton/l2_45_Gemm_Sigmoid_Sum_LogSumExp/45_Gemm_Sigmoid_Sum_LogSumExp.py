@@ -11,13 +11,17 @@ def _require_npu_tensor(name: str, tensor: torch.Tensor) -> None:
 
 @triton.jit
 def _fused_linear_sigmoid_row_sum_kernel(
-    x_ptr,         # *f32 / *f16 [B, K]
-    w_ptr,         # *f32 / *f16 [H, K]
-    b_ptr,         # *f32 / *f16 [H]
-    out_ptr,       # *f32        [B]
-    B, K, H,       # int32 sizes
-    stride_xm, stride_xk,
-    stride_wj, stride_wk,
+    x_ptr,  # *f32 / *f16 [B, K]
+    w_ptr,  # *f32 / *f16 [H, K]
+    b_ptr,  # *f32 / *f16 [H]
+    out_ptr,  # *f32        [B]
+    B,
+    K,
+    H,  # int32 sizes
+    stride_xm,
+    stride_xk,
+    stride_wj,
+    stride_wk,
     stride_b,
     BLOCK_H: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -52,7 +56,8 @@ def _fused_linear_sigmoid_row_sum_kernel(
 
             # Compute linear outputs for this hidden tile
             w_tile = tl.load(
-                w_ptr + j_offsets[:, None] * stride_wj + k_offsets[None, :] * stride_wk,
+                w_ptr + j_offsets[:, None] * stride_wj +
+                k_offsets[None, :] * stride_wk,
                 mask=j_mask[:, None] & k_mask[None, :],
                 other=0.0,
             ).to(tl.float32)  # [BLOCK_H, BLOCK_K]
@@ -60,7 +65,9 @@ def _fused_linear_sigmoid_row_sum_kernel(
             acc = tl.sum(w_tile * x_vals[None, :], axis=1)
 
             # Add bias
-            b_vals = tl.load(b_ptr + j_offsets * stride_b, mask=j_mask, other=0.0).to(tl.float32)
+            b_vals = tl.load(b_ptr + j_offsets * stride_b,
+                             mask=j_mask,
+                             other=0.0).to(tl.float32)
             acc = acc + b_vals
 
             # Sigmoid and masked reduction over this hidden tile
@@ -76,7 +83,7 @@ def _fused_linear_sigmoid_row_sum_kernel(
             j_offsets = j_start + j_arange
             j_mask = j_offsets < H
 
-            acc = tl.zeros((BLOCK_H,), dtype=tl.float32)
+            acc = tl.zeros((BLOCK_H, ), dtype=tl.float32)
 
             # Loop over K dimension
             k_start = 0
@@ -93,7 +100,8 @@ def _fused_linear_sigmoid_row_sum_kernel(
 
                 # Load W[j, k] tile
                 w_tile = tl.load(
-                    w_ptr + j_offsets[:, None] * stride_wj + k_offsets[None, :] * stride_wk,
+                    w_ptr + j_offsets[:, None] * stride_wj +
+                    k_offsets[None, :] * stride_wk,
                     mask=j_mask[:, None] & k_mask[None, :],
                     other=0.0,
                 ).to(tl.float32)  # [BLOCK_H, BLOCK_K]
@@ -103,7 +111,9 @@ def _fused_linear_sigmoid_row_sum_kernel(
                 k_start += BLOCK_K
 
             # Add bias
-            b_vals = tl.load(b_ptr + j_offsets * stride_b, mask=j_mask, other=0.0).to(tl.float32)
+            b_vals = tl.load(b_ptr + j_offsets * stride_b,
+                             mask=j_mask,
+                             other=0.0).to(tl.float32)
             acc = acc + b_vals
 
             # Sigmoid and masked reduction over this hidden tile
@@ -117,7 +127,8 @@ def _fused_linear_sigmoid_row_sum_kernel(
     tl.store(out_ptr + pid, row_sum)
 
 
-def _fused_linear_sigmoid_row_sum(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
+def _fused_linear_sigmoid_row_sum(x: torch.Tensor, weight: torch.Tensor,
+                                  bias: torch.Tensor) -> torch.Tensor:
     """
     Compute sum_j sigmoid(x @ W^T + b)_j for each row of x using a Triton kernel.
     x:      [B, K]
@@ -144,17 +155,25 @@ def _fused_linear_sigmoid_row_sum(x: torch.Tensor, weight: torch.Tensor, bias: t
     stride_wj, stride_wk = w_c.stride()
     stride_b = b_c.stride(0)
 
-    grid = (B,)
+    grid = (B, )
 
     # For small K/H, these tiles reduce masked work and launch overhead
     _fused_linear_sigmoid_row_sum_kernel[grid](
-        x_c, w_c, b_c, out,
-        B, K, H,
-        stride_xm, stride_xk,
-        stride_wj, stride_wk,
+        x_c,
+        w_c,
+        b_c,
+        out,
+        B,
+        K,
+        H,
+        stride_xm,
+        stride_xk,
+        stride_wj,
+        stride_wk,
         stride_b,
-        BLOCK_H=32,   # covers H<=32 in a single tile for common sizes (e.g., H=20)
-        BLOCK_K=16,   # covers K<=16 in one pass (e.g., K=10)
+        BLOCK_H=
+        32,  # covers H<=32 in a single tile for common sizes (e.g., H=20)
+        BLOCK_K=16,  # covers K<=16 in one pass (e.g., K=10)
         num_warps=1,  # reduce scheduling overhead for tiny tiles
         num_stages=2,
     )
@@ -188,7 +207,8 @@ def _logsumexp_kernel(inp_ptr, out_ptr, B, BLOCK: tl.constexpr):
         tile_sum = tl.sum(tl.exp(vals - tile_max), axis=0)
 
         new_max = tl.maximum(acc_max, tile_max)
-        acc_sum = acc_sum * tl.exp(acc_max - new_max) + tile_sum * tl.exp(tile_max - new_max)
+        acc_sum = acc_sum * tl.exp(acc_max - new_max) + tile_sum * tl.exp(
+            tile_max - new_max)
         acc_max = new_max
 
         offset += BLOCK
@@ -201,19 +221,23 @@ def _logsumexp_triton(x: torch.Tensor) -> torch.Tensor:
     _require_npu_tensor("x", x)
     B = x.numel()
     out = torch.empty(1, device=x.device, dtype=torch.float32)
-    _logsumexp_kernel[(1,)](x, out, B, BLOCK=128, num_warps=1, num_stages=1)
+    _logsumexp_kernel[(1, )](x, out, B, BLOCK=128, num_warps=1, num_stages=1)
     return out[0]
 
 
 @triton.jit
 def _fused_rowsum_logsumexp_kernel(
-    x_ptr,         # *f32 [B, K]
-    w_ptr,         # *f32 [H, K]
-    b_ptr,         # *f32 [H]
-    out_ptr,       # *f32 [1]
-    B, K, H,
-    stride_xm, stride_xk,
-    stride_wj, stride_wk,
+    x_ptr,  # *f32 [B, K]
+    w_ptr,  # *f32 [H, K]
+    b_ptr,  # *f32 [H]
+    out_ptr,  # *f32 [1]
+    B,
+    K,
+    H,
+    stride_xm,
+    stride_xk,
+    stride_wj,
+    stride_wk,
     stride_b,
     BLOCK_B: tl.constexpr,
     BLOCK_H: tl.constexpr,
@@ -225,7 +249,7 @@ def _fused_rowsum_logsumexp_kernel(
         return
 
     acc_max = -1.0e30  # running max for stable logsumexp
-    acc_sum = 0.0      # running sum of exp shifted by acc_max
+    acc_sum = 0.0  # running sum of exp shifted by acc_max
 
     rows_arange = tl.arange(0, BLOCK_B)
     j_arange = tl.arange(0, BLOCK_H)
@@ -237,7 +261,7 @@ def _fused_rowsum_logsumexp_kernel(
         row_mask = rows < B
 
         # Accumulator for per-row sums after sigmoid over hidden dim
-        row_sums = tl.zeros((BLOCK_B,), dtype=tl.float32)
+        row_sums = tl.zeros((BLOCK_B, ), dtype=tl.float32)
 
         j_start = 0
         while j_start < H:
@@ -254,14 +278,16 @@ def _fused_rowsum_logsumexp_kernel(
 
                 # Load X tiles for multiple rows at once: [BLOCK_B, BLOCK_K]
                 x_tile = tl.load(
-                    x_ptr + rows[:, None] * stride_xm + k_offsets[None, :] * stride_xk,
+                    x_ptr + rows[:, None] * stride_xm +
+                    k_offsets[None, :] * stride_xk,
                     mask=row_mask[:, None] & k_mask[None, :],
                     other=0.0,
                 ).to(tl.float32)
 
                 # Load W tile once and reuse across rows: [BLOCK_H, BLOCK_K]
                 w_tile = tl.load(
-                    w_ptr + j_offsets[:, None] * stride_wj + k_offsets[None, :] * stride_wk,
+                    w_ptr + j_offsets[:, None] * stride_wj +
+                    k_offsets[None, :] * stride_wk,
                     mask=j_mask[:, None] & k_mask[None, :],
                     other=0.0,
                 ).to(tl.float32)
@@ -272,7 +298,9 @@ def _fused_rowsum_logsumexp_kernel(
                 k_start += BLOCK_K
 
             # Add bias and apply sigmoid
-            b_vals = tl.load(b_ptr + j_offsets * stride_b, mask=j_mask, other=0.0).to(tl.float32)
+            b_vals = tl.load(b_ptr + j_offsets * stride_b,
+                             mask=j_mask,
+                             other=0.0).to(tl.float32)
             acc = acc + b_vals[None, :]
 
             s = tl.sigmoid(acc)
@@ -289,7 +317,8 @@ def _fused_rowsum_logsumexp_kernel(
         tile_sum = tl.sum(tl.exp(masked_vals - tile_max), axis=0)
 
         new_max = tl.maximum(acc_max, tile_max)
-        acc_sum = acc_sum * tl.exp(acc_max - new_max) + tile_sum * tl.exp(tile_max - new_max)
+        acc_sum = acc_sum * tl.exp(acc_max - new_max) + tile_sum * tl.exp(
+            tile_max - new_max)
         acc_max = new_max
 
         b_start += BLOCK_B
@@ -298,7 +327,8 @@ def _fused_rowsum_logsumexp_kernel(
     tl.store(out_ptr, result)
 
 
-def _fused_rowsum_logsumexp(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
+def _fused_rowsum_logsumexp(x: torch.Tensor, weight: torch.Tensor,
+                            bias: torch.Tensor) -> torch.Tensor:
     """
     Single fused Triton kernel computing:
     y = logsumexp_i( sum_j sigmoid( x[i] @ W[j]^T + b[j] ) )
@@ -320,24 +350,30 @@ def _fused_rowsum_logsumexp(x: torch.Tensor, weight: torch.Tensor, bias: torch.T
     out = torch.empty(1, device=x.device, dtype=torch.float32)
 
     # Single-CTA persistent kernel to minimize launch overhead and memory traffic
-    _fused_rowsum_logsumexp_kernel[(1,)](
-        x_c, w_c, b_c, out,
-        B, K, H,
-        stride_xm, stride_xk,
-        stride_wj, stride_wk,
+    _fused_rowsum_logsumexp_kernel[(1, )](
+        x_c,
+        w_c,
+        b_c,
+        out,
+        B,
+        K,
+        H,
+        stride_xm,
+        stride_xk,
+        stride_wj,
+        stride_wk,
         stride_b,
-        BLOCK_B=32,   # rows per tile
-        BLOCK_H=32,   # covers H<=32 in one pass (e.g., H=20)
-        BLOCK_K=16,   # covers K<=16 in one pass (e.g., K=10)
+        BLOCK_B=32,  # rows per tile
+        BLOCK_H=32,  # covers H<=32 in one pass (e.g., H=20)
+        BLOCK_K=16,  # covers K<=16 in one pass (e.g., K=10)
         num_warps=4,
         num_stages=2,
     )
     return out[0]
 
 
-def gemm_sigmoid_sum_logsumexp(
-    x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
-) -> torch.Tensor:
+def gemm_sigmoid_sum_logsumexp(x: torch.Tensor, weight: torch.Tensor,
+                               bias: torch.Tensor) -> torch.Tensor:
     return _fused_rowsum_logsumexp(x, weight, bias)
 
 
@@ -345,15 +381,20 @@ class ModelNew(nn.Module):
     """
     Model that performs a matrix multiplication (Gemm), applies Sigmoid, sums the result, and calculates the LogSumExp.
     """
+
     def __init__(self, input_size, hidden_size, output_size):
         super(ModelNew, self).__init__()
         self.linear1 = nn.Linear(input_size, hidden_size)
-        self.linear2 = nn.Linear(hidden_size, output_size)  # kept for parity with original, unused in forward
+        self.linear2 = nn.Linear(
+            hidden_size,
+            output_size)  # kept for parity with original, unused in forward
 
     def forward(self, x):
         if self.linear1.bias is None:
-            raise RuntimeError("ModelNew requires linear1.bias for the fused Triton path")
-        return gemm_sigmoid_sum_logsumexp(x, self.linear1.weight, self.linear1.bias)
+            raise RuntimeError(
+                "ModelNew requires linear1.bias for the fused Triton path")
+        return gemm_sigmoid_sum_logsumexp(x, self.linear1.weight,
+                                          self.linear1.bias)
 
 
 batch_size = 128
@@ -361,8 +402,10 @@ input_size = 10
 hidden_size = 20
 output_size = 5
 
+
 def get_inputs():
     return [torch.randn(batch_size, input_size)]
+
 
 def get_init_inputs():
     return [input_size, hidden_size, output_size]

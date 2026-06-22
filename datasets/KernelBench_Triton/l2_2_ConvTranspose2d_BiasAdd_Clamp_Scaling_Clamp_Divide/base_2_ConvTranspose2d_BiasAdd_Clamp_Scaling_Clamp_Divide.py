@@ -33,10 +33,14 @@ def _fused_bias_scale_clamp_inplace(
 
         for tile_lane in tl.static_range(0, TILES_PER_PROG):
             tile_idx_in_plane = tile_base + tile_lane
-            hw_offsets = tile_idx_in_plane * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            hw_offsets = tile_idx_in_plane * BLOCK_SIZE + tl.arange(
+                0, BLOCK_SIZE)
             mask = plane_mask & (hw_offsets < HW)
             offsets = plane_base + hw_offsets
-            x = tl.load(in_out_ptr + offsets, mask=mask, other=0.0, cache_modifier=".cg")
+            x = tl.load(in_out_ptr + offsets,
+                        mask=mask,
+                        other=0.0,
+                        cache_modifier=".cg")
             y = tl.maximum(x + b, 0.0)
             y = tl.minimum(y, upper)
 
@@ -44,6 +48,7 @@ def _fused_bias_scale_clamp_inplace(
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_channels=None,
@@ -90,7 +95,8 @@ class ModelNew(nn.Module):
         y = self.conv_transpose(x)
         s = float(self.scaling_factor)
         y = y.contiguous()
-        bias = self.bias.to(device=y.device, dtype=y.dtype).contiguous().view(-1)
+        bias = self.bias.to(device=y.device,
+                            dtype=y.dtype).contiguous().view(-1)
 
         _, C, H, W = y.shape
         HW = H * W
@@ -98,10 +104,12 @@ class ModelNew(nn.Module):
         block_size = 4096
         planes_per_prog = 12
         tiles_per_prog = 1
-        grid = lambda META: (
-            triton.cdiv(plane_count, META["PLANES_PER_PROG"])
-            * triton.cdiv(triton.cdiv(HW, META["BLOCK_SIZE"]), META["TILES_PER_PROG"]),
-        )
+
+        def grid(META):
+            return (triton.cdiv(plane_count, META["PLANES_PER_PROG"]) *
+                    triton.cdiv(triton.cdiv(HW, META["BLOCK_SIZE"]),
+                                META["TILES_PER_PROG"]), )
+
         _fused_bias_scale_clamp_inplace[grid](
             y,
             bias,
@@ -135,4 +143,7 @@ def get_inputs():
 
 
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, bias_shape, scaling_factor]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding,
+        output_padding, bias_shape, scaling_factor
+    ]

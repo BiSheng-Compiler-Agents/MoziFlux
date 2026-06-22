@@ -48,6 +48,7 @@ class ModelNew(nn.Module):
     Model that performs a transposed convolution, adds a bias term, clamps, scales, clamps, and divides.
     The post-conv elementwise ops are fused into a single Triton kernel for improved performance.
     """
+
     def __init__(
         self,
         in_channels=None,
@@ -94,13 +95,17 @@ class ModelNew(nn.Module):
         y = self.conv_transpose(x)
         s = float(self.scaling_factor)
         y = y.contiguous()
-        bias = self.bias.to(device=y.device, dtype=y.dtype).contiguous().view(-1)
+        bias = self.bias.to(device=y.device,
+                            dtype=y.dtype).contiguous().view(-1)
 
         _, C, H, W = y.shape
         n_elements = y.numel()
         HW = H * W
         block_size = HW
-        grid = lambda META: (triton.cdiv(n_elements, META["BLOCK_SIZE"]),)
+
+        def grid(META):
+            return (triton.cdiv(n_elements, META["BLOCK_SIZE"]), )
+
         _fused_bias_scale_clamp_inplace[grid](
             y,
             bias,
@@ -113,10 +118,12 @@ class ModelNew(nn.Module):
             num_stages=3,
         )
         return y
+
+
 batch_size = 128
-in_channels  = 64  
-out_channels = 64  
-height = width = 128 
+in_channels = 64
+out_channels = 64
+height = width = 128
 kernel_size = 3
 stride = 2
 padding = 1
@@ -124,7 +131,13 @@ output_padding = 1
 bias_shape = (out_channels, 1, 1)
 scaling_factor = 2.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width)]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, output_padding, bias_shape, scaling_factor]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding,
+        output_padding, bias_shape, scaling_factor
+    ]

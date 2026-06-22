@@ -1,10 +1,8 @@
-import math
 import torch
 import torch.nn as nn
 import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
-
 
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_CHANNELS = 64
@@ -22,9 +20,16 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 @triton.jit
 def _instancenorm_divide_2d_fused_kernel(
     x_ptr,  # input/output
-    N, C, H, W,
-    stride_n, stride_c, stride_h, stride_w,
-    eps, div_const,
+    N,
+    C,
+    H,
+    W,
+    stride_n,
+    stride_c,
+    stride_h,
+    stride_w,
+    eps,
+    div_const,
     BLOCK_HW: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)  # each program handles one (n, c)
@@ -104,6 +109,7 @@ class ModelNew(nn.Module):
     This version fuses InstanceNorm (no affine, no running stats) and the final division into a single
     Triton kernel for improved performance.
     """
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -121,11 +127,13 @@ class ModelNew(nn.Module):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
 
         x = self.conv(x)
         if x.dtype not in (torch.float16, torch.float32):
-            raise RuntimeError("ModelNew supports only float16 and float32 inputs")
+            raise RuntimeError(
+                "ModelNew supports only float16 and float32 inputs")
 
         N, C, H, W = x.shape
         # Ensure contiguous layout for predictable strides
@@ -135,7 +143,7 @@ class ModelNew(nn.Module):
         # Triton kernel: one program per (n, c), vectorize across H*W
         HW = H * W
         BLOCK_HW = _next_power_of_two(HW)
-        grid = (N * C,)
+        grid = (N * C, )
 
         eps = float(self.instance_norm.eps)
         div_const = float(self.divide_by)
@@ -154,9 +162,16 @@ class ModelNew(nn.Module):
         else:
             _instancenorm_divide_2d_fused_kernel[grid](
                 x,  # in-place
-                N, C, H, W,
-                stride_n, stride_c, stride_h, stride_w,
-                eps, div_const,
+                N,
+                C,
+                H,
+                W,
+                stride_n,
+                stride_c,
+                stride_h,
+                stride_w,
+                eps,
+                div_const,
                 BLOCK_HW=BLOCK_HW,
                 num_warps=2,
                 num_stages=1,
@@ -175,14 +190,19 @@ def run_operator(x: torch.Tensor) -> torch.Tensor:
         model.eval()
         _MODEL_CACHE[key] = model
     return model(x)
+
+
 batch_size = 128
-in_channels  = 64  
-out_channels = 128  
-height = width = 128  
+in_channels = 64
+out_channels = 128
+height = width = 128
 kernel_size = 3
 divide_by = 2.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_channels, height, width, device='npu')]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, divide_by]

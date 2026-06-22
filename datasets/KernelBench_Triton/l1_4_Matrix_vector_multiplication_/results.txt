@@ -1,0 +1,19 @@
+TEST baseline1 M=1 K=1 dtype=torch.float32: PASS max_abs=0
+TEST baseline2 M=1 K=1 dtype=torch.float32: PASS max_abs=0
+TEST optimized M=1 K=1 dtype=torch.float32: PASS max_abs=0
+TEST baseline1 M=7 K=31 dtype=torch.float16: PASS max_abs=0
+TEST baseline2 M=7 K=31 dtype=torch.float16: PASS max_abs=0
+TEST optimized M=7 K=31 dtype=torch.float16: PASS max_abs=0
+TEST baseline1 M=64 K=512 dtype=torch.float16: PASS max_abs=0
+TEST baseline2 M=64 K=512 dtype=torch.float16: PASS max_abs=0
+TEST optimized M=64 K=512 dtype=torch.float16: PASS max_abs=0
+TEST baseline1 M=257 K=777 dtype=torch.float16: PASS max_abs=0
+TEST baseline2 M=257 K=777 dtype=torch.float16: PASS max_abs=0
+TEST optimized M=257 K=777 dtype=torch.float16: PASS max_abs=0
+UNIT_TEST PASS
+l1_4_gemv:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small       0.002748          0.003945          0.003148          0.002755
+1    nonpow2       0.003541          0.008157          0.006822          0.005952
+2     medium       0.016748          0.055786          0.040275          0.033724
+3  benchmark       3.261529          7.245373          5.253984          4.414024

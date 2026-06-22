@@ -1,0 +1,62 @@
+/home/s00929845/kernel_verify/l1_20_LeakyReLU_1782241951/20_LeakyReLU.py:59: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x_contig)
+TEST N1024 baseline1 torch.float16: PASS max_abs=0
+TEST N1024 baseline2 torch.float16: PASS max_abs=0
+TEST N1024 optimized torch.float16: PASS max_abs=0
+TEST N1024 baseline1 torch.float32: PASS max_abs=0
+TEST N1024 baseline2 torch.float32: PASS max_abs=0
+TEST N1024 optimized torch.float32: PASS max_abs=0
+TEST N65536 baseline1 torch.float16: PASS max_abs=0
+TEST N65536 baseline2 torch.float16: PASS max_abs=0
+TEST N65536 optimized torch.float16: PASS max_abs=0
+TEST N65536 baseline1 torch.float32: PASS max_abs=0
+TEST N65536 baseline2 torch.float32: PASS max_abs=0
+TEST N65536 optimized torch.float32: PASS max_abs=0
+TEST N524288 baseline1 torch.float16: PASS max_abs=0
+TEST N524288 baseline2 torch.float16: PASS max_abs=0
+TEST N524288 optimized torch.float16: PASS max_abs=0
+TEST N524288 baseline1 torch.float32: PASS max_abs=0
+TEST N524288 baseline2 torch.float32: PASS max_abs=0
+TEST N524288 optimized torch.float32: PASS max_abs=0
+TEST N4M baseline1 torch.float16: PASS max_abs=0
+TEST N4M baseline2 torch.float16: PASS max_abs=0
+TEST N4M optimized torch.float16: PASS max_abs=0
+TEST N4M baseline1 torch.float32: PASS max_abs=0
+TEST N4M baseline2 torch.float32: PASS max_abs=0
+TEST N4M optimized torch.float32: PASS max_abs=0
+TEST N16M baseline1 torch.float16: PASS max_abs=0
+TEST N16M baseline2 torch.float16: PASS max_abs=0
+TEST N16M optimized torch.float16: PASS max_abs=0
+TEST N16M baseline1 torch.float32: PASS max_abs=0
+TEST N16M baseline2 torch.float32: PASS max_abs=0
+TEST N16M optimized torch.float32: PASS max_abs=0
+TEST benchmark baseline1 torch.float16: INFO coreDim would exceed Ascend 65535; benchmark returns inf
+TEST benchmark baseline2 torch.float16: PASS max_abs=0
+TEST benchmark optimized torch.float16: PASS max_abs=0
+TEST benchmark baseline1 torch.float32: INFO coreDim would exceed Ascend 65535; benchmark returns inf
+TEST benchmark baseline2 torch.float32: PASS max_abs=0
+TEST benchmark optimized torch.float32: PASS max_abs=0
+TEST N100 baseline1 torch.float16: PASS max_abs=0
+TEST N100 baseline2 torch.float16: PASS max_abs=0
+TEST N100 optimized torch.float16: PASS max_abs=0
+TEST N100 baseline1 torch.float32: PASS max_abs=0
+TEST N100 baseline2 torch.float32: PASS max_abs=0
+TEST N100 optimized torch.float32: PASS max_abs=0
+TEST N4097 baseline1 torch.float16: PASS max_abs=0
+TEST N4097 baseline2 torch.float16: PASS max_abs=0
+TEST N4097 optimized torch.float16: PASS max_abs=0
+TEST N4097 baseline1 torch.float32: PASS max_abs=0
+TEST N4097 baseline2 torch.float32: PASS max_abs=0
+TEST N4097 optimized torch.float32: PASS max_abs=0
+UNIT_TEST PASS
+BENCH benchmark baseline1: INFO coreDim would exceed Ascend 65535; returning inf
+leaky_relu_performance:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      N1024       0.001757          0.001516          0.002523          0.001361
+1     N65536       0.002406          0.001988          0.003057          0.001810
+2    N524288       0.003874          0.004996          0.003921          0.004572
+3        N4M       0.019850          0.025756          0.019709          0.026355
+4       N16M       0.077267          0.101704          0.077395          0.101479
+5  benchmark       4.507617               inf          4.571447          6.177552
+6       N100       0.001581          0.001359          0.002468          0.001244
+7      N4097       0.002020          0.001609          0.002552          0.001571

@@ -7,7 +7,8 @@ import triton.language as tl
 
 
 @triton.jit
-def _relu_divide_inplace_kernel(x_ptr, n_elements, inv_divisor, BLOCK_SIZE: tl.constexpr):
+def _relu_divide_inplace_kernel(x_ptr, n_elements, inv_divisor,
+                                BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     block_start = pid * BLOCK_SIZE
     offsets = block_start + tl.arange(0, BLOCK_SIZE)
@@ -30,7 +31,8 @@ def gemm_relu_divide(x, weight, bias, divisor):
     _require_npu_tensor("weight", weight)
     _require_npu_tensor("bias", bias)
     if x.device != weight.device or x.device != bias.device:
-        raise RuntimeError("x, weight, and bias must be on the same NPU device")
+        raise RuntimeError(
+            "x, weight, and bias must be on the same NPU device")
 
     divisor = float(divisor)
     if divisor == 0.0:
@@ -42,7 +44,7 @@ def gemm_relu_divide(x, weight, bias, divisor):
     n_elements = y.numel()
 
     def grid(meta):
-        return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+        return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]), )
 
     _relu_divide_inplace_kernel[grid](
         y,
@@ -56,6 +58,7 @@ def gemm_relu_divide(x, weight, bias, divisor):
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_features=1024,
@@ -76,13 +79,19 @@ class ModelNew(nn.Module):
         self.divisor = float(divisor)
 
     def forward(self, x):
-        return gemm_relu_divide(x, self.linear.weight, self.linear.bias, self.divisor)
+        return gemm_relu_divide(x, self.linear.weight, self.linear.bias,
+                                self.divisor)
+
+
 batch_size = 1024
 in_features = 8192
 out_features = 8192
 divisor = 2.0
 
+
 def get_inputs():
     return [torch.rand(batch_size, in_features)]
+
+
 def get_init_inputs():
     return [in_features, out_features, divisor]

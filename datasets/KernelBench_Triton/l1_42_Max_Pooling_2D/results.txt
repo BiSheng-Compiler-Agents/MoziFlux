@@ -1,0 +1,23 @@
+TEST baseline1 direct_small INFO_EXCEPTION UnsupportedLanguageConstruct
+TEST baseline2 direct_small INFO_EXCEPTION MLIRCompilationError
+TEST optimized direct_small PASS
+TEST baseline1 generic_2x2 INFO_EXCEPTION UnsupportedLanguageConstruct
+TEST baseline2 generic_2x2 PASS
+TEST optimized generic_2x2 PASS
+TEST baseline1 persistent_medium INFO_EXCEPTION UnsupportedLanguageConstruct
+TEST baseline2 persistent_medium INFO_EXCEPTION MLIRCompilationError
+TEST optimized persistent_medium PASS
+TEST baseline1 target_original INFO_EXCEPTION UnsupportedLanguageConstruct
+TEST baseline2 target_original INFO_EXCEPTION MLIRCompilationError
+TEST optimized target_original PASS
+UNIT_TEST PASS
+
+INFO bench_exception baseline1 direct_small UnsupportedLanguageConstruct
+INFO bench_exception baseline2 direct_small MLIRCompilationError
+INFO bench_exception baseline1 generic_2x2 UnsupportedLanguageConstruct
+max_pool2d_perf:
+               label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0       direct_small       0.003387               inf               inf          0.077180
+1        generic_2x2       0.003089               inf          0.005759          0.028418
+2  persistent_medium       0.638336               inf               inf         81.752251
+3    target_original      17.071651               inf               inf       2963.359619

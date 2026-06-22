@@ -1,0 +1,65 @@
+/home/s00929845/kernel_verify/l1_89_cumsum_1782245321/89_cumsum.py:52: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y_2d = torch.empty_like(x_2d)
+TEST M32_N64 baseline1 torch.float16: PASS max_abs=0
+TEST M32_N64 baseline2 torch.float16: PASS max_abs=0
+TEST M32_N64 optimized torch.float16: PASS max_abs=0
+TEST M32_N64 baseline1 torch.float32: PASS max_abs=2.28882e-05
+TEST M32_N64 baseline2 torch.float32: PASS max_abs=1.52588e-05
+TEST M32_N64 optimized torch.float32: PASS max_abs=2.28882e-05
+TEST M32_N64 baseline1 torch.bfloat16: INFO TypeError: cumsum_npu supports float16 and float32 inputs only
+TEST M32_N64 baseline2 torch.bfloat16: INFO TypeError: cumsum_npu supports float16 and float32 inputs only
+TEST M32_N64 optimized torch.bfloat16: PASS max_abs=0
+TEST M32_N128 baseline1 torch.float16: PASS max_abs=0
+TEST M32_N128 baseline2 torch.float16: PASS max_abs=0
+TEST M32_N128 optimized torch.float16: PASS max_abs=0
+TEST M32_N128 baseline1 torch.float32: PASS max_abs=3.8147e-05
+TEST M32_N128 baseline2 torch.float32: PASS max_abs=1.52588e-05
+TEST M32_N128 optimized torch.float32: PASS max_abs=3.8147e-05
+TEST M32_N128 baseline1 torch.bfloat16: INFO TypeError: cumsum_npu supports float16 and float32 inputs only
+TEST M32_N128 baseline2 torch.bfloat16: INFO TypeError: cumsum_npu supports float16 and float32 inputs only
+TEST M32_N128 optimized torch.bfloat16: PASS max_abs=0
+TEST M32_N100 baseline1 torch.float16: PASS max_abs=0
+TEST M32_N100 baseline2 torch.float16: PASS max_abs=0
+TEST M32_N100 optimized torch.float16: PASS max_abs=0
+TEST M32_N100 baseline1 torch.float32: PASS max_abs=2.67029e-05
+TEST M32_N100 baseline2 torch.float32: PASS max_abs=1.52588e-05
+TEST M32_N100 optimized torch.float32: PASS max_abs=2.67029e-05
+TEST M32_N100 baseline1 torch.bfloat16: INFO TypeError: cumsum_npu supports float16 and float32 inputs only
+TEST M32_N100 baseline2 torch.bfloat16: INFO TypeError: cumsum_npu supports float16 and float32 inputs only
+TEST M32_N100 optimized torch.bfloat16: PASS max_abs=0
+TEST M32_N256 baseline1 torch.float16: PASS max_abs=0
+TEST M32_N256 baseline2 torch.float16: PASS max_abs=0
+TEST M32_N256 optimized torch.float16: PASS max_abs=0
+TEST M32_N256 baseline1 torch.float32: PASS max_abs=0.000106812
+TEST M32_N256 baseline2 torch.float32: PASS max_abs=3.05176e-05
+TEST M32_N256 optimized torch.float32: PASS max_abs=0.000106812
+TEST M32_N256 baseline1 torch.bfloat16: INFO TypeError: cumsum_npu supports float16 and float32 inputs only
+TEST M32_N256 baseline2 torch.bfloat16: INFO TypeError: cumsum_npu supports float16 and float32 inputs only
+TEST M32_N256 optimized torch.bfloat16: PASS max_abs=0
+TEST M32_N512 baseline1 torch.float16: PASS max_abs=0
+TEST M32_N512 baseline2 torch.float16: PASS max_abs=0
+TEST M32_N512 optimized torch.float16: PASS max_abs=0
+TEST M32_N512 baseline1 torch.float32: PASS max_abs=0.000114441
+TEST M32_N512 baseline2 torch.float32: PASS max_abs=6.10352e-05
+TEST M32_N512 optimized torch.float32: PASS max_abs=0.000106812
+TEST M32_N512 baseline1 torch.bfloat16: INFO TypeError: cumsum_npu supports float16 and float32 inputs only
+TEST M32_N512 baseline2 torch.bfloat16: INFO TypeError: cumsum_npu supports float16 and float32 inputs only
+TEST M32_N512 optimized torch.bfloat16: PASS max_abs=0
+TEST M128_N512 baseline1 torch.float16: PASS max_abs=0
+TEST M128_N512 baseline2 torch.float16: PASS max_abs=0.000244141
+TEST M128_N512 optimized torch.float16: PASS max_abs=0.000244141
+TEST M128_N512 baseline1 torch.float32: PASS max_abs=0.000167847
+TEST M128_N512 baseline2 torch.float32: PASS max_abs=6.10352e-05
+TEST M128_N512 optimized torch.float32: PASS max_abs=0.000152588
+TEST M128_N512 baseline1 torch.bfloat16: INFO TypeError: cumsum_npu supports float16 and float32 inputs only
+TEST M128_N512 baseline2 torch.bfloat16: INFO TypeError: cumsum_npu supports float16 and float32 inputs only
+TEST M128_N512 optimized torch.bfloat16: PASS max_abs=0
+UNIT_TEST PASS
+cumsum_performance:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    M32_N64       0.004199          0.094497          0.032598          0.009292
+1   M32_N128       0.005595          0.099071          0.063467          0.010371
+2   M32_N100       0.005242          0.097264          0.056545          0.010735
+3   M32_N256       0.008669          0.107142          0.134613          0.012370
+4   M32_N512       0.010939          0.200155          0.364902          0.020912
+5  M128_N512       0.017406          0.543026          0.361040          0.036083

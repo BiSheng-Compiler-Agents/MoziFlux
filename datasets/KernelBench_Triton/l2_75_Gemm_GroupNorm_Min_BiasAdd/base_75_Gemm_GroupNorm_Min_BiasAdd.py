@@ -39,9 +39,12 @@ def _fused_groupnorm_min_bias_kernel(
         valid_channels = ch_offs_2d < C
         mask = valid_groups & valid_channels
 
-        x = tl.load(x_ptr + row_base + ch_offs_2d, mask=mask, other=0.0).to(tl.float32)
-        gamma = tl.load(gamma_ptr + ch_offs_2d, mask=mask, other=0.0).to(tl.float32)
-        beta = tl.load(beta_ptr + ch_offs_2d, mask=mask, other=0.0).to(tl.float32)
+        x = tl.load(x_ptr + row_base + ch_offs_2d, mask=mask,
+                    other=0.0).to(tl.float32)
+        gamma = tl.load(gamma_ptr + ch_offs_2d, mask=mask,
+                        other=0.0).to(tl.float32)
+        beta = tl.load(beta_ptr + ch_offs_2d, mask=mask,
+                       other=0.0).to(tl.float32)
 
         inv_gs = 1.0 / GROUP_SIZE
         sum1 = tl.sum(x, axis=1)
@@ -62,7 +65,8 @@ def _fused_groupnorm_min_bias_kernel(
         ch_offs_2d = offs_grp * GROUP_SIZE + offs_g
         valid_channels = ch_offs_2d < C
         mask = valid_groups & valid_channels
-        bias = tl.load(bias_ptr + ch_offs_2d, mask=mask, other=0.0).to(tl.float32)
+        bias = tl.load(bias_ptr + ch_offs_2d, mask=mask,
+                       other=0.0).to(tl.float32)
         out_tile = bias + row_min
         out_ptrs = out_ptr + ch_offs_2d * STRIDE_OC + pid * STRIDE_ON
         tl.store(out_ptrs, out_tile, mask=mask)
@@ -77,13 +81,17 @@ def _groupnorm_min_bias_triton(
     eps: float,
 ):
     if x.ndim != 2:
-        raise ValueError(f"Expected a 2D input tensor [N, C], got shape {tuple(x.shape)}")
+        raise ValueError(
+            f"Expected a 2D input tensor [N, C], got shape {tuple(x.shape)}")
     if x.device.type != "npu":
-        raise RuntimeError("The Triton fused GroupNorm-Min-Bias operator requires Ascend NPU tensors.")
+        raise RuntimeError(
+            "The Triton fused GroupNorm-Min-Bias operator requires Ascend NPU tensors."
+        )
 
     N, C = x.shape
     if C % num_groups != 0:
-        raise ValueError(f"Channel count {C} must be divisible by num_groups={num_groups}")
+        raise ValueError(
+            f"Channel count {C} must be divisible by num_groups={num_groups}")
     if gamma.numel() != C or beta.numel() != C:
         raise ValueError("GroupNorm affine parameters must have shape [C].")
 
@@ -103,7 +111,7 @@ def _groupnorm_min_bias_triton(
     out = torch.empty((1, C, N, 1), device=x.device, dtype=x.dtype)
 
     block_groups = 32 if num_groups >= 32 else num_groups
-    _fused_groupnorm_min_bias_kernel[(N,)](
+    _fused_groupnorm_min_bias_kernel[(N, )](
         x_ctg,
         gamma_ctg,
         beta_ctg,
@@ -144,6 +152,7 @@ def gemm_groupnorm_min_bias_add(
 
 
 class ModelNew(nn.Module):
+
     def __init__(self, in_features, out_features, num_groups, bias_shape):
         super(ModelNew, self).__init__()
         self.gemm = nn.Linear(in_features, out_features)

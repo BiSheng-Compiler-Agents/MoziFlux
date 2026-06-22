@@ -5,7 +5,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 16
 DEFAULT_IN_CHANNELS = 16
 DEFAULT_OUT_CHANNELS = 32
@@ -33,13 +32,13 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 )
 @triton.jit
 def _spatial_mean_subtract_kernel(
-    x_ptr,       # *: [N, C, D, H, W] contiguous in spatial dims
-    y_ptr,       # *: [N, C, D, H, W] output
-    stride_n,    # stride along N dimension (elements)
-    stride_c,    # stride along C dimension (elements)
-    S,           # total spatial elements per (n, c) = D*H*W
-    N,           # batch size
-    C,           # channels
+    x_ptr,  # *: [N, C, D, H, W] contiguous in spatial dims
+    y_ptr,  # *: [N, C, D, H, W] output
+    stride_n,  # stride along N dimension (elements)
+    stride_c,  # stride along C dimension (elements)
+    S,  # total spatial elements per (n, c) = D*H*W
+    N,  # batch size
+    C,  # channels
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -60,7 +59,10 @@ def _spatial_mean_subtract_kernel(
     while i < S:
         idx = i + offsets
         mask = idx < S
-        vals = tl.load(base_x + idx, mask=mask, other=0.0, eviction_policy="evict_last").to(tl.float32)
+        vals = tl.load(base_x + idx,
+                       mask=mask,
+                       other=0.0,
+                       eviction_policy="evict_last").to(tl.float32)
         sum_acc += tl.sum(vals, axis=0)
         i += BLOCK_SIZE
 
@@ -72,7 +74,10 @@ def _spatial_mean_subtract_kernel(
     while i < S:
         idx = i + offsets
         mask = idx < S
-        vals = tl.load(base_x + idx, mask=mask, other=0.0, eviction_policy="evict_last")
+        vals = tl.load(base_x + idx,
+                       mask=mask,
+                       other=0.0,
+                       eviction_policy="evict_last")
         out = vals.to(tl.float32) - mean
         tl.store(base_y + idx, out.to(vals.dtype), mask=mask)
         i += BLOCK_SIZE
@@ -82,6 +87,7 @@ class ModelNew(nn.Module):
     """
     A 3D convolutional transpose layer followed by Batch Normalization and subtraction.
     """
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -92,16 +98,20 @@ class ModelNew(nn.Module):
         bias=True,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose3d(
-            in_channels, out_channels, kernel_size, stride=stride, padding=padding, bias=bias
-        )
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding,
+                                                 bias=bias)
         self.batch_norm = nn.BatchNorm3d(out_channels)
 
     def forward(self, x):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
 
         x = self.conv_transpose(x)
         x = self.batch_norm(x)
@@ -112,7 +122,9 @@ class ModelNew(nn.Module):
         y = torch.empty_like(x_contig)
         stride_n, stride_c = x_contig.stride(0), x_contig.stride(1)
 
-        grid = lambda meta: (N * C,)
+        def grid(meta):
+            return (N * C, )
+
         _spatial_mean_subtract_kernel[grid](
             x_contig,
             y,
@@ -136,6 +148,8 @@ def run_operator(x: torch.Tensor) -> torch.Tensor:
         model.eval()
         _MODEL_CACHE[key] = model
     return model(x)
+
+
 batch_size = 16
 in_channels = 16
 out_channels = 32
@@ -144,7 +158,12 @@ kernel_size = 3
 stride = 2
 padding = 1
 
+
 def get_inputs():
-    return [torch.rand(batch_size, in_channels, depth, height, width, device='npu')]
+    return [
+        torch.rand(batch_size, in_channels, depth, height, width, device='npu')
+    ]
+
+
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, stride, padding]

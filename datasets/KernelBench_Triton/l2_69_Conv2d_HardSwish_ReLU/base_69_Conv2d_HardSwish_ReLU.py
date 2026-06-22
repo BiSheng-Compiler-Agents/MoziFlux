@@ -4,7 +4,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_CHANNELS = 8
 DEFAULT_OUT_CHANNELS = 64
@@ -23,7 +22,8 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 
 @triton.jit
-def _hswish_relu_masked_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+def _hswish_relu_masked_kernel(x_ptr, y_ptr, n_elements,
+                               BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     tl.multiple_of(offsets, 16)
@@ -47,6 +47,7 @@ def _hswish_relu_exact_kernel(x_ptr, y_ptr, BLOCK_SIZE: tl.constexpr):
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -58,9 +59,11 @@ class ModelNew(nn.Module):
 
     def _fused_hardswish_relu_triton(self, x: torch.Tensor) -> torch.Tensor:
         if not _is_npu_tensor(x):
-            raise RuntimeError("ModelNew expects Ascend NPU tensors for the Triton path")
+            raise RuntimeError(
+                "ModelNew expects Ascend NPU tensors for the Triton path")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
         if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
             raise RuntimeError(
                 f"ModelNew supports float16, bfloat16, and float32 inputs, got {x.dtype}"
@@ -72,12 +75,12 @@ class ModelNew(nn.Module):
             return torch.empty_like(x_in)
 
         y = torch.empty_like(x_in)
-        if (
-            n_elements == SPECIAL_CASE_NUMEL
-            and x_in.shape == (DEFAULT_BATCH_SIZE, DEFAULT_OUT_CHANNELS, DEFAULT_HEIGHT - DEFAULT_KERNEL_SIZE + 1, DEFAULT_WIDTH - DEFAULT_KERNEL_SIZE + 1)
-            and x_in.dtype == torch.float16
-        ):
-            grid = (SPECIAL_CASE_NUMEL // SPECIAL_CASE_BLOCK,)
+        if (n_elements == SPECIAL_CASE_NUMEL
+                and x_in.shape == (DEFAULT_BATCH_SIZE, DEFAULT_OUT_CHANNELS,
+                                   DEFAULT_HEIGHT - DEFAULT_KERNEL_SIZE + 1,
+                                   DEFAULT_WIDTH - DEFAULT_KERNEL_SIZE + 1)
+                and x_in.dtype == torch.float16):
+            grid = (SPECIAL_CASE_NUMEL // SPECIAL_CASE_BLOCK, )
             _hswish_relu_exact_kernel[grid](
                 x_in,
                 y,
@@ -97,7 +100,9 @@ class ModelNew(nn.Module):
             block_size = 2048
             num_warps = 4
 
-        grid = lambda META: (triton.cdiv(n_elements, META["BLOCK_SIZE"]),)
+        def grid(META):
+            return (triton.cdiv(n_elements, META["BLOCK_SIZE"]), )
+
         _hswish_relu_masked_kernel[grid](
             x_in,
             y,

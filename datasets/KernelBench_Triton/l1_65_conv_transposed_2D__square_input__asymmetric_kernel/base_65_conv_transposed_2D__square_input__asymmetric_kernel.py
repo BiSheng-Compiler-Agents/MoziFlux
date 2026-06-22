@@ -29,13 +29,9 @@ def _fast_path_available(
     padding = _pair(padding)
     output_padding = _pair(output_padding)
     dilation = _pair(dilation)
-    return (
-        stride == (1, 1)
-        and dilation == (1, 1)
-        and output_padding == (0, 0)
-        and padding[0] <= 1
-        and padding[1] <= 3
-    )
+    return (stride == (1, 1) and dilation == (1, 1)
+            and output_padding == (0, 0) and padding[0] <= 1
+            and padding[1] <= 3)
 
 
 def _full_conv_pad(
@@ -55,17 +51,15 @@ def _full_conv_pad(
     )
 
 
-def _weight_to_conv2d_eager(weight: torch.Tensor, groups: int, out_channels: int) -> torch.Tensor:
+def _weight_to_conv2d_eager(weight: torch.Tensor, groups: int,
+                            out_channels: int) -> torch.Tensor:
     in_c, out_c_per_group, kH, kW = weight.shape
     in_per_group = in_c // groups
-    return (
-        weight.view(groups, in_per_group, out_c_per_group, kH, kW)
-        .flip(dims=[3, 4])
-        .permute(0, 2, 1, 3, 4)
-        .contiguous()
-        .view(out_channels, in_per_group, kH, kW)
-        .contiguous()
-    )
+    return (weight.view(groups, in_per_group,
+                        out_c_per_group, kH, kW).flip(dims=[3, 4]).permute(
+                            0, 2, 1, 3,
+                            4).contiguous().view(out_channels, in_per_group,
+                                                 kH, kW).contiguous())
 
 
 def _conv_transpose_via_conv2d(
@@ -80,7 +74,8 @@ def _conv_transpose_via_conv2d(
 ) -> torch.Tensor:
     x_pad = F.pad(
         x.contiguous(),
-        _full_conv_pad(weight_conv2d.shape[-2:], padding, output_padding, dilation),
+        _full_conv_pad(weight_conv2d.shape[-2:], padding, output_padding,
+                       dilation),
     )
     return F.conv2d(
         x_pad,
@@ -97,9 +92,13 @@ def _conv_transpose_via_conv2d(
 def _permute_flip_weight_kernel(
     src_ptr,  # (in_c, out_c_per_group, 21)
     dst_ptr,  # (out_c, in_c_per_group, 21)
-    s_wi, s_wo,
-    s_do, s_di,
-    in_c, out_c, groups,
+    s_wi,
+    s_wo,
+    s_do,
+    s_di,
+    in_c,
+    out_c,
+    groups,
 ):
     pid_o = tl.program_id(0)  # out channel (total)
     pid_i = tl.program_id(1)  # in channel within group
@@ -132,9 +131,13 @@ def _permute_flip_weight_kernel(
 def _permute_flip_weight_kernel_go8_gi2(
     src_ptr,  # (in_c, out_c_per_group, 21)
     dst_ptr,  # (out_c, in_c_per_group, 21)
-    s_wi, s_wo,
-    s_do, s_di,
-    in_c, out_c, groups,
+    s_wi,
+    s_wo,
+    s_do,
+    s_di,
+    in_c,
+    out_c,
+    groups,
 ):
     pid_g = tl.program_id(0)
     pid_o_tile = tl.program_id(1)
@@ -162,13 +165,23 @@ def _permute_flip_weight_kernel_go8_gi2(
             src_base = src_ptr + i_total * s_wi + o_within * s_wo
             dst_base = dst_ptr + o_total * s_do + pid_i * s_di
 
-            vals0 = tl.load(src_base + 14 + reversed_col, mask=row_mask & valid_i, other=0)
-            vals1 = tl.load(src_base + 7 + reversed_col, mask=row_mask & valid_i, other=0)
-            vals2 = tl.load(src_base + reversed_col, mask=row_mask & valid_i, other=0)
+            vals0 = tl.load(src_base + 14 + reversed_col,
+                            mask=row_mask & valid_i,
+                            other=0)
+            vals1 = tl.load(src_base + 7 + reversed_col,
+                            mask=row_mask & valid_i,
+                            other=0)
+            vals2 = tl.load(src_base + reversed_col,
+                            mask=row_mask & valid_i,
+                            other=0)
 
             tl.store(dst_base + col_offsets, vals0, mask=row_mask & valid_i)
-            tl.store(dst_base + 7 + col_offsets, vals1, mask=row_mask & valid_i)
-            tl.store(dst_base + 14 + col_offsets, vals2, mask=row_mask & valid_i)
+            tl.store(dst_base + 7 + col_offsets,
+                     vals1,
+                     mask=row_mask & valid_i)
+            tl.store(dst_base + 14 + col_offsets,
+                     vals2,
+                     mask=row_mask & valid_i)
 
 
 def conv_transposed_2d_square_input_asymmetric_kernel(
@@ -187,25 +200,35 @@ def conv_transposed_2d_square_input_asymmetric_kernel(
     dilation = _pair(dilation)
 
     if not _is_npu_tensor(x):
-        raise RuntimeError("conv_transposed_2d_square_input_asymmetric_kernel expects an Ascend NPU input tensor")
+        raise RuntimeError(
+            "conv_transposed_2d_square_input_asymmetric_kernel expects an Ascend NPU input tensor"
+        )
     if not _is_npu_tensor(weight):
-        raise RuntimeError("conv_transposed_2d_square_input_asymmetric_kernel expects Ascend NPU weights")
+        raise RuntimeError(
+            "conv_transposed_2d_square_input_asymmetric_kernel expects Ascend NPU weights"
+        )
     if bias is not None and not _is_npu_tensor(bias):
         raise RuntimeError("bias must be allocated on Ascend NPU")
     if x.dim() != 4:
-        raise ValueError(f"expected a 4D input tensor, got shape {tuple(x.shape)}")
+        raise ValueError(
+            f"expected a 4D input tensor, got shape {tuple(x.shape)}")
     if weight.dim() != 4:
-        raise ValueError(f"expected a 4D weight tensor, got shape {tuple(weight.shape)}")
+        raise ValueError(
+            f"expected a 4D weight tensor, got shape {tuple(weight.shape)}")
     if x.shape[-1] != x.shape[-2]:
-        raise ValueError(f"expected square spatial input, got shape {tuple(x.shape)}")
+        raise ValueError(
+            f"expected square spatial input, got shape {tuple(x.shape)}")
     if x.dtype not in (torch.float16, torch.float32):
         raise TypeError(f"unsupported input dtype: {x.dtype}")
     if weight.dtype != x.dtype:
-        raise TypeError(f"weight dtype {weight.dtype} must match input dtype {x.dtype}")
+        raise TypeError(
+            f"weight dtype {weight.dtype} must match input dtype {x.dtype}")
     if bias is not None and bias.dtype != x.dtype:
-        raise TypeError(f"bias dtype {bias.dtype} must match input dtype {x.dtype}")
+        raise TypeError(
+            f"bias dtype {bias.dtype} must match input dtype {x.dtype}")
     if _fast_path_available(stride, padding, output_padding, dilation):
-        weight_conv2d = _weight_to_conv2d_eager(weight.contiguous(), groups, weight.shape[1] * groups)
+        weight_conv2d = _weight_to_conv2d_eager(weight.contiguous(), groups,
+                                                weight.shape[1] * groups)
         return _conv_transpose_via_conv2d(
             x,
             weight_conv2d,
@@ -242,7 +265,16 @@ class ModelNew(nn.Module):
         groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
         bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
     """
-    def __init__(self, in_channels: int = 32, out_channels: int = 64, kernel_size: tuple = (3, 5), stride: int = 1, padding: int = 0, output_padding: int = 0, groups: int = 1, bias: bool = False):
+
+    def __init__(self,
+                 in_channels: int = 32,
+                 out_channels: int = 64,
+                 kernel_size: tuple = (3, 5),
+                 stride: int = 1,
+                 padding: int = 0,
+                 output_padding: int = 0,
+                 groups: int = 1,
+                 bias: bool = False):
         super(ModelNew, self).__init__()
         self.conv_transpose2d = nn.ConvTranspose2d(
             in_channels,
@@ -265,14 +297,11 @@ class ModelNew(nn.Module):
             assert in_c % g == 0
             in_pg = in_c // g
             # (G, in_pg, out_pg, kH, kW) -> flip hw -> (G, out_pg, in_pg, kH, kW) -> (out_c, in_pg, kH, kW)
-            w2_cpu = (
-                w.view(g, in_pg, out_pg, kH, kW)
-                 .flip(dims=[3, 4])
-                 .permute(0, 2, 1, 3, 4)
-                 .contiguous()
-                 .view(self.conv_transpose2d.out_channels, in_pg, kH, kW)
-                 .contiguous()
-            )
+            w2_cpu = (w.view(g, in_pg,
+                             out_pg, kH, kW).flip(dims=[3, 4]).permute(
+                                 0, 2, 1, 3, 4).contiguous().view(
+                                     self.conv_transpose2d.out_channels, in_pg,
+                                     kH, kW).contiguous())
         self.register_buffer("_pre_w2", w2_cpu)
         self._pre_w2_version = int(self.conv_transpose2d.weight._version)
 
@@ -301,21 +330,16 @@ class ModelNew(nn.Module):
             out_channels=self.conv_transpose2d.out_channels,
         )
         # If we already have a valid GPU-cached transform, use it
-        if (
-            self._cached_w2 is not None
-            and self._cached_meta is not None
-            and all(meta[k] == self._cached_meta.get(k) for k in meta.keys())
-        ):
+        if (self._cached_w2 is not None and self._cached_meta is not None
+                and all(meta[k] == self._cached_meta.get(k)
+                        for k in meta.keys())):
             return self._cached_w2
 
         # If a precomputed buffer exists and is up-to-date and on the right device/dtype, use it directly
-        if (
-            hasattr(self, "_pre_w2")
-            and self._pre_w2 is not None
-            and self._pre_w2_version == int(weight._version)
-            and self._pre_w2.dtype == weight.dtype
-            and self._pre_w2.device == weight.device
-        ):
+        if (hasattr(self, "_pre_w2") and self._pre_w2 is not None
+                and self._pre_w2_version == int(weight._version)
+                and self._pre_w2.dtype == weight.dtype
+                and self._pre_w2.device == weight.device):
             self._cached_w2 = self._pre_w2
             self._cached_meta = meta
             return self._cached_w2
@@ -338,30 +362,35 @@ class ModelNew(nn.Module):
             return w2
 
         # Allocate destination tensor for Triton path
-        w2 = torch.empty((out_c, in_per_group, kH, kW), dtype=weight.dtype, device=weight.device)
+        w2 = torch.empty((out_c, in_per_group, kH, kW),
+                         dtype=weight.dtype,
+                         device=weight.device)
 
         # Triton kernel launch config
         total_kernel_elems = kH * kW
         if total_kernel_elems == 21 and kH == 3 and kW == 7:
-            weight_flat = weight.view(in_c, out_c_per_group, total_kernel_elems)
+            weight_flat = weight.view(in_c, out_c_per_group,
+                                      total_kernel_elems)
             w2_flat = w2.view(out_c, in_per_group, total_kernel_elems)
             s_wi, s_wo, _ = weight_flat.stride()
             s_do, s_di, _ = w2_flat.stride()
             out_per_group = out_c // groups
             if out_per_group % 8 == 0 and in_per_group % 2 == 0:
-                _permute_flip_weight_kernel_go8_gi2[(groups, out_per_group // 8, in_per_group // 2)](
-                    weight_flat,
-                    w2_flat,
-                    s_wi,
-                    s_wo,
-                    s_do,
-                    s_di,
-                    in_c,
-                    out_c,
-                    groups,
-                    num_warps=1,
-                    num_stages=1,
-                )
+                _permute_flip_weight_kernel_go8_gi2[(groups,
+                                                     out_per_group // 8,
+                                                     in_per_group // 2)](
+                                                         weight_flat,
+                                                         w2_flat,
+                                                         s_wi,
+                                                         s_wo,
+                                                         s_do,
+                                                         s_di,
+                                                         in_c,
+                                                         out_c,
+                                                         groups,
+                                                         num_warps=1,
+                                                         num_stages=1,
+                                                     )
             else:
                 _permute_flip_weight_kernel[(out_c, in_per_group)](
                     weight_flat,
@@ -395,7 +424,8 @@ class ModelNew(nn.Module):
             torch.Tensor: Output tensor of shape (batch_size, out_channels, height_out, width_out).
         """
         if self._fast_path_available():
-            weight_conv2d = self._weight_to_conv2d_cached(self.conv_transpose2d.weight)
+            weight_conv2d = self._weight_to_conv2d_cached(
+                self.conv_transpose2d.weight)
             return _conv_transpose_via_conv2d(
                 x,
                 weight_conv2d,
@@ -416,6 +446,8 @@ class ModelNew(nn.Module):
             groups=self.conv_transpose2d.groups,
             dilation=self.conv_transpose2d.dilation,
         )
+
+
 batch_size = 8
 in_channels = 64
 out_channels = 64
@@ -423,8 +455,13 @@ kernel_size = (3, 7)  # larger asymmetric kernel
 width = 512
 height = 512
 
+
 def get_inputs():
     x = torch.rand(batch_size, in_channels, height, width)
     return [x]
+
+
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size]  # Provide in_channels, out_channels, kernel_size for initialization
+    return [
+        in_channels, out_channels, kernel_size
+    ]  # Provide in_channels, out_channels, kernel_size for initialization

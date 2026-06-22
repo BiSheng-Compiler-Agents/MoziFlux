@@ -1,0 +1,24 @@
+[UNIT_TEST] start
+[UNIT_TEST] direct_small Baseline Triton1: PASS ok
+[UNIT_TEST] direct_small Baseline Triton2: PASS ok
+[UNIT_TEST] direct_small Optimized Triton: PASS ok
+[UNIT_TEST] direct_medium Baseline Triton1: PASS ok
+[UNIT_TEST] direct_medium Baseline Triton2: PASS ok
+[UNIT_TEST] direct_medium Optimized Triton: PASS ok
+[UNIT_TEST] persistent_original Baseline Triton1: INFO_SKIP coreDim would exceed 65535
+[UNIT_TEST] persistent_original Baseline Triton2: INFO_SKIP coreDim would exceed 65535
+[UNIT_TEST] persistent_original Optimized Triton: PASS ok
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l1_25_Swish_1782320787/25_Swish.py:51: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x_contig)
+[BENCH] Baseline Triton1 (4096, 393216): INFO_SKIP coreDim would exceed 65535
+[BENCH] Baseline Triton2 (4096, 393216): INFO_SKIP coreDim would exceed 65535
+swish-performance:
+                 label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0         direct_small       0.014102          0.010636          0.009728          0.010664
+1        direct_medium       0.509341          0.283147          0.238085          0.260082
+2  persistent_original      22.084715               inf               inf          9.252346
+
+/home/s00929845/kernel_verify/l1_25_Swish_1782320787/25_Swish.py:51: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x_contig)

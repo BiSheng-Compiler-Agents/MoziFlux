@@ -1,0 +1,31 @@
+TEST baseline1 small PASS max_abs=2.38419e-07 max_rel=2.382e-07
+TEST baseline2 small PASS max_abs=5.96046e-07 max_rel=3.9228e-07
+TEST optimized small PASS max_abs=5.96046e-07 max_rel=3.9228e-07
+TEST baseline1 irregular PASS max_abs=2.38419e-07 max_rel=2.38145e-07
+TEST baseline2 irregular PASS max_abs=4.76837e-07 max_rel=3.56881e-07
+TEST optimized irregular PASS max_abs=4.76837e-07 max_rel=3.56881e-07
+TEST baseline1 medium INFO RuntimeError: SKIP coreDim_guard: baseline1 grid B*H*W exceeds 65535
+TEST baseline2 medium PASS max_abs=7.15256e-07 max_rel=4.70224e-07
+TEST optimized medium PASS max_abs=7.15256e-07 max_rel=4.70224e-07
+TEST baseline1 target INFO RuntimeError: SKIP coreDim_guard: baseline1 grid B*H*W exceeds 65535
+TEST baseline2 target INFO RuntimeError: SKIP coreDim_guard: baseline2 block grid exceeds 65535
+TEST optimized target PASS max_abs=8.34465e-07 max_rel=5.17562e-07
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l1_36_RMSNorm__1782336072/36_RMSNorm_.py:63: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y_2d = torch.empty_like(x_2d)
+INFO bench baseline1 medium RuntimeError: SKIP coreDim_guard: baseline1 grid B*H*W exceeds 65535
+INFO bench baseline1 medium INF RuntimeError: SKIP coreDim_guard: baseline1 grid B*H*W exceeds 65535
+INFO bench baseline1 target RuntimeError: SKIP coreDim_guard: baseline1 grid B*H*W exceeds 65535
+INFO bench baseline1 target INF RuntimeError: SKIP coreDim_guard: baseline1 grid B*H*W exceeds 65535
+INFO bench baseline2 target RuntimeError: SKIP coreDim_guard: baseline2 block grid exceeds 65535
+INFO bench baseline2 target INF RuntimeError: SKIP coreDim_guard: baseline2 block grid exceeds 65535
+rmsnorm-performance:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small       0.012445          0.018687          0.003869          0.003942
+1  irregular       0.013519          0.027563          0.005011          0.004973
+2     medium       0.112559               inf          0.077636          0.166671
+3     target      30.311148               inf               inf         14.053106
+
+/home/s00929845/kernel_verify/l1_36_RMSNorm__1782336072/36_RMSNorm_.py:63: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y_2d = torch.empty_like(x_2d)

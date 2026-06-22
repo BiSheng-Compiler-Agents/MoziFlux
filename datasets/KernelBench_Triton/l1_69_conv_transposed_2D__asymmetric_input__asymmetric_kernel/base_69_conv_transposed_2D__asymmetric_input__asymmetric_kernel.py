@@ -23,7 +23,7 @@ def _touch_tensor_kernel(x_ptr, STRIDE: tl.constexpr, COUNT: tl.constexpr):
 
 def _touch_triton_path(x: torch.Tensor) -> None:
     x_contiguous = x.contiguous().view(-1)
-    _touch_tensor_kernel[(1,)](x_contiguous, STRIDE=4096, COUNT=4)
+    _touch_tensor_kernel[(1, )](x_contiguous, STRIDE=4096, COUNT=4)
 
 
 def conv_transposed_2d_asymmetric_input_asymmetric_kernel(
@@ -47,15 +47,19 @@ def conv_transposed_2d_asymmetric_input_asymmetric_kernel(
     if bias is not None and not _is_npu_tensor(bias):
         raise RuntimeError("bias must be allocated on Ascend NPU")
     if x.dim() != 4:
-        raise ValueError(f"expected a 4D input tensor, got shape {tuple(x.shape)}")
+        raise ValueError(
+            f"expected a 4D input tensor, got shape {tuple(x.shape)}")
     if weight.dim() != 4:
-        raise ValueError(f"expected a 4D weight tensor, got shape {tuple(weight.shape)}")
+        raise ValueError(
+            f"expected a 4D weight tensor, got shape {tuple(weight.shape)}")
     if x.dtype not in (torch.float16, torch.float32):
         raise TypeError(f"unsupported input dtype: {x.dtype}")
     if weight.dtype != x.dtype:
-        raise TypeError(f"weight dtype {weight.dtype} must match input dtype {x.dtype}")
+        raise TypeError(
+            f"weight dtype {weight.dtype} must match input dtype {x.dtype}")
     if bias is not None and bias.dtype != x.dtype:
-        raise TypeError(f"bias dtype {bias.dtype} must match input dtype {x.dtype}")
+        raise TypeError(
+            f"bias dtype {bias.dtype} must match input dtype {x.dtype}")
     if x.shape[1] != weight.shape[0]:
         raise ValueError(
             f"input channels {x.shape[1]} must match weight input channels {weight.shape[0]}"
@@ -75,17 +79,18 @@ def conv_transposed_2d_asymmetric_input_asymmetric_kernel(
 
 
 class ModelNew(nn.Module):
+
     def __init__(
-        self,
-        in_channels: int = 64,
-        out_channels: int = 128,
-        kernel_size: tuple = (3, 5),
-        stride: tuple = (1, 1),
-        padding: tuple = (0, 0),
-        output_padding: tuple = (0, 0),
-        dilation: tuple = (1, 1),
-        groups: int = 1,
-        bias: bool = False,
+            self,
+            in_channels: int = 64,
+            out_channels: int = 128,
+            kernel_size: tuple = (3, 5),
+            stride: tuple = (1, 1),
+            padding: tuple = (0, 0),
+            output_padding: tuple = (0, 0),
+            dilation: tuple = (1, 1),
+            groups: int = 1,
+            bias: bool = False,
     ):
         super().__init__()
         self.conv_transpose2d = nn.ConvTranspose2d(

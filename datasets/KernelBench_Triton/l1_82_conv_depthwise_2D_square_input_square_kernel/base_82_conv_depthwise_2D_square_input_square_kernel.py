@@ -74,16 +74,25 @@ def _dwconv2d_kernel(
                 iw = ow + kw
                 for oh_idx in tl.static_range(0, BLOCK_H):
                     oh = h_start + oh_idx
-                    x_ptrs = x_ptr + x_plane_base + (oh + kh) * stride_xH + iw * stride_xW
+                    x_ptrs = x_ptr + x_plane_base + (
+                        oh + kh) * stride_xH + iw * stride_xW
                     x_val = tl.load(x_ptrs, mask=out_mask, other=0.0)
-                    if oh_idx == 0: acc0 += x_val * w_val
-                    elif oh_idx == 1: acc1 += x_val * w_val
-                    elif oh_idx == 2: acc2 += x_val * w_val
-                    elif oh_idx == 3: acc3 += x_val * w_val
-                    elif oh_idx == 4: acc4 += x_val * w_val
-                    elif oh_idx == 5: acc5 += x_val * w_val
-                    elif oh_idx == 6: acc6 += x_val * w_val
-                    elif oh_idx == 7: acc7 += x_val * w_val
+                    if oh_idx == 0:
+                        acc0 += x_val * w_val
+                    elif oh_idx == 1:
+                        acc1 += x_val * w_val
+                    elif oh_idx == 2:
+                        acc2 += x_val * w_val
+                    elif oh_idx == 3:
+                        acc3 += x_val * w_val
+                    elif oh_idx == 4:
+                        acc4 += x_val * w_val
+                    elif oh_idx == 5:
+                        acc5 += x_val * w_val
+                    elif oh_idx == 6:
+                        acc6 += x_val * w_val
+                    elif oh_idx == 7:
+                        acc7 += x_val * w_val
     else:
         for kh in tl.static_range(0, K):
             w_row_base = w_base_c + kh * stride_wH
@@ -97,16 +106,25 @@ def _dwconv2d_kernel(
                     ih = ih0 + kh
                     valid_h = (ih >= 0) & (ih < H)
                     mask = out_mask & valid_h & valid_w
-                    x_ptrs = x_ptr + x_plane_base + ih * stride_xH + (iw0 + kw) * stride_xW
+                    x_ptrs = x_ptr + x_plane_base + ih * stride_xH + (
+                        iw0 + kw) * stride_xW
                     x_val = tl.load(x_ptrs, mask=mask, other=0.0)
-                    if oh_idx == 0: acc0 += x_val * w_val
-                    elif oh_idx == 1: acc1 += x_val * w_val
-                    elif oh_idx == 2: acc2 += x_val * w_val
-                    elif oh_idx == 3: acc3 += x_val * w_val
-                    elif oh_idx == 4: acc4 += x_val * w_val
-                    elif oh_idx == 5: acc5 += x_val * w_val
-                    elif oh_idx == 6: acc6 += x_val * w_val
-                    elif oh_idx == 7: acc7 += x_val * w_val
+                    if oh_idx == 0:
+                        acc0 += x_val * w_val
+                    elif oh_idx == 1:
+                        acc1 += x_val * w_val
+                    elif oh_idx == 2:
+                        acc2 += x_val * w_val
+                    elif oh_idx == 3:
+                        acc3 += x_val * w_val
+                    elif oh_idx == 4:
+                        acc4 += x_val * w_val
+                    elif oh_idx == 5:
+                        acc5 += x_val * w_val
+                    elif oh_idx == 6:
+                        acc6 += x_val * w_val
+                    elif oh_idx == 7:
+                        acc7 += x_val * w_val
 
     if HAS_BIAS:
         b_val = tl.load(b_ptr + c)
@@ -124,17 +142,26 @@ def _dwconv2d_kernel(
         h_mask = oh < H_OUT
         y_ptrs = y_ptr + y_base_nc + oh * stride_yH + ow * stride_yW
         store_mask = out_mask & h_mask
-        if oh_idx == 0: tl.store(y_ptrs, acc0, mask=store_mask)
-        elif oh_idx == 1: tl.store(y_ptrs, acc1, mask=store_mask)
-        elif oh_idx == 2: tl.store(y_ptrs, acc2, mask=store_mask)
-        elif oh_idx == 3: tl.store(y_ptrs, acc3, mask=store_mask)
-        elif oh_idx == 4: tl.store(y_ptrs, acc4, mask=store_mask)
-        elif oh_idx == 5: tl.store(y_ptrs, acc5, mask=store_mask)
-        elif oh_idx == 6: tl.store(y_ptrs, acc6, mask=store_mask)
-        elif oh_idx == 7: tl.store(y_ptrs, acc7, mask=store_mask)
+        if oh_idx == 0:
+            tl.store(y_ptrs, acc0, mask=store_mask)
+        elif oh_idx == 1:
+            tl.store(y_ptrs, acc1, mask=store_mask)
+        elif oh_idx == 2:
+            tl.store(y_ptrs, acc2, mask=store_mask)
+        elif oh_idx == 3:
+            tl.store(y_ptrs, acc3, mask=store_mask)
+        elif oh_idx == 4:
+            tl.store(y_ptrs, acc4, mask=store_mask)
+        elif oh_idx == 5:
+            tl.store(y_ptrs, acc5, mask=store_mask)
+        elif oh_idx == 6:
+            tl.store(y_ptrs, acc6, mask=store_mask)
+        elif oh_idx == 7:
+            tl.store(y_ptrs, acc7, mask=store_mask)
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_channels: int = DEFAULT_IN_CHANNELS,
@@ -176,7 +203,9 @@ class ModelNew(nn.Module):
         H_OUT_ch = (H_ch + 2 * P_ch - K_ch) // S_ch + 1
         W_OUT_ch = (W_ch + 2 * P_ch - K_ch) // S_ch + 1
 
-        y = torch.empty((N_ch, C_ch, H_OUT_ch, W_OUT_ch), device=x.device, dtype=x.dtype)
+        y = torch.empty((N_ch, C_ch, H_OUT_ch, W_OUT_ch),
+                        device=x.device,
+                        dtype=x.dtype)
 
         stride_xN, stride_xC, stride_xH, stride_xW = x.stride()
         stride_wC, _, stride_wH, stride_wW = w.stride()

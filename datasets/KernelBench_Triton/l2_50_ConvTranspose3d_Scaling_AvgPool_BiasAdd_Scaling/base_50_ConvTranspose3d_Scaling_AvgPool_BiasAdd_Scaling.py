@@ -8,7 +8,6 @@ try:
 except ImportError:
     torch_npu = None
 
-
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_IN_CHANNELS = 3
 DEFAULT_OUT_CHANNELS = 16
@@ -41,7 +40,6 @@ def _avgpool3d_k2s2_bias_scale_fused(
     W2,
     out_spatial,
     alpha,
-
     BLOCK_HW: tl.constexpr,
     CHUNKS_PER_PLANE: tl.constexpr,
 ):
@@ -61,16 +59,35 @@ def _avgpool3d_k2s2_bias_scale_fused(
     stride_h = W
     stride_d = H * W
     stride_nc = D * H * W
-    base = nc * stride_nc + d2 * (2 * stride_d) + (h2 * 2) * stride_h + (w2 * 2)
+    base = nc * stride_nc + d2 * (2 * stride_d) + (h2 * 2) * stride_h + (w2 *
+                                                                         2)
 
     x0 = tl.load(x_ptr + base, mask=mask, other=0.0, cache_modifier=".ca")
     x1 = tl.load(x_ptr + base + 1, mask=mask, other=0.0, cache_modifier=".ca")
-    x2 = tl.load(x_ptr + base + stride_h, mask=mask, other=0.0, cache_modifier=".ca")
-    x3 = tl.load(x_ptr + base + stride_h + 1, mask=mask, other=0.0, cache_modifier=".ca")
-    x4 = tl.load(x_ptr + base + stride_d, mask=mask, other=0.0, cache_modifier=".ca")
-    x5 = tl.load(x_ptr + base + stride_d + 1, mask=mask, other=0.0, cache_modifier=".ca")
-    x6 = tl.load(x_ptr + base + stride_d + stride_h, mask=mask, other=0.0, cache_modifier=".ca")
-    x7 = tl.load(x_ptr + base + stride_d + stride_h + 1, mask=mask, other=0.0, cache_modifier=".ca")
+    x2 = tl.load(x_ptr + base + stride_h,
+                 mask=mask,
+                 other=0.0,
+                 cache_modifier=".ca")
+    x3 = tl.load(x_ptr + base + stride_h + 1,
+                 mask=mask,
+                 other=0.0,
+                 cache_modifier=".ca")
+    x4 = tl.load(x_ptr + base + stride_d,
+                 mask=mask,
+                 other=0.0,
+                 cache_modifier=".ca")
+    x5 = tl.load(x_ptr + base + stride_d + 1,
+                 mask=mask,
+                 other=0.0,
+                 cache_modifier=".ca")
+    x6 = tl.load(x_ptr + base + stride_d + stride_h,
+                 mask=mask,
+                 other=0.0,
+                 cache_modifier=".ca")
+    x7 = tl.load(x_ptr + base + stride_d + stride_h + 1,
+                 mask=mask,
+                 other=0.0,
+                 cache_modifier=".ca")
 
     s0 = x0 + x1
     s1 = x2 + x3
@@ -81,11 +98,11 @@ def _avgpool3d_k2s2_bias_scale_fused(
     b = tl.load(bias_ptr + c)
     out = s * alpha + b
 
-
     tl.store(y_ptr + plane_pid * out_spatial + plane_offs, out, mask=mask)
 
 
 class ModelNew(nn.Module):
+
     def __init__(
         self,
         in_channels=DEFAULT_IN_CHANNELS,
@@ -120,13 +137,12 @@ class ModelNew(nn.Module):
         out = torch.empty((N, C, D2, H2, W2), device=x.device, dtype=x.dtype)
 
         plane_size = H2 * W2
-        grid = (N * C * D2 * 1,)
+        grid = (N * C * D2 * 1, )
 
         scale1_value = float(self.scale1.item())
         scale2_value = float(self.scale2.item())
         alpha = scale1_value * scale2_value * 0.125
         bias_1d = (self.bias.view(C).contiguous() * scale2_value)
-
 
         _avgpool3d_k2s2_bias_scale_fused[grid](
             x,
@@ -141,7 +157,6 @@ class ModelNew(nn.Module):
             W2,
             plane_size,
             alpha,
-
             BLOCK_HW=961,
             CHUNKS_PER_PLANE=1,
             num_warps=16,
@@ -176,8 +191,13 @@ bias_shape = (out_channels, 1, 1, 1)
 
 
 def get_inputs():
-    return [torch.rand(batch_size, in_channels, depth, height, width, device="npu")]
+    return [
+        torch.rand(batch_size, in_channels, depth, height, width, device="npu")
+    ]
 
 
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, scale1, scale2, bias_shape]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding, scale1,
+        scale2, bias_shape
+    ]

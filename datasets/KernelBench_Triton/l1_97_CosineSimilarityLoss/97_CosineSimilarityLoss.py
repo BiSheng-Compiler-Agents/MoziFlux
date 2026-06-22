@@ -49,16 +49,21 @@ class ModelNew(nn.Module):
     """
     A model that computes Cosine Similarity Loss for comparing vectors.
     """
+
     def __init__(self):
         super(ModelNew, self).__init__()
 
     def forward(self, predictions, targets):
         if predictions.ndim != 2 or targets.ndim != 2:
-            raise ValueError("ModelNew expects 2D predictions and targets tensors")
+            raise ValueError(
+                "ModelNew expects 2D predictions and targets tensors")
         if predictions.shape != targets.shape:
-            raise ValueError("predictions and targets must have the same shape")
-        if not getattr(predictions, "is_npu", False) or not getattr(targets, "is_npu", False):
-            raise RuntimeError("ModelNew requires predictions and targets on Ascend NPU")
+            raise ValueError(
+                "predictions and targets must have the same shape")
+        if not getattr(predictions, "is_npu", False) or not getattr(
+                targets, "is_npu", False):
+            raise RuntimeError(
+                "ModelNew requires predictions and targets on Ascend NPU")
 
         x = predictions.contiguous()
         y = targets.contiguous()
@@ -71,12 +76,17 @@ class ModelNew(nn.Module):
         sx0, sx1 = x.stride()
         sy0, sy1 = y.stride()
 
-        grid = (B,)
+        grid = (B, )
         _cosine_similarity_rows_kernel[grid](
-            x, y, out,
-            B, D,
-            sx0, sx1,
-            sy0, sy1,
+            x,
+            y,
+            out,
+            B,
+            D,
+            sx0,
+            sx1,
+            sy0,
+            sy1,
             EPS=1e-8,
             BLOCK_SIZE=block_size,
         )
@@ -88,8 +98,13 @@ batch_size = 128
 input_shape = (4096, )
 dim = 1
 
+
 def get_inputs():
-    return [torch.randn(batch_size, *input_shape), torch.randn(batch_size, *input_shape)]
+    return [
+        torch.randn(batch_size, *input_shape),
+        torch.randn(batch_size, *input_shape)
+    ]
+
 
 def get_init_inputs():
     return []
