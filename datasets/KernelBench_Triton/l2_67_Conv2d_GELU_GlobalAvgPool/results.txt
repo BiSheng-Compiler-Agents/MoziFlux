@@ -1,0 +1,23 @@
+TEST PyTorch / ACL small_32: PASS max_abs=0.0
+TEST Baseline Triton1 small_32: PASS max_abs=0.000123173
+TEST Baseline Triton2 small_32: SKIP_COMPARISON sandbox_forbids_base_reference_import max_abs=inf
+TEST Optimized Triton small_32: PASS max_abs=0
+TEST PyTorch / ACL medium_128: PASS max_abs=0.0
+TEST Baseline Triton1 medium_128: PASS max_abs=0.000123024
+TEST Baseline Triton2 medium_128: SKIP_COMPARISON sandbox_forbids_base_reference_import max_abs=inf
+TEST Optimized Triton medium_128: PASS max_abs=0
+TEST PyTorch / ACL exact_256: PASS max_abs=0.0
+TEST Baseline Triton1 exact_256: SKIP_COMPARISON comparison_provider_preskipped_to_avoid_timeout max_abs=inf
+TEST Baseline Triton2 exact_256: SKIP_COMPARISON sandbox_forbids_base_reference_import max_abs=inf
+TEST Optimized Triton exact_256: PASS max_abs=0
+UNIT_TEST PASS
+
+INFO benchmark Baseline Triton2 small_32: unavailable sandbox_forbids_base_reference_import
+INFO benchmark Baseline Triton2 medium_128: unavailable sandbox_forbids_base_reference_import
+INFO benchmark Baseline Triton1 exact_256: inf comparison_provider_preskipped_to_avoid_timeout
+INFO benchmark Baseline Triton2 exact_256: unavailable sandbox_forbids_base_reference_import
+conv2d-gelu-globalavgpool:
+        label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    small_32       0.173654          0.315187               inf          0.180027
+1  medium_128       2.615391          4.027653               inf          2.615107
+2   exact_256      85.133858               inf               inf         85.582291

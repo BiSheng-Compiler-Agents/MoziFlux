@@ -1,0 +1,16 @@
+CHECK Baseline Triton1 default_k2 PASS
+INFO Baseline Triton2 default_k2 unavailable_or_mismatch AssertionError
+CHECK Optimized Triton default_k2 PASS
+CHECK Baseline Triton1 small_k2 PASS
+INFO Baseline Triton2 small_k2 unavailable_or_mismatch AssertionError
+CHECK Optimized Triton small_k2 PASS
+CHECK Baseline Triton1 fallback_k3 PASS
+CHECK Baseline Triton2 fallback_k3 PASS
+CHECK Optimized Triton fallback_k3 PASS
+UNIT_TEST PASS
+
+conv2d_subtract_hswish_maxpool_mish:
+         label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   default_k2     186.801392       2743.935791        117.518745        186.279282
+1     small_k2       1.833902         26.494989          1.205941          1.798434
+2  fallback_k3       0.560993         27.233152         27.242937          0.552674

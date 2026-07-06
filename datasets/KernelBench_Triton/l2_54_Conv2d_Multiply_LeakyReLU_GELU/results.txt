@@ -1,0 +1,22 @@
+UNIT small_2x64x64 Baseline Triton1 max_abs_diff=0.000233769 close=True
+UNIT small_2x64x64 Baseline Triton2 max_abs_diff=0.000233769 close=True
+UNIT small_2x64x64 Optimized Triton max_abs_diff=0.000233769 close=True
+UNIT small_2x64x64 Optimized Triton forced_persistent max_abs_diff=0.000233769 close=True
+UNIT irregular_3x64x70 Baseline Triton1 max_abs_diff=0.000233889 close=True
+UNIT irregular_3x64x70 Baseline Triton2 max_abs_diff=0.000233889 close=True
+UNIT irregular_3x64x70 Optimized Triton max_abs_diff=0.000233889 close=True
+UNIT target_64x256 Baseline Triton1 max_abs_diff=0.000426054 close=True
+UNIT target_64x256 Baseline Triton2 max_abs_diff=0.000426054 close=True
+UNIT target_64x256 Optimized Triton max_abs_diff=0.000426054 close=True
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l2_54_Conv2d_Multiply_LeakyReLU_GELU_1782775111/54_Conv2d_Multiply_LeakyReLU_GELU.py:96: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out = torch.empty_like(x)
+l2_54_conv2d_multiply_leakyrelu_gelu:
+               label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small_2x64x64       0.491543          2.548235          0.581859          0.624289
+1  irregular_3x64x70       1.003195          4.482508          1.063988          1.269771
+2      target_64x256      89.027657       1165.898560         79.043129        168.715775
+
+/home/s00929845/kernel_verify/l2_54_Conv2d_Multiply_LeakyReLU_GELU_1782775111/54_Conv2d_Multiply_LeakyReLU_GELU.py:96: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out = torch.empty_like(x)

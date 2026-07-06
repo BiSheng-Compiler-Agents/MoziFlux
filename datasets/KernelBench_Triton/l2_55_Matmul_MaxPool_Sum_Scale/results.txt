@@ -1,0 +1,26 @@
+REMOTE_VERIFY TEST OUTPUT
+TEST baseline1 small_fallback: PASS max_abs=0.000259399
+TEST baseline2 small_fallback: UNAVAILABLE MLIRCompilationError max_abs=inf
+TEST optimized small_fallback: PASS max_abs=0
+TEST opt_fallback small_fallback: PASS max_abs=4.76837e-07
+TEST baseline1 irregular_acl: PASS max_abs=0.000673294
+TEST baseline2 irregular_acl: UNAVAILABLE MLIRCompilationError max_abs=inf
+TEST optimized irregular_acl: PASS max_abs=0
+TEST opt_fallback irregular_acl: PASS max_abs=9.53674e-07
+INFO test_skip baseline1 default_acl: huge custom Triton comparison path preskipped
+TEST baseline2 default_acl: SKIP huge_custom_path max_abs=inf
+TEST optimized default_acl: PASS max_abs=0
+INFO test_skip opt_fallback default_acl: huge custom Triton comparison path preskipped
+UNIT_TEST PASS
+
+REMOTE_VERIFY BENCH OUTPUT
+INFO bench_unavailable baseline2 small_fallback: MLIRCompilationError
+INFO bench_unavailable baseline2 irregular_acl: MLIRCompilationError
+INFO bench_skip baseline1 default_acl: huge custom Triton comparison path preskipped_to_avoid_timeout
+INFO bench_skip baseline2 default_acl: huge custom Triton comparison path preskipped_to_avoid_timeout
+INFO bench_skip opt_fallback default_acl: huge custom Triton comparison path preskipped_to_avoid_timeout
+matmul_maxpool_sum_scale:
+            label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton  Optimized TritonFallback
+0  small_fallback       0.118540          1.025326               inf          0.122819                  0.103357
+1   irregular_acl       0.125548          1.560702               inf          0.121913                  0.170513
+2     default_acl      48.042503               inf               inf         47.546478                       inf

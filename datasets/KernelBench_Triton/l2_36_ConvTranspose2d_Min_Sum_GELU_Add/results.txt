@@ -1,0 +1,7 @@
+UNIT_TEST PASS
+
+l2_36_ConvTranspose2d_Min_Sum_GELU_Add:
+             label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    small_default       0.359492               inf               inf          0.359370
+1  small_multibias       0.381217               inf               inf          0.363572
+2           target      31.850307               inf               inf         32.052872

@@ -1,0 +1,17 @@
+CHECK Baseline Triton1 default_B128_K10_H20: max_abs=1.62125e-05 status=PASS
+CHECK Baseline Triton2 default_B128_K10_H20: max_abs=1.62125e-05 status=PASS
+CHECK Optimized Triton default_B128_K10_H20: max_abs=0 status=PASS
+CHECK Baseline Triton1 boundary_B17_K10_H20: max_abs=4.29153e-05 status=PASS
+CHECK Baseline Triton2 boundary_B17_K10_H20: max_abs=4.29153e-05 status=PASS
+CHECK Optimized Triton boundary_B17_K10_H20: max_abs=0 status=PASS
+CHECK Baseline Triton1 aligned_B64_K16_H32: max_abs=4.00543e-05 status=PASS
+CHECK Baseline Triton2 aligned_B64_K16_H32: max_abs=4.00543e-05 status=PASS
+CHECK Optimized Triton aligned_B64_K16_H32: max_abs=0 status=PASS
+UNIT_TEST PASS
+
+l2_45_gemm_sigmoid_sum_logsumexp:
+                  label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0  default_B128_K10_H20       0.300901          0.353859          0.514104          0.078209
+1  boundary_B17_K10_H20       0.283041          0.097949          0.266649          0.073361
+2   aligned_B64_K16_H32       0.285604          0.152980          0.229801          0.065873
+

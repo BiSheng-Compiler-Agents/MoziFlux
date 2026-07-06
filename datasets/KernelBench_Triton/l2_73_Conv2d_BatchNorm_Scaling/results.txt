@@ -1,0 +1,24 @@
+TEST Baseline Triton1 small_direct: PASS max_abs=0
+TEST Baseline Triton2 small_direct: SKIP_SANDBOX_DO_NOT_READ max_abs=inf
+TEST Optimized Triton small_direct: PASS max_abs=0
+TEST Baseline Triton1 medium_direct: PASS max_abs=0
+TEST Baseline Triton2 medium_direct: SKIP_SANDBOX_DO_NOT_READ max_abs=inf
+TEST Optimized Triton medium_direct: PASS max_abs=0
+TEST Baseline Triton1 default: PASS max_abs=0
+TEST Baseline Triton2 default: SKIP_SANDBOX_DO_NOT_READ max_abs=inf
+TEST Optimized Triton default: PASS max_abs=0
+TEST Optimized Triton scale_direct: PASS max_abs=0
+TEST Optimized Triton scale_persistent: PASS max_abs=0
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l2_73_Conv2d_BatchNorm_Scaling_1782798107/opt_73_Conv2d_BatchNorm_Scaling.py:44: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x_contig)
+INFO benchmark Baseline Triton2 small_direct: inf_sandbox_do_not_read
+INFO benchmark Baseline Triton2 medium_direct: inf_sandbox_do_not_read
+INFO benchmark Baseline Triton2 default: inf_sandbox_do_not_read
+conv2d_batchnorm_scaling:
+           label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   small_direct       0.242323          0.224978               inf          0.197309
+1  medium_direct       1.921494          1.574609               inf          1.539209
+2        default      27.749615         20.992706               inf         21.022699
+

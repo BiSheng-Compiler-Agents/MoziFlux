@@ -1,0 +1,20 @@
+TEST Baseline Triton1 tiny: PASS max_abs=0
+TEST Baseline Triton2 tiny: SKIP_UNAVAILABLE sandbox_do_not_read_base max_abs=inf
+TEST Optimized Triton tiny: PASS max_abs=0
+TEST Baseline Triton1 default: PASS max_abs=0
+TEST Baseline Triton2 default: SKIP_UNAVAILABLE sandbox_do_not_read_base max_abs=inf
+TEST Optimized Triton default: PASS max_abs=0
+TEST Baseline Triton1 large_direct: PASS max_abs=0
+TEST Baseline Triton2 large_direct: SKIP_UNAVAILABLE sandbox_do_not_read_base max_abs=inf
+TEST Optimized Triton large_direct: PASS max_abs=0
+TEST Baseline Triton1 persistent_forced: PASS max_abs=0
+TEST Baseline Triton2 persistent_forced: SKIP_UNAVAILABLE sandbox_do_not_read_base max_abs=inf
+TEST Optimized Triton persistent_forced: PASS max_abs=0
+UNIT_TEST PASS
+
+matmul_dropout_mean_softmax_latency:
+               label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0               tiny       0.015772          0.011796               inf          0.009842
+1            default       0.015760          0.010767               inf          0.010658
+2       large_direct       0.018666          0.016579               inf          0.013321
+3  persistent_forced       0.018995          0.014564               inf          0.013623

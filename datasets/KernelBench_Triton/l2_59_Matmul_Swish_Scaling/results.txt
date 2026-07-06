@@ -1,0 +1,17 @@
+TEST Baseline Triton1 small_4x1024x1024: PASS max_abs=0.000976562
+TEST Baseline Triton2 small_4x1024x1024: SKIP_UNAVAILABLE reference_file_not_read max_abs=inf
+TEST Optimized Triton small_4x1024x1024: PASS max_abs=5.96046e-08
+TEST Baseline Triton1 medium_16x4096x4096: PASS max_abs=0.00195312
+TEST Baseline Triton2 medium_16x4096x4096: SKIP_UNAVAILABLE reference_file_not_read max_abs=inf
+TEST Optimized Triton medium_16x4096x4096: PASS max_abs=5.96046e-08
+TEST Baseline Triton1 default_128x32768x32768: PASS max_abs=0.00195312
+TEST Baseline Triton2 default_128x32768x32768: SKIP_UNAVAILABLE reference_file_not_read max_abs=inf
+TEST Optimized Triton default_128x32768x32768: PASS max_abs=5.96046e-08
+TEST Optimized Triton forced_persistent_3x1024x8192: PASS max_abs=5.96046e-08
+UNIT_TEST PASS
+
+matmul_swish_scaling_latency:
+                     label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0        small_4x1024x1024       0.090410          0.173191               inf          0.168977
+1      medium_16x4096x4096       0.387783          1.163948               inf          1.163936
+2  default_128x32768x32768      23.343973         68.357521               inf         68.049301

@@ -1,0 +1,16 @@
+TEST Baseline Triton1 small_N128: PASS max_abs=9.53674e-07
+TEST Baseline Triton2 small_N128: SKIP_UNAVAILABLE sandbox_reference_not_read max_abs=inf
+TEST Optimized Triton small_N128: PASS max_abs=0
+TEST Baseline Triton1 default_N1024: PASS max_abs=9.53674e-07
+TEST Baseline Triton2 default_N1024: SKIP_UNAVAILABLE sandbox_reference_not_read max_abs=inf
+TEST Optimized Triton default_N1024: PASS max_abs=0
+TEST Optimized Triton forced_fallback_tiny: PASS max_abs=0
+UNIT_TEST PASS
+
+INFO benchmark_skip Baseline Triton2 small_N128 sandbox_reference_not_read
+INFO benchmark_skip Baseline Triton2 default_N1024 sandbox_reference_not_read
+gemm_groupnorm_min_bias_add:
+           label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0     small_N128       4.278572          4.619391               inf          4.265512
+1  default_N1024      20.418920         22.344521               inf         20.398811
+

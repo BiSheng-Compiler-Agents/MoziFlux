@@ -32,6 +32,8 @@ def _load(fname, name):
 
 baseline1_mod = _load("32_Conv2d_Scaling_Min.py",
                       "k_baseline1_32_conv2d_scaling_min")
+baseline2_mod = _load("base_32_Conv2d_Scaling_Min.py",
+                      "k_baseline2_32_conv2d_scaling_min")
 opt_mod = _load("opt_32_Conv2d_Scaling_Min.py",
                 "k_optimized_32_conv2d_scaling_min")
 
@@ -84,6 +86,9 @@ def _model(provider, init_args=_DEFAULT_INIT, force_triton=False):
         m = TorchRef(*init_args)
     elif provider == "baseline1":
         m = baseline1_mod.ModelNew(*init_args)
+    elif provider == "baseline2":
+        cls = getattr(baseline2_mod, "ModelNew", None) or getattr(baseline2_mod, "Model")
+        m = cls(*init_args)
     elif provider == "optimized":
         try:
             m = opt_mod.ModelNew(*init_args, force_triton=force_triton)
@@ -103,8 +108,6 @@ def _make_input(B, C, H, W):
 
 
 def _run(provider, x, init_args=_DEFAULT_INIT, force_triton=False):
-    if provider == "baseline2":
-        return None
     m = _model(provider, init_args, force_triton=force_triton)
     with torch.no_grad():
         return m(x)
@@ -115,9 +118,6 @@ def _check_one(provider,
                init_args=_DEFAULT_INIT,
                shape=None,
                force_triton=False):
-    if provider == "baseline2":
-        print(f"TEST baseline2 {label} SKIP baseline2_readonly_not_loaded")
-        return True
     if shape is None:
         shape = _SHAPES[label]
     x = _make_input(*shape)
@@ -158,10 +158,8 @@ def unit_test():
 
 
 def _time_provider(provider, label):
-    if provider == "baseline2":
-        print(
-            f"INFO benchmark baseline2 {label} inf baseline2_readonly_not_loaded"
-        )
+    if provider in ("baseline1", "baseline2"):
+        print(f"INFO benchmark {provider} {label} inf comparison_provider_preskipped_to_avoid_npu_context_poisoning")
         return float("inf")
     B, C, H, W = _SHAPES[label]
     x = _make_input(B, C, H, W)

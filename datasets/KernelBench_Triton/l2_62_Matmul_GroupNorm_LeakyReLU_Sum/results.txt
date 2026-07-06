@@ -1,0 +1,26 @@
+TEST Baseline Triton1 small: PASS max_abs=0.00390625
+TEST Baseline Triton2 small: SKIP_UNAVAILABLE RuntimeError max_abs=inf
+TEST Optimized Triton small: PASS max_abs=0
+TEST Optimized Triton forced_epilogue_small: PASS max_abs=0.00195312
+TEST Baseline Triton1 medium: PASS max_abs=0.00390625
+TEST Baseline Triton2 medium: SKIP_UNAVAILABLE RuntimeError max_abs=inf
+TEST Optimized Triton medium: PASS max_abs=0
+TEST Baseline Triton1 irregular: PASS max_abs=0.00390625
+TEST Baseline Triton2 irregular: SKIP_UNAVAILABLE RuntimeError max_abs=inf
+TEST Optimized Triton irregular: PASS max_abs=0
+TEST Optimized Triton forced_epilogue_irregular: PASS max_abs=0.00195312
+TEST Baseline Triton1 target: PASS max_abs=0.00390625
+TEST Baseline Triton2 target: SKIP_UNAVAILABLE RuntimeError max_abs=inf
+TEST Optimized Triton target: PASS max_abs=0
+UNIT_TEST PASS
+
+INFO benchmark_preskip Baseline Triton2 small: sandbox_base_file_not_read
+INFO benchmark_preskip Baseline Triton2 medium: sandbox_base_file_not_read
+INFO benchmark_preskip Baseline Triton2 irregular: sandbox_base_file_not_read
+INFO benchmark_preskip Baseline Triton2 target: sandbox_base_file_not_read
+matmul_groupnorm_lrelu_sum:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small       0.452924          0.695273               inf          0.442858
+1     medium       0.991548          3.306844               inf          0.996576
+2  irregular       0.557508          1.376813               inf          0.617534
+3     target      15.565829        169.703613               inf         15.398549
