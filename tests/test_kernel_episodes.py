@@ -29,6 +29,7 @@ _retrieve_episodes = _kernel_episodes._retrieve_episodes
 _list_episodes = _kernel_episodes._list_episodes
 _update_episode = _kernel_episodes._update_episode
 _delete_episode = _kernel_episodes._delete_episode
+_restore_database_from_dump = _kernel_episodes._restore_database_from_dump
 _sanitize_fts_query = _kernel_episodes._sanitize_fts_query
 _row_to_dict = _kernel_episodes._row_to_dict
 _db_path = _kernel_episodes._db_path
@@ -183,6 +184,43 @@ class TestEpisodeCRUD:
 
         results = _retrieve_episodes(query="test_del")
         assert len(results) == 0
+
+    def test_restore_database_from_dump(self, tmp_path, monkeypatch):
+        dump_path = str(_PROJECT_DIR / "episodes.sql")
+        db_path = str(tmp_path / "restored_episodes.db")
+        monkeypatch.setenv("KERNEL_EPISODES_DB", db_path)
+
+        restored = _restore_database_from_dump(dump_path=dump_path)
+
+        assert restored["db_path"] == db_path
+        assert restored["episode_count"] >= 1
+        eps = _list_episodes(limit=1)
+        assert len(eps) == 1
+        assert "kernel_name" in eps[0]
+
+    def test_restore_database_from_dump_no_overwrite(self, tmp_path):
+        dump_path = str(_PROJECT_DIR / "episodes.sql")
+        db_path = tmp_path / "existing.db"
+        db_path.write_bytes(b"existing")
+
+        import pytest
+        with pytest.raises(FileExistsError):
+            _restore_database_from_dump(dump_path=dump_path,
+                                        db_path=str(db_path),
+                                        overwrite=False)
+
+    def test_restore_on_boot(self, tmp_path, monkeypatch):
+        db_path = tmp_path / "boot_restored_episodes.db"
+        dump_path = db_path.with_suffix(".sql")
+        dump_path.write_text((_PROJECT_DIR / "episodes.sql").read_text(encoding="utf-8"),
+                             encoding="utf-8")
+        monkeypatch.setenv("KERNEL_EPISODES_DB", str(db_path))
+
+        _kernel_episodes._restore_on_boot()
+
+        eps = _list_episodes(limit=1)
+        assert len(eps) == 1
+        assert "kernel_name" in eps[0]
 
     def test_row_to_dict(self):
         """Test sqlite3.Row to dict conversion."""

@@ -6,6 +6,7 @@
 **/.pipeline_state.json
 **/logs/
 **/outputs/
+episodes.db
 
 # Ignore everything under datasets except the deliverable files we track
 datasets/**

@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import sqlite3
+from pathlib import Path
 from contextlib import contextmanager
 from typing import Any
 
@@ -45,6 +46,10 @@ def _db_path() -> str:
         "KERNEL_EPISODES_DB",
         os.path.expanduser("~/CompilerClaw/episodes.db"),
     )
+
+
+def _dump_path() -> str:
+    return str(Path(_db_path()).expanduser().with_suffix(".sql"))
 
 
 @contextmanager
@@ -70,6 +75,69 @@ def _db():
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     return dict(row)
+
+
+def _restore_database_from_dump(
+    dump_path: str | None = None,
+    db_path: str | None = None,
+    overwrite: bool = True,
+) -> dict[str, Any]:
+    """Restore the episodes SQLite database from an SQL dump file.
+
+    The default dump is ``episodes.sql`` in the current working directory and
+    the default destination is ``KERNEL_EPISODES_DB`` / ``~/CompilerClaw/episodes.db``.
+    """
+    src = Path(dump_path or _dump_path()).expanduser()
+    dst = Path(db_path or _db_path()).expanduser()
+
+    if not src.is_file():
+        raise FileNotFoundError(f"Episodes dump not found at {src}.")
+    if dst.exists() and not overwrite:
+        raise FileExistsError(
+            f"Episodes database already exists at {dst}; pass overwrite=True to replace it."
+        )
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_name(f".{dst.name}.restore.tmp")
+    if tmp.exists():
+        tmp.unlink()
+
+    conn = sqlite3.connect(tmp)
+    try:
+        with src.open("r", encoding="utf-8") as fh:
+            conn.executescript(fh.read())
+        conn.commit()
+        count = conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    os.replace(tmp, dst)
+    for suffix in ("-wal", "-shm"):
+        sidecar = Path(str(dst) + suffix)
+        if sidecar.exists():
+            sidecar.unlink()
+
+    return {
+        "db_path": str(dst),
+        "dump_path": str(src),
+        "episode_count": count,
+    }
+
+
+def _restore_on_boot() -> None:
+    """Best-effort DB restore at plugin load time; never crash Hermes startup."""
+    try:
+        restored = _restore_database_from_dump()
+        logger.info("kernel_episodes restored %s episodes from %s to %s",
+                    restored["episode_count"], restored["dump_path"],
+                    restored["db_path"])
+    except FileNotFoundError as exc:
+        logger.debug("kernel_episodes boot restore skipped: %s", exc)
+    except Exception as exc:
+        logger.exception("kernel_episodes boot restore failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +393,7 @@ def _handle_list(args: dict, **_) -> str:
 
 def register(ctx) -> None:
 
+    _restore_on_boot()
     _requires_env = ["KERNEL_EPISODES_DB"]
 
     def _check_fn():
