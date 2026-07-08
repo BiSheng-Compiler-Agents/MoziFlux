@@ -1,0 +1,20 @@
+TEST Baseline Triton1 small: PASS max_abs=0.000488281
+TEST Baseline Triton2 small: SKIP_UNAVAILABLE sandbox_base_file_read_disallowed max_abs=inf
+TEST Optimized Triton small: PASS max_abs=0
+TEST Baseline Triton1 irregular: PASS max_abs=0.000976562
+TEST Baseline Triton2 irregular: SKIP_UNAVAILABLE sandbox_base_file_read_disallowed max_abs=inf
+TEST Optimized Triton irregular: PASS max_abs=0
+TEST Baseline Triton1 target: SKIP_COMPARISON target_custom_triton_too_slow max_abs=inf
+TEST Baseline Triton2 target: SKIP_UNAVAILABLE sandbox_base_file_read_disallowed max_abs=inf
+TEST Optimized Triton target: PASS max_abs=0
+UNIT_TEST PASS
+
+INFO bench_skip Baseline Triton2 small: sandbox_base_file_read_disallowed
+INFO bench_skip Baseline Triton2 irregular: sandbox_base_file_read_disallowed
+INFO bench_skip Baseline Triton1 target: target_custom_triton_too_slow
+INFO bench_skip Baseline Triton2 target: sandbox_base_file_read_disallowed
+conv2d_avgpool_sigmoid_sum:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small       0.338654          3.252927               inf          0.342543
+1  irregular       0.388928          3.147664               inf          0.394206
+2     target     135.654602               inf               inf        137.190369

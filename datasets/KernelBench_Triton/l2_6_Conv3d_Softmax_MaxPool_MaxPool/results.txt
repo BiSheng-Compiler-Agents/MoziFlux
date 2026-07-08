@@ -1,0 +1,27 @@
+TEST PyTorch / ACL small_direct: PASS max_abs=0.000000e+00
+TEST Baseline Triton1 small_direct: SKIP_COMPARISON preskipped_to_avoid_remote_timeout max_abs=inf
+TEST Baseline Triton2 small_direct: SKIP_UNAVAILABLE reference_file_marked_do_not_read max_abs=inf
+TEST Optimized Triton small_direct: PASS max_abs=0.000000e+00
+TEST PyTorch / ACL generic_c24: PASS max_abs=0.000000e+00
+TEST Baseline Triton1 generic_c24: SKIP_COMPARISON preskipped_to_avoid_remote_timeout max_abs=inf
+TEST Baseline Triton2 generic_c24: SKIP_UNAVAILABLE reference_file_marked_do_not_read max_abs=inf
+TEST Optimized Triton generic_c24: PASS max_abs=0.000000e+00
+TEST PyTorch / ACL target: PASS max_abs=0.000000e+00
+TEST Baseline Triton1 target: SKIP_COMPARISON preskipped_to_avoid_remote_timeout max_abs=inf
+TEST Baseline Triton2 target: SKIP_UNAVAILABLE reference_file_marked_do_not_read max_abs=inf
+TEST Optimized Triton target: PASS max_abs=0.000000e+00
+TEST Optimized Triton small_direct forced_persistent: PASS max_abs=0.000000e+00
+TEST Optimized Triton wide_acl acl_fallback: PASS max_abs=0.000000e+00
+UNIT_TEST PASS
+
+INFO benchmark_preskip Baseline Triton1 small_direct preskipped_to_avoid_remote_timeout
+INFO benchmark_preskip Baseline Triton2 small_direct reference_file_marked_do_not_read
+INFO benchmark_preskip Baseline Triton1 generic_c24 preskipped_to_avoid_remote_timeout
+INFO benchmark_preskip Baseline Triton2 generic_c24 reference_file_marked_do_not_read
+INFO benchmark_preskip Baseline Triton1 target preskipped_to_avoid_remote_timeout
+INFO benchmark_preskip Baseline Triton2 target reference_file_marked_do_not_read
+l2_6_conv3d_softmax_maxpool_maxpool:
+          label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0  small_direct       0.343644               inf               inf          0.344725
+1   generic_c24       0.810060               inf               inf          0.820889
+2        target      11.270019               inf               inf         11.302918

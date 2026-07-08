@@ -1,0 +1,19 @@
+TEST PyTorch / ACL small_acl_fallback: PASS max_abs=0.0
+TEST Baseline Triton2 small_acl_fallback: SKIP_UNAVAILABLE SandboxReferenceNotRead max_abs=inf
+TEST Baseline Triton1 small_acl_fallback: PASS max_abs=0.00195312
+TEST Optimized Triton small_acl_fallback: PASS max_abs=0
+TEST PyTorch / ACL large_triton_irregular: PASS max_abs=0.0
+TEST Baseline Triton2 large_triton_irregular: SKIP_UNAVAILABLE SandboxReferenceNotRead max_abs=inf
+TEST Baseline Triton1 large_triton_irregular: PASS max_abs=0.00390625
+TEST Optimized Triton large_triton_irregular: PASS max_abs=0.00390625
+TEST PyTorch / ACL target_1024x8192x8192: PASS max_abs=0.0
+TEST Baseline Triton2 target_1024x8192x8192: SKIP_UNAVAILABLE SandboxReferenceNotRead max_abs=inf
+TEST Baseline Triton1 target_1024x8192x8192: PASS max_abs=0.00390625
+TEST Optimized Triton target_1024x8192x8192: PASS max_abs=0.00390625
+UNIT_TEST PASS
+
+l2_76_gemm_add_relu:
+label PyTorch / ACL Baseline Triton1 Baseline Triton2 Optimized Triton
+small_acl_fallback 0.275525 0.288268 inf 0.273165
+large_triton_irregular 0.627758 1.818688 inf 1.323332
+target_1024x8192x8192 11.457041 84.633667 inf 39.893669

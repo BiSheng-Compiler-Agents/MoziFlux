@@ -15,6 +15,34 @@ error: '_exit' was not declared in this scope; did you mean '_Exit'?
 
 **Fix:** Add `#include <unistd.h>` to the C++ host. The include is portable across all POSIX systems and GCC versions.
 
+## `rtFunctionRegister` / `rtKernelLaunch` stub pattern on CANN 9.0.0+
+
+Some CANN 9.0.0 runtime headers do not expose a usable `rtFunction_t` type for custom host launchers, and the `rtFunctionRegister` signature is:
+
+```cpp
+rtFunctionRegister(void *binHandle, const void *stubFunc, const char_t *stubName,
+                   const void *kernelInfoExt, uint32_t funcMode);
+```
+
+Use a stable host-side stub object and launch with its address:
+
+```cpp
+static size_t func_stub = 0;
+rtFunctionRegister(bin_handle, &func_stub, "my_kernel",
+                   (void*)"my_kernel", 0);
+rtKernelLaunch(&func_stub, GRID_X, &args, sizeof(args), nullptr, stream);
+```
+
+Avoid this incompatible pattern:
+
+```cpp
+rtFunction_t func = nullptr;
+rtFunctionRegister(handle, (void*)"my_kernel", (void*)"my_kernel", 0, &func);
+rtKernelLaunch(func, ...);
+```
+
+It can fail to compile with `rtFunction_t was not declared` or invalid argument conversions.
+
 ## `rtMemset` requires 4 arguments on CANN 9.0.0+
 
 The CANN runtime `rtMemset` API has a 4-argument signature:

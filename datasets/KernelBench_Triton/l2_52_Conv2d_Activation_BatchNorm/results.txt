@@ -1,0 +1,11 @@
+UNIT_TEST PASS
+CHECK optimized direct_tiny max_abs=1.19209e-07 PASS
+CHECK optimized direct_irregular max_abs=1.19209e-07 PASS
+CHECK optimized persistent_default max_abs=1.78814e-07 PASS
+CHECK optimized forced_persistent direct_irregular max_abs=1.19209e-07 PASS
+
+l2_52_conv_mish_batchnorm:
+                label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0         direct_tiny       0.264229          0.199950          0.213662          0.210264
+1    direct_irregular       0.422897          0.267303          0.279676          0.274420
+2  persistent_default     111.227417         42.782085         39.964504         40.374432

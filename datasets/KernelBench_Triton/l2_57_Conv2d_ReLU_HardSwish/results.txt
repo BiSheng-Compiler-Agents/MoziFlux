@@ -1,0 +1,20 @@
+TEST Baseline Triton1 default: PASS max_abs=0
+TEST Baseline Triton2 default: SKIP reference_read_forbidden max_abs=inf
+TEST Optimized Triton default: PASS max_abs=0
+TEST Baseline Triton1 small_irregular: PASS max_abs=0
+TEST Baseline Triton2 small_irregular: SKIP reference_read_forbidden max_abs=inf
+TEST Optimized Triton small_irregular: PASS max_abs=0
+TEST Baseline Triton1 batch1: PASS max_abs=0
+TEST Baseline Triton2 batch1: SKIP reference_read_forbidden max_abs=inf
+TEST Optimized Triton batch1: PASS max_abs=0
+TEST Optimized Triton forced_persistent: PASS max_abs=0
+UNIT_TEST PASS
+
+INFO bench_preskip baseline2 default reference_read_forbidden
+INFO bench_preskip baseline2 small_irregular reference_read_forbidden
+INFO bench_preskip baseline2 batch1 reference_read_forbidden
+conv2d_relu_hardswish:
+             label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0          default      46.918804         18.718069               inf         17.887016
+1  small_irregular       0.535934          0.269839               inf          0.245997
+2           batch1       0.206875          0.115719               inf          0.123684

@@ -1,0 +1,17 @@
+REMOTE_VERIFY
+UNIT_TEST PASS
+OK Baseline Triton1 direct_small max_diff=2.23517e-08
+OK Baseline Triton2 direct_small max_diff=2.23517e-08
+OK Optimized Triton direct_small max_diff=2.23517e-08
+OK Baseline Triton1 direct_medium max_diff=2.23517e-08
+OK Baseline Triton2 direct_medium max_diff=2.23517e-08
+OK Optimized Triton direct_medium max_diff=2.23517e-08
+INFO comparison_provider_unavailable Baseline Triton1 target_acl: RuntimeError
+OK Baseline Triton2 target_acl max_diff=2.23517e-08
+OK Optimized Triton target_acl max_diff=2.23517e-08
+
+BENCHMARK_MS
+label,PyTorch / ACL,Baseline Triton1,Baseline Triton2,Optimized Triton
+direct_small,0.431836,0.359965,0.359437,0.359187
+direct_medium,1.806396,1.697713,1.698720,1.694708
+target_acl,540.028137,inf,625.447144,538.535034

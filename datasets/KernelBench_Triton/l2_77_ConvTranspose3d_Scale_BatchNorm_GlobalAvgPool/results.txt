@@ -1,0 +1,21 @@
+TEST Baseline Triton1 tiny_direct: PASS max_abs=2.98023e-08
+TEST Baseline Triton2 tiny_direct: SKIP_UNAVAILABLE sandboxed_reference_file max_abs=inf
+TEST Optimized Triton tiny_direct: PASS max_abs=0.000101104
+TEST Baseline Triton1 irregular_direct: PASS max_abs=2.98023e-08
+TEST Baseline Triton2 irregular_direct: SKIP_UNAVAILABLE sandboxed_reference_file max_abs=inf
+TEST Optimized Triton irregular_direct: PASS max_abs=0.0001176
+TEST Baseline Triton1 default_required: PASS max_abs=2.38419e-07
+TEST Baseline Triton2 default_required: SKIP_UNAVAILABLE sandboxed_reference_file max_abs=inf
+TEST Optimized Triton default_required: PASS max_abs=0.00013371
+TEST Optimized Triton forced_persistent: PASS max_abs=0.000101104
+TEST Optimized Triton acl_fallback: PASS max_abs=0
+UNIT_TEST PASS
+
+INFO benchmark Baseline Triton2 tiny_direct: inf sandboxed_reference_file
+INFO benchmark Baseline Triton2 irregular_direct: inf sandboxed_reference_file
+INFO benchmark Baseline Triton2 default_required: inf sandboxed_reference_file
+l2_77_convtranspose3d_scale_bn_gap:
+              label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0       tiny_direct       0.288679          0.382169               inf          0.367147
+1  irregular_direct       0.299384          0.396965               inf          0.381412
+2  default_required      90.400230         85.358635               inf          1.871922

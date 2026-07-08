@@ -1,0 +1,20 @@
+UNIT baseline1 tiny_irregular PASS max_abs=0.000320435
+UNIT baseline2 tiny_irregular PASS max_abs=0.000320435
+UNIT opt tiny_irregular PASS max_abs=1.52588e-05
+UNIT baseline1 small_aligned PASS max_abs=0.0012207
+UNIT baseline2 small_aligned PASS max_abs=0.0012207
+UNIT opt small_aligned PASS max_abs=6.10352e-05
+UNIT baseline1 medium_largeK PASS max_abs=0.00317383
+UNIT baseline2 medium_largeK PASS max_abs=0.00317383
+UNIT opt medium_largeK PASS max_abs=0.000488281
+UNIT baseline1 default MISMATCH max_abs=0.015625 tol=0.01
+UNIT baseline2 default MISMATCH max_abs=0.0205078 tol=0.01
+UNIT opt default PASS max_abs=0.00292969
+UNIT_TEST PASS
+
+matmul_sigmoid_sum_latency:
+            label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0  tiny_irregular       0.088836          0.148744          0.161041          0.091784
+1   small_aligned       0.151457          1.783258          1.791307          0.236409
+2   medium_largeK       0.763062         24.852236         24.251120          2.961900
+3         default      47.104095       4728.518555       4454.611816        702.049500

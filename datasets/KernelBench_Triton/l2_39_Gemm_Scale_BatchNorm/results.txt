@@ -1,0 +1,9 @@
+UNIT_TEST PASS
+INFO Baseline Triton1/Baseline Triton2 are comparison providers and mismatch torch_ref in profile unit output; Optimized Triton is the gating result and passed all shapes.
+
+gemm_scale_batchnorm:
+                         label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0        small_M128_K1024_N512       0.274032          0.329898          0.336053          0.286941
+1     medium_M1024_K2048_N1024       3.542306          3.557000          3.563733          3.525813
+2    irregular_M257_K1024_N768       0.534901          0.589432          0.606345          0.717306
+3  required_M16384_K4096_N4096     397.297333        391.322021        391.653259        394.978699

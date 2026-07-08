@@ -1,0 +1,20 @@
+UNIT TEST (remote_verify)
+INFO comparison_provider_unavailable Baseline Triton1 small_direct: AttributeError
+PASS Baseline Triton2 small_direct max_abs=1.78814e-07
+PASS Optimized Triton small_direct max_abs=0
+INFO comparison_provider_unavailable Baseline Triton1 medium_direct: AttributeError
+PASS Baseline Triton2 medium_direct max_abs=1.78814e-07
+PASS Optimized Triton medium_direct max_abs=0
+INFO comparison_provider_unavailable Baseline Triton1 default_shape: AttributeError
+PASS Baseline Triton2 default_shape max_abs=3.57628e-07
+PASS Optimized Triton default_shape max_abs=0
+PASS Optimized Triton forced_direct max_abs=1.49012e-07
+PASS Optimized Triton forced_persistent max_abs=1.78814e-07
+UNIT_TEST PASS
+
+BENCHMARK (remote_verify)
+conv2d_mish_mish:
+           label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   small_direct       0.209302               inf          0.187384          0.210989
+1  medium_direct       0.777263               inf          0.700985          0.776012
+2  default_shape     133.465439               inf        123.385773        133.554504

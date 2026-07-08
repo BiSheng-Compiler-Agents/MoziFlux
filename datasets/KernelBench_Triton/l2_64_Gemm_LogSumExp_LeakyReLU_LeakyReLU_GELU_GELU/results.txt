@@ -1,0 +1,21 @@
+TEST Baseline Triton1 small: PASS max_abs=4.76837e-07
+TEST Baseline Triton2 small: SKIP_UNAVAILABLE sandbox_do_not_read max_abs=inf
+TEST Optimized Triton small: PASS max_abs=4.76837e-07
+TEST Optimized Triton fallback_direct small: PASS max_abs=4.76837e-07
+TEST Optimized Triton fallback_persistent small: PASS max_abs=4.76837e-07
+TEST Baseline Triton1 medium: PASS max_abs=9.53674e-07
+TEST Baseline Triton2 medium: SKIP_UNAVAILABLE sandbox_do_not_read max_abs=inf
+TEST Optimized Triton medium: PASS max_abs=9.53674e-07
+TEST Baseline Triton1 target: PASS max_abs=9.53674e-07
+TEST Baseline Triton2 target: SKIP_UNAVAILABLE sandbox_do_not_read max_abs=inf
+TEST Optimized Triton target: PASS max_abs=0
+UNIT_TEST PASS
+
+INFO benchmark_preskip Baseline Triton2 small sandbox_do_not_read
+INFO benchmark_preskip Baseline Triton2 medium sandbox_do_not_read
+INFO benchmark_preskip Baseline Triton2 target sandbox_do_not_read
+gemm_lse_leaky_gelu2:
+    label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   small       1.629233          0.313595               inf          0.316928
+1  medium      30.567839          7.000385               inf          7.001180
+2  target     223.839617        106.514735               inf        106.121605
