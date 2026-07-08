@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import math
 import sys
 import time
 from pathlib import Path
@@ -51,13 +50,21 @@ def _load(path: Path, name: str):
         _MODULES[name] = mod
         return mod
     except BaseException as exc:
-        print(f"INFO provider_unavailable {_PROVIDER_NAMES.get(name, name)} {type(exc).__name__}")
+        print(
+            f"INFO provider_unavailable {_PROVIDER_NAMES.get(name, name)} {type(exc).__name__}"
+        )
         _MODULES[name] = None
         return None
 
 
 class TorchRef(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, eps=1e-5, momentum=0.1):
+
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size,
+                 eps=1e-5,
+                 momentum=0.1):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
         self.bn = nn.BatchNorm2d(out_channels, eps=eps, momentum=momentum)
@@ -70,7 +77,8 @@ class TorchRef(nn.Module):
 
 
 def _init_args(mod):
-    init = mod.get_init_inputs() if hasattr(mod, "get_init_inputs") else [64, 128, 3]
+    init = mod.get_init_inputs() if hasattr(
+        mod, "get_init_inputs") else [64, 128, 3]
     if init == [()]:
         init = []
     return init
@@ -83,7 +91,11 @@ def _model(key):
     if key == "torch":
         m = TorchRef(64, 128, 3)
     else:
-        path = {"baseline1": INPUT_FILE, "baseline2": BASE_FILE, "optimized": OPT_FILE}[key]
+        path = {
+            "baseline1": INPUT_FILE,
+            "baseline2": BASE_FILE,
+            "optimized": OPT_FILE
+        }[key]
         mod = _load(path, key)
         if mod is None:
             _MODELS[key] = None
@@ -97,7 +109,7 @@ def _model(key):
 def _make_inputs(label):
     _, b, c, h, w = next(s for s in _BENCH_SHAPES if s[0] == label)
     torch.manual_seed(1234 + b + h + w)
-    return (torch.rand((b, c, h, w), device="npu", dtype=torch.float32),)
+    return (torch.rand((b, c, h, w), device="npu", dtype=torch.float32), )
 
 
 def _activation_tiles(label):
@@ -115,7 +127,9 @@ def _run_provider(key, label):
     x, = _make_inputs(label)
     # The editable baseline launches one Triton program per activation tile and exceeds Ascend coreDim at default size.
     if key == "baseline1" and _activation_tiles(label) > 65535:
-        print(f"INFO comparison_provider_preskipped {_PROVIDER_NAMES[key]} {label} coreDim_guard")
+        print(
+            f"INFO comparison_provider_preskipped {_PROVIDER_NAMES[key]} {label} coreDim_guard"
+        )
         return None
     with torch.no_grad():
         return model(x)
@@ -132,14 +146,18 @@ def unit_test():
         opt = _run_provider("optimized", label)
         diff = _max_abs(opt, ref)
         passed = diff <= 1e-3
-        print(f"CHECK optimized {label} max_abs={diff:.6g} {'PASS' if passed else 'MISMATCH'}")
+        print(
+            f"CHECK optimized {label} max_abs={diff:.6g} {'PASS' if passed else 'MISMATCH'}"
+        )
         ok = ok and passed
         for key in ("baseline1", "baseline2"):
             out = _run_provider(key, label)
             if out is None:
                 continue
             d = _max_abs(out, ref)
-            print(f"INFO comparison { _PROVIDER_NAMES[key] } {label} max_abs={d:.6g}")
+            print(
+                f"INFO comparison { _PROVIDER_NAMES[key] } {label} max_abs={d:.6g}"
+            )
 
     # Unit-only forced persistent path without allocating a huge tensor.
     opt_mod = _load(OPT_FILE, "optimized")
@@ -151,7 +169,9 @@ def unit_test():
         out = _run_provider("optimized", "direct_irregular")
         d = _max_abs(out, ref)
         forced_ok = d <= 1e-3
-        print(f"CHECK optimized forced_persistent direct_irregular max_abs={d:.6g} {'PASS' if forced_ok else 'MISMATCH'}")
+        print(
+            f"CHECK optimized forced_persistent direct_irregular max_abs={d:.6g} {'PASS' if forced_ok else 'MISMATCH'}"
+        )
         ok = ok and forced_ok
         opt_mod._MAX_PROGRAMS = old
         _MODELS.pop("optimized", None)
@@ -187,11 +207,12 @@ def _manual_bench(fn, warmup=10, rep=30):
         ylabel="Latency (ms)",
         plot_name="l2_52_conv_mish_batchnorm",
         args={},
-    )
-)
+    ))
 def bench(label, provider):
     if provider == "baseline1" and _activation_tiles(label) > 65535:
-        print(f"INFO comparison_provider_preskipped {_PROVIDER_NAMES[provider]} {label} coreDim_guard")
+        print(
+            f"INFO comparison_provider_preskipped {_PROVIDER_NAMES[provider]} {label} coreDim_guard"
+        )
         return float("inf")
     model = _model(provider)
     if model is None:
@@ -204,10 +225,15 @@ def bench(label, provider):
 
     try:
         if hasattr(triton.testing, "do_bench"):
-            return triton.testing.do_bench(fn, warmup=10, rep=30, return_mode="mean")
+            return triton.testing.do_bench(fn,
+                                           warmup=10,
+                                           rep=30,
+                                           return_mode="mean")
         return _manual_bench(fn)
     except BaseException as exc:
-        print(f"INFO bench_unavailable {_PROVIDER_NAMES[provider]} {label} {type(exc).__name__}")
+        print(
+            f"INFO bench_unavailable {_PROVIDER_NAMES[provider]} {label} {type(exc).__name__}"
+        )
         return float("inf")
 
 

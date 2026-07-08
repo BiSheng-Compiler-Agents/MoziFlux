@@ -23,7 +23,8 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 
 @triton.jit
-def _hswish_relu_direct_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+def _hswish_relu_direct_kernel(x_ptr, y_ptr, n_elements,
+                               BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     tl.multiple_of(offsets, 16)
@@ -83,9 +84,11 @@ class ModelNew(nn.Module):
 
     def _fused_hardswish_relu_triton(self, x: torch.Tensor) -> torch.Tensor:
         if not _is_npu_tensor(x):
-            raise RuntimeError("ModelNew expects Ascend NPU tensors for the Triton path")
+            raise RuntimeError(
+                "ModelNew expects Ascend NPU tensors for the Triton path")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
         if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
             raise RuntimeError(
                 f"ModelNew supports float16, bfloat16, and float32 inputs, got {x.dtype}"
@@ -102,7 +105,7 @@ class ModelNew(nn.Module):
 
         if n_tiles > _MAX_GRID:
             n_programs = _MAX_GRID
-            _hswish_relu_persistent_kernel[(n_programs,)](
+            _hswish_relu_persistent_kernel[(n_programs, )](
                 x_in,
                 y,
                 n_elements,
@@ -112,7 +115,7 @@ class ModelNew(nn.Module):
                 num_stages=2,
             )
         else:
-            _hswish_relu_direct_kernel[(n_tiles,)](
+            _hswish_relu_direct_kernel[(n_tiles, )](
                 x_in,
                 y,
                 n_elements,

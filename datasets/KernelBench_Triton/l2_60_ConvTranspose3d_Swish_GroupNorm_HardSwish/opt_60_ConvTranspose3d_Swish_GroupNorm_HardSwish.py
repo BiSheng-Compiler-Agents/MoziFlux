@@ -187,10 +187,15 @@ class ModelNew(nn.Module):
         bias=True,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose3d(
-            in_channels, out_channels, kernel_size, stride=stride, padding=padding, bias=bias
-        )
-        self.group_norm = nn.GroupNorm(num_groups=groups, num_channels=out_channels, eps=eps)
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding,
+                                                 bias=bias)
+        self.group_norm = nn.GroupNorm(num_groups=groups,
+                                       num_channels=out_channels,
+                                       eps=eps)
 
     def _triton_post(self, y: torch.Tensor) -> torch.Tensor:
         N, C, D, H, W = y.shape
@@ -202,36 +207,99 @@ class ModelNew(nn.Module):
         max_parts = triton.cdiv(group_elems, _REDUCE_BLOCK)
         total_ngd = N * num_groups * D
         partial_shape = (total_ngd, max_parts)
-        partial_sum = torch.empty(partial_shape, device=y.device, dtype=torch.float32)
-        partial_sumsq = torch.empty(partial_shape, device=y.device, dtype=torch.float32)
-        reduce_grid = (total_ngd * max_parts,)
+        partial_sum = torch.empty(partial_shape,
+                                  device=y.device,
+                                  dtype=torch.float32)
+        partial_sumsq = torch.empty(partial_shape,
+                                    device=y.device,
+                                    dtype=torch.float32)
+        reduce_grid = (total_ngd * max_parts, )
         _swish_group_reduce_parts_3d[reduce_grid](
-            y, partial_sum, partial_sumsq, C, D, H, W, sN, sC, sD, sH, sW,
-            group_size, num_groups, group_elems, max_parts, BLOCK_SIZE=_REDUCE_BLOCK,
-            num_warps=8, num_stages=2,
+            y,
+            partial_sum,
+            partial_sumsq,
+            C,
+            D,
+            H,
+            W,
+            sN,
+            sC,
+            sD,
+            sH,
+            sW,
+            group_size,
+            num_groups,
+            group_elems,
+            max_parts,
+            BLOCK_SIZE=_REDUCE_BLOCK,
+            num_warps=8,
+            num_stages=2,
         )
-        sums = partial_sum.view(N, num_groups, D, max_parts).sum(dim=(2, 3)).contiguous()
-        sumsq = partial_sumsq.view(N, num_groups, D, max_parts).sum(dim=(2, 3)).contiguous()
+        sums = partial_sum.view(N, num_groups, D,
+                                max_parts).sum(dim=(2, 3)).contiguous()
+        sumsq = partial_sumsq.view(N, num_groups, D,
+                                   max_parts).sum(dim=(2, 3)).contiguous()
         m = float(group_size * D * H * W)
         mean = (sums / m).contiguous()
         var = (sumsq / m - mean * mean).clamp_min(0.0)
         invstd = torch.rsqrt(var + eps).contiguous()
-        weight = self.group_norm.weight.to(device=y.device, dtype=torch.float32, non_blocking=True)
-        bias = self.group_norm.bias.to(device=y.device, dtype=torch.float32, non_blocking=True)
+        weight = self.group_norm.weight.to(device=y.device,
+                                           dtype=torch.float32,
+                                           non_blocking=True)
+        bias = self.group_norm.bias.to(device=y.device,
+                                       dtype=torch.float32,
+                                       non_blocking=True)
         out = torch.empty_like(y)
         n_elements = y.numel()
         n_tiles = triton.cdiv(n_elements, _APPLY_BLOCK)
         if n_tiles > _MAX_GRID:
-            _apply_gn_hswish_persistent_3d[(_MAX_GRID,)](
-                y, mean, invstd, weight, bias, out, n_elements, _MAX_GRID, C, D, H, W,
-                sN, sC, sD, sH, sW, group_size, num_groups, BLOCK_SIZE=_APPLY_BLOCK,
-                num_warps=8, num_stages=2,
+            _apply_gn_hswish_persistent_3d[(_MAX_GRID, )](
+                y,
+                mean,
+                invstd,
+                weight,
+                bias,
+                out,
+                n_elements,
+                _MAX_GRID,
+                C,
+                D,
+                H,
+                W,
+                sN,
+                sC,
+                sD,
+                sH,
+                sW,
+                group_size,
+                num_groups,
+                BLOCK_SIZE=_APPLY_BLOCK,
+                num_warps=8,
+                num_stages=2,
             )
         else:
-            _apply_gn_hswish_direct_3d[(n_tiles,)](
-                y, mean, invstd, weight, bias, out, n_elements, C, D, H, W,
-                sN, sC, sD, sH, sW, group_size, num_groups, BLOCK_SIZE=_APPLY_BLOCK,
-                num_warps=8, num_stages=2,
+            _apply_gn_hswish_direct_3d[(n_tiles, )](
+                y,
+                mean,
+                invstd,
+                weight,
+                bias,
+                out,
+                n_elements,
+                C,
+                D,
+                H,
+                W,
+                sN,
+                sC,
+                sD,
+                sH,
+                sW,
+                group_size,
+                num_groups,
+                BLOCK_SIZE=_APPLY_BLOCK,
+                num_warps=8,
+                num_stages=2,
             )
         return out.to(y.dtype)
 
@@ -250,7 +318,8 @@ class ModelNew(nn.Module):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
         y = self.conv_transpose(x)
         # Default production route: ACL handles the standard Swish/GroupNorm/HardSwish chain
         # faster and avoids the baseline's atomic reductions and oversized launch grid.
@@ -284,8 +353,12 @@ eps = 1e-5
 
 
 def get_inputs():
-    return [torch.rand(batch_size, in_channels, depth, height, width, device='npu')]
+    return [
+        torch.rand(batch_size, in_channels, depth, height, width, device='npu')
+    ]
 
 
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, groups, eps]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding, groups, eps
+    ]

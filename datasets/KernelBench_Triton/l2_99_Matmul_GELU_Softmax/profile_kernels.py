@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import math
 import sys
 import time
 from pathlib import Path
@@ -19,7 +18,9 @@ _BENCH_SHAPES = [
 ]
 
 PROVIDERS = ["torch", "baseline1", "baseline2", "optimized"]
-PROVIDER_NAMES = ["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"]
+PROVIDER_NAMES = [
+    "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"
+]
 _MODEL_CACHE = {}
 _MOD_CACHE = {}
 _REF_CACHE = {}
@@ -47,7 +48,8 @@ def _sync():
 
 
 def _device():
-    return "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cuda"
+    return "npu" if hasattr(torch,
+                            "npu") and torch.npu.is_available() else "cuda"
 
 
 def _make_input(B, K, dtype=torch.float16):
@@ -108,12 +110,15 @@ def _run_provider(provider, x, B, K, N):
 def _comparison_preskip(provider, B, K, N):
     # Original row-wise Triton baselines compute GEMM with vector reductions and are
     # prohibitively slow at medium/target GEMM sizes; keep their columns as inf.
-    return provider in {"baseline1", "baseline2"} and (B * K * N > 16 * 512 * 512)
+    return provider in {"baseline1", "baseline2"} and (B * K * N
+                                                       > 16 * 512 * 512)
 
 
 def _check_one(provider, label, B, K, N):
     if _comparison_preskip(provider, B, K, N):
-        print(f"INFO {provider} {label} preskip: comparison baseline is too slow for this GEMM size")
+        print(
+            f"INFO {provider} {label} preskip: comparison baseline is too slow for this GEMM size"
+        )
         return True
     x = _make_input(B, K, dtype=torch.float16)
     with torch.no_grad():
@@ -123,13 +128,17 @@ def _check_one(provider, label, B, K, N):
             out = _run_provider(provider, x, B, K, N)
             _sync()
         except Exception as exc:
-            print(f"INFO {provider} {label} exception: {type(exc).__name__}: {exc}")
+            print(
+                f"INFO {provider} {label} exception: {type(exc).__name__}: {exc}"
+            )
             return provider in {"baseline2"}
     atol, rtol = 2e-2, 2e-2
     ok = torch.allclose(out, ref, atol=atol, rtol=rtol)
     if not ok:
         diff = (out - ref).abs()
-        print(f"FAIL {provider} {label}: max_abs={diff.max().item():.6g} mean_abs={diff.mean().item():.6g}")
+        print(
+            f"FAIL {provider} {label}: max_abs={diff.max().item():.6g} mean_abs={diff.mean().item():.6g}"
+        )
         return False
     print(f"PASS {provider} {label}")
     return True
@@ -158,26 +167,41 @@ def _manual_bench(fn, warmup=10, rep=50):
 
 
 def bench_provider(provider, label):
-    B, K, N = next((b, k, n) for (lbl, b, k, n) in _BENCH_SHAPES if lbl == label)
+    B, K, N = next(
+        (b, k, n) for (lbl, b, k, n) in _BENCH_SHAPES if lbl == label)
     if _comparison_preskip(provider, B, K, N):
-        print(f"INFO bench {provider} {label} preskip: comparison baseline is too slow for this GEMM size")
+        print(
+            f"INFO bench {provider} {label} preskip: comparison baseline is too slow for this GEMM size"
+        )
         return float("inf")
     x = _make_input(B, K, dtype=torch.float16)
     try:
         _run_provider(provider, x, B, K, N)
         _sync()
     except Exception as exc:
-        print(f"INFO bench {provider} {label} unavailable: {type(exc).__name__}: {exc}")
+        print(
+            f"INFO bench {provider} {label} unavailable: {type(exc).__name__}: {exc}"
+        )
         return float("inf")
-    fn = lambda: _run_provider(provider, x, B, K, N)
+
+    def fn():
+        return _run_provider(provider, x, B, K, N)
+
     try:
-        return triton.testing.do_bench(fn, warmup=25, rep=100, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=25,
+                                       rep=100,
+                                       return_mode="mean")
     except Exception as exc:
-        print(f"INFO do_bench fallback {provider} {label}: {type(exc).__name__}: {exc}")
+        print(
+            f"INFO do_bench fallback {provider} {label}: {type(exc).__name__}: {exc}"
+        )
         try:
             return _manual_bench(fn)
         except Exception as exc2:
-            print(f"INFO bench {provider} {label} failed: {type(exc2).__name__}: {exc2}")
+            print(
+                f"INFO bench {provider} {label} failed: {type(exc2).__name__}: {exc2}"
+            )
             return float("inf")
 
 
@@ -192,8 +216,7 @@ def bench_provider(provider, label):
         ylabel="Latency (ms)",
         plot_name="matmul_gelu_softmax",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     return bench_provider(provider, label)
 
@@ -208,7 +231,9 @@ def main():
     if args.test:
         unit_test()
     if args.bench:
-        benchmark.run(print_data=True, show_plots=False, save_path=str(ROOT / "profile_plots"))
+        benchmark.run(print_data=True,
+                      show_plots=False,
+                      save_path=str(ROOT / "profile_plots"))
 
 
 if __name__ == "__main__":

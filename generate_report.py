@@ -334,7 +334,8 @@ def plot_aggregate_box(df: pd.DataFrame, out_path: Path) -> None:
 
     methods = _method_order(plot_df["method"].unique().tolist())
     data = [
-        plot_df[(plot_df["method"] == m) & np.isfinite(plot_df["runtime"])]["runtime"].values
+        plot_df[(plot_df["method"] == m)
+                & np.isfinite(plot_df["runtime"])]["runtime"].values
         for m in methods
     ]
     n_valid = [len(d) for d in data]

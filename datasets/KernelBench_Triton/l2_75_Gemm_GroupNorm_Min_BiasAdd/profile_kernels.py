@@ -7,7 +7,6 @@ import time
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import triton
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -26,6 +25,7 @@ BASE2_AVAILABLE = False  # sandbox reference files are intentionally not read/im
 
 
 class TorchRef(nn.Module):
+
     def __init__(self, in_features, out_features, num_groups, bias_shape):
         super().__init__()
         self.gemm = nn.Linear(in_features, out_features)
@@ -99,20 +99,28 @@ def unit_test():
     for label, *_ in _BENCH_SHAPES:
         inputs = _make_inputs(label)
         ref = _run_torch_ref(label, inputs)
-        for display, key in [("Baseline Triton1", "baseline1"), ("Baseline Triton2", "baseline2"), ("Optimized Triton", "opt")]:
+        for display, key in [("Baseline Triton1", "baseline1"),
+                             ("Baseline Triton2", "baseline2"),
+                             ("Optimized Triton", "opt")]:
             if key == "baseline2":
-                print(f"TEST {display} {label}: SKIP_UNAVAILABLE sandbox_reference_not_read max_abs=inf")
+                print(
+                    f"TEST {display} {label}: SKIP_UNAVAILABLE sandbox_reference_not_read max_abs=inf"
+                )
                 continue
             try:
                 out = _run_provider(key, label, inputs)
                 diff = _max_abs(out, ref)
                 passed = math.isfinite(diff) and diff <= 2e-3
-                print(f"TEST {display} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}")
+                print(
+                    f"TEST {display} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}"
+                )
                 if key == "opt" and not passed:
                     ok = False
             except Exception as exc:
                 tag = "SKIP_UNAVAILABLE" if key == "baseline1" else "EXCEPTION"
-                print(f"TEST {display} {label}: {tag} {type(exc).__name__} max_abs=inf")
+                print(
+                    f"TEST {display} {label}: {tag} {type(exc).__name__} max_abs=inf"
+                )
                 if key == "opt":
                     ok = False
     # Force the hidden Triton fallback on a tiny synthetic shape so every optimized
@@ -126,17 +134,22 @@ def unit_test():
         torch.manual_seed(0)
         tiny_ref = TorchRef(128, 128, 16, (1, 128, 1, 1)).to("npu").eval()
         torch.manual_seed(0)
-        tiny_opt = opt_mod.ModelNew(128, 128, 16, (1, 128, 1, 1)).to("npu").eval()
+        tiny_opt = opt_mod.ModelNew(128, 128, 16,
+                                    (1, 128, 1, 1)).to("npu").eval()
         with torch.no_grad():
             ref = tiny_ref(tiny_x)
             out = tiny_opt(tiny_x)
         opt_mod._USE_ACL_DISPATCH = old
         diff = _max_abs(out, ref)
         passed = math.isfinite(diff) and diff <= 2e-3
-        print(f"TEST Optimized Triton forced_fallback_tiny: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}")
+        print(
+            f"TEST Optimized Triton forced_fallback_tiny: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}"
+        )
         ok = ok and passed
     except Exception as exc:
-        print(f"TEST Optimized Triton forced_fallback_tiny: EXCEPTION {type(exc).__name__} max_abs=inf")
+        print(
+            f"TEST Optimized Triton forced_fallback_tiny: EXCEPTION {type(exc).__name__} max_abs=inf"
+        )
         ok = False
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
@@ -164,26 +177,37 @@ def _manual_bench(fn, warmup=3, rep=10):
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=["torch", "baseline1", "baseline2", "opt"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("blue", "-"), ("red", "--"), ("black", ":"), ("green", "-")],
         ylabel="Latency (ms)",
         plot_name="gemm_groupnorm_min_bias_add",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     if provider == "baseline2":
-        print(f"INFO benchmark_skip Baseline Triton2 {label} sandbox_reference_not_read")
+        print(
+            f"INFO benchmark_skip Baseline Triton2 {label} sandbox_reference_not_read"
+        )
         return float("inf")
     inputs = _make_inputs(label)
     try:
         if provider == "torch":
-            fn = lambda: _run_torch_ref(label, inputs)
+
+            def fn():
+                return _run_torch_ref(label, inputs)
         else:
-            fn = lambda: _run_provider(provider, label, inputs)
+
+            def fn():
+                return _run_provider(provider, label, inputs)
+
         return _manual_bench(fn)
     except Exception as exc:
-        print(f"INFO benchmark_unavailable {provider} {label} {type(exc).__name__}")
+        print(
+            f"INFO benchmark_unavailable {provider} {label} {type(exc).__name__}"
+        )
         return float("inf")
 
 

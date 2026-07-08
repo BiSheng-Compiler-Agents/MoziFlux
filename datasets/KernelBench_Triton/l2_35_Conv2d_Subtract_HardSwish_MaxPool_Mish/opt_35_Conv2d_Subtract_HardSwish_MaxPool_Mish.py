@@ -44,7 +44,9 @@ def _fused_hswish_maxpool2_mish_vector_kernel(
     k = tl.arange(0, 4)
     kh = k // 2
     kw = k - kh * 2
-    vals = tl.load(x_ptr + base[None, :] + kh[:, None] * W + kw[:, None], mask=mask[None, :], other=0.0).to(tl.float32) - subtract_value
+    vals = tl.load(x_ptr + base[None, :] + kh[:, None] * W + kw[:, None],
+                   mask=mask[None, :],
+                   other=0.0).to(tl.float32) - subtract_value
     vp3 = tl.minimum(tl.maximum(vals + 3.0, 0.0), 6.0)
     hs = vals * (vp3 * (1.0 / 6.0))
     mv = tl.max(hs, axis=0)
@@ -89,10 +91,14 @@ def _fused_hswish_maxpool2_mish_row_kernel(
         n = t // C
         base = ((n * C + c) * H + ho * 2) * W + safe_wo * 2
 
-        x00 = tl.load(x_ptr + base, mask=mask, other=0.0).to(tl.float32) - subtract_value
-        x01 = tl.load(x_ptr + base + 1, mask=mask, other=0.0).to(tl.float32) - subtract_value
-        x10 = tl.load(x_ptr + base + W, mask=mask, other=0.0).to(tl.float32) - subtract_value
-        x11 = tl.load(x_ptr + base + W + 1, mask=mask, other=0.0).to(tl.float32) - subtract_value
+        x00 = tl.load(x_ptr + base, mask=mask, other=0.0).to(
+            tl.float32) - subtract_value
+        x01 = tl.load(x_ptr + base + 1, mask=mask, other=0.0).to(
+            tl.float32) - subtract_value
+        x10 = tl.load(x_ptr + base + W, mask=mask, other=0.0).to(
+            tl.float32) - subtract_value
+        x11 = tl.load(x_ptr + base + W + 1, mask=mask, other=0.0).to(
+            tl.float32) - subtract_value
 
         p00 = tl.minimum(tl.maximum(x00 + 3.0, 0.0), 6.0)
         p01 = tl.minimum(tl.maximum(x01 + 3.0, 0.0), 6.0)
@@ -151,7 +157,8 @@ def _fused_hswish_maxpool_mish_generic_kernel(
         for kh in tl.static_range(0, K):
             row_base = base + kh * W
             for kw in tl.static_range(0, K):
-                v = tl.load(x_ptr + row_base + kw, mask=mask, other=0.0).to(tl.float32) - subtract_value
+                v = tl.load(x_ptr + row_base + kw, mask=mask, other=0.0).to(
+                    tl.float32) - subtract_value
                 vp3 = tl.minimum(tl.maximum(v + 3.0, 0.0), 6.0)
                 maxv = tl.maximum(maxv, v * (vp3 * inv6))
 
@@ -179,14 +186,16 @@ class ModelNew(nn.Module):
         self.subtract_value = float(subtract_value)
         self.pool = nn.MaxPool2d(pool_kernel_size)
         if isinstance(pool_kernel_size, (tuple, list)):
-            assert pool_kernel_size[0] == pool_kernel_size[1], "Fused path requires square pooling"
+            assert pool_kernel_size[0] == pool_kernel_size[
+                1], "Fused path requires square pooling"
             self.pool_k = int(pool_kernel_size[0])
         else:
             self.pool_k = int(pool_kernel_size)
 
     def _num_vector_cores(self, x: torch.Tensor) -> int:
         try:
-            return driver.active.utils.get_device_properties(x.device)["num_vectorcore"]
+            return driver.active.utils.get_device_properties(
+                x.device)["num_vectorcore"]
         except Exception:
             return 32
 
@@ -204,7 +213,7 @@ class ModelNew(nn.Module):
             n_out = y.numel()
             total_tiles = triton.cdiv(n_out, BLOCK)
             if total_tiles <= 65535:
-                _fused_hswish_maxpool2_mish_vector_kernel[(total_tiles,)](
+                _fused_hswish_maxpool2_mish_vector_kernel[(total_tiles, )](
                     x.contiguous().view(-1),
                     y.view(-1),
                     n_out,
@@ -224,7 +233,7 @@ class ModelNew(nn.Module):
                 num_w_tiles = triton.cdiv(W_OUT, BLOCK_W)
                 row_tiles = N * C * H_OUT * num_w_tiles
                 ncores = self._num_vector_cores(x)
-                grid = (min(row_tiles, ncores, 65535),)
+                grid = (min(row_tiles, ncores, 65535), )
                 _fused_hswish_maxpool2_mish_row_kernel[grid](
                     x.contiguous().view(-1),
                     y.view(-1),
@@ -246,7 +255,7 @@ class ModelNew(nn.Module):
             n_out = y.numel()
             total_tiles = triton.cdiv(n_out, BLOCK)
             ncores = self._num_vector_cores(x)
-            grid = (min(total_tiles, ncores, 65535),)
+            grid = (min(total_tiles, ncores, 65535), )
             _fused_hswish_maxpool_mish_generic_kernel[grid](
                 x.contiguous().view(-1),
                 y.view(-1),
@@ -290,4 +299,7 @@ def get_inputs():
 
 
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, subtract_value, pool_kernel_size]
+    return [
+        in_channels, out_channels, kernel_size, subtract_value,
+        pool_kernel_size
+    ]

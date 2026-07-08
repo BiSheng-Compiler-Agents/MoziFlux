@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import math
 import sys
 import time
 from pathlib import Path
@@ -69,12 +68,14 @@ def _run_provider(provider, x):
     if provider == "torch":
         return _run_torch_ref(x)
     if provider == "baseline2":
-        raise RuntimeError("Baseline Triton2 is read-only and unavailable in this sandbox")
+        raise RuntimeError(
+            "Baseline Triton2 is read-only and unavailable in this sandbox")
     return _model(provider)(x)
 
 
 def _max_abs(a, b):
-    return float((a - b).abs().max().detach().cpu().item()) if a.numel() else 0.0
+    return float(
+        (a - b).abs().max().detach().cpu().item()) if a.numel() else 0.0
 
 
 def _sync():
@@ -84,7 +85,10 @@ def _sync():
 
 def _bench_fn(fn, warmup=25, rep=100):
     try:
-        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=warmup,
+                                       rep=rep,
+                                       return_mode="mean")
     except Exception:
         for _ in range(5):
             fn()
@@ -109,7 +113,9 @@ def unit_test():
             ("optimized", "Optimized Triton"),
         ]:
             if provider == "baseline2":
-                print(f"TEST {display} {label}: SKIP_UNAVAILABLE sandbox_do_not_read_base max_abs=inf")
+                print(
+                    f"TEST {display} {label}: SKIP_UNAVAILABLE sandbox_do_not_read_base max_abs=inf"
+                )
                 continue
             try:
                 if provider == "optimized" and label == "persistent_forced" and saved_max is not None:
@@ -120,10 +126,14 @@ def unit_test():
                 diff = _max_abs(y, ref)
                 passed = diff <= 1e-6 and y.shape == ref.shape
                 ok = ok and (passed or provider == "baseline1")
-                print(f"TEST {display} {label}: {'PASS' if passed else 'FAIL'} max_abs={diff:.6g}")
+                print(
+                    f"TEST {display} {label}: {'PASS' if passed else 'FAIL'} max_abs={diff:.6g}"
+                )
             except Exception as exc:
                 ok = ok and provider != "optimized"
-                print(f"TEST {display} {label}: SKIP_UNAVAILABLE {type(exc).__name__} max_abs=inf")
+                print(
+                    f"TEST {display} {label}: SKIP_UNAVAILABLE {type(exc).__name__} max_abs=inf"
+                )
             finally:
                 if provider == "optimized" and saved_max is not None:
                     opt_mod._MAX_PROGRAMS = saved_max
@@ -138,13 +148,15 @@ def unit_test():
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=["torch", "baseline1", "baseline2", "optimized"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("black", "-"), ("blue", "-"), ("green", "--"), ("red", "-")],
         ylabel="ms",
         plot_name="matmul_dropout_mean_softmax_latency",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     x, = _make_inputs(*shape)
@@ -171,7 +183,9 @@ def main():
     if args.test:
         unit_test()
     if args.bench:
-        benchmark.run(print_data=True, show_plots=False, save_path=str(ROOT / "profile_plots"))
+        benchmark.run(print_data=True,
+                      show_plots=False,
+                      save_path=str(ROOT / "profile_plots"))
 
 
 if __name__ == "__main__":

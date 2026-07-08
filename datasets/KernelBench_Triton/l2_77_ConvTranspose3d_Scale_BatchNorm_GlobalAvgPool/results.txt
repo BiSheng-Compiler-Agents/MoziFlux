@@ -19,4 +19,3 @@ l2_77_convtranspose3d_scale_bn_gap:
 0       tiny_direct       0.288679          0.382169               inf          0.367147
 1  irregular_direct       0.299384          0.396965               inf          0.381412
 2  default_required      90.400230         85.358635               inf          1.871922
-

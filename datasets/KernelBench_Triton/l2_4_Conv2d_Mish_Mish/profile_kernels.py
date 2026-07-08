@@ -1,8 +1,6 @@
 import argparse
 import importlib.util
-import math
 import sys
-import time
 from pathlib import Path
 
 import torch
@@ -37,7 +35,8 @@ def _load(path: Path, key: str):
     if key in _MODULE_CACHE:
         return _MODULE_CACHE[key]
     try:
-        spec = importlib.util.spec_from_file_location(f"k_{key}_{path.stem}", path)
+        spec = importlib.util.spec_from_file_location(f"k_{key}_{path.stem}",
+                                                      path)
         mod = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = mod
         spec.loader.exec_module(mod)
@@ -57,7 +56,7 @@ def _sync():
 def _make_inputs(label):
     shape = _SHAPES[label]
     torch.manual_seed(123)
-    return (torch.rand(shape, device="npu", dtype=torch.float32),)
+    return (torch.rand(shape, device="npu", dtype=torch.float32), )
 
 
 def _model(key):
@@ -67,12 +66,17 @@ def _model(key):
     if key == "torch":
         model = nn.Conv2d(*_INIT).npu().eval()
     else:
-        path = {"baseline1": INPUT_FILE, "baseline2": BASE_FILE, "opt": OPT_FILE}[key]
+        path = {
+            "baseline1": INPUT_FILE,
+            "baseline2": BASE_FILE,
+            "opt": OPT_FILE
+        }[key]
         mod = _load(path, key)
         if mod is None:
             _MODEL_CACHE[key] = None
             return None
-        init = mod.get_init_inputs() if hasattr(mod, "get_init_inputs") else _INIT
+        init = mod.get_init_inputs() if hasattr(mod,
+                                                "get_init_inputs") else _INIT
         if init == [()]:
             init = []
         model = mod.ModelNew(*init).npu().eval()
@@ -103,7 +107,7 @@ def _max_abs(a, b):
 def unit_test():
     ok = True
     for label, *_ in _BENCH_SHAPES:
-        (x,) = _make_inputs(label)
+        (x, ) = _make_inputs(label)
         ref = _run_torch_ref(x)
         _sync()
         for key in _PROVIDERS[1:]:
@@ -115,16 +119,23 @@ def unit_test():
                 if diff <= 1e-3:
                     print(f"PASS {name} {label} max_abs={diff:.6g}")
                 elif key == "opt":
-                    print(f"UNIT_TEST_FAILED {name} {label} max_abs={diff:.6g}")
+                    print(
+                        f"UNIT_TEST_FAILED {name} {label} max_abs={diff:.6g}")
                     ok = False
                 else:
-                    print(f"INFO comparison_mismatch {name} {label} max_abs={diff:.6g}")
+                    print(
+                        f"INFO comparison_mismatch {name} {label} max_abs={diff:.6g}"
+                    )
             except Exception as exc:
                 if key == "opt":
-                    print(f"UNIT_TEST_FAILED {name} {label}: {type(exc).__name__}")
+                    print(
+                        f"UNIT_TEST_FAILED {name} {label}: {type(exc).__name__}"
+                    )
                     ok = False
                 else:
-                    print(f"INFO comparison_provider_unavailable {name} {label}: {type(exc).__name__}")
+                    print(
+                        f"INFO comparison_provider_unavailable {name} {label}: {type(exc).__name__}"
+                    )
     # Force custom Triton direct and persistent paths; production dispatch uses ACL.
     try:
         opt_mod = _load(OPT_FILE, "opt")
@@ -137,38 +148,53 @@ def unit_test():
         ]:
             opt_mod._MAX_GRID = cap
             _MODEL_CACHE.pop("opt", None)
-            (x,) = _make_inputs(shape_label)
+            (x, ) = _make_inputs(shape_label)
             ref = _run_torch_ref(x)
             out = _run_provider("opt", x)
             _sync()
             diff = _max_abs(out, ref)
             if diff <= 1e-3:
-                print(f"PASS Optimized Triton {forced_label} max_abs={diff:.6g}")
+                print(
+                    f"PASS Optimized Triton {forced_label} max_abs={diff:.6g}")
             else:
-                print(f"UNIT_TEST_FAILED Optimized Triton {forced_label} max_abs={diff:.6g}")
+                print(
+                    f"UNIT_TEST_FAILED Optimized Triton {forced_label} max_abs={diff:.6g}"
+                )
                 ok = False
         if old_cap is not None:
             opt_mod._MAX_GRID = old_cap
         opt_mod._USE_ACL_DISPATCH = old_acl
         _MODEL_CACHE.pop("opt", None)
     except Exception as exc:
-        print(f"UNIT_TEST_FAILED Optimized Triton forced_paths: {type(exc).__name__}")
+        print(
+            f"UNIT_TEST_FAILED Optimized Triton forced_paths: {type(exc).__name__}"
+        )
         ok = False
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
 
 
 def _bench_once(provider, label):
-    (x,) = _make_inputs(label)
+    (x, ) = _make_inputs(label)
     try:
-        fn = lambda: _run_provider(provider, x)
+
+        def fn():
+            return _run_provider(provider, x)
+
         # Avoid poisoning the process with providers that are known to be unavailable.
         if provider != "opt" and _model(provider) is None:
-            print(f"INFO benchmark_provider_unavailable {_PROVIDER_NAMES[provider]} {label}")
+            print(
+                f"INFO benchmark_provider_unavailable {_PROVIDER_NAMES[provider]} {label}"
+            )
             return float("inf")
-        return triton.testing.do_bench(fn, warmup=25, rep=100, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=25,
+                                       rep=100,
+                                       return_mode="mean")
     except Exception:
-        print(f"INFO benchmark_provider_unavailable {_PROVIDER_NAMES[provider]} {label}")
+        print(
+            f"INFO benchmark_provider_unavailable {_PROVIDER_NAMES[provider]} {label}"
+        )
         return float("inf")
 
 
@@ -183,8 +209,7 @@ def _bench_once(provider, label):
         ylabel="ms",
         plot_name="conv2d_mish_mish",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     return _bench_once(provider, label)
 

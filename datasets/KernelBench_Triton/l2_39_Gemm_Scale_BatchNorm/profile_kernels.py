@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import math
 import sys
 from pathlib import Path
 
@@ -38,7 +37,13 @@ def _load(path: Path, name: str):
 
 
 class TorchRef(nn.Module):
-    def __init__(self, in_features, out_features, scale_shape, eps=1e-5, momentum=0.1):
+
+    def __init__(self,
+                 in_features,
+                 out_features,
+                 scale_shape,
+                 eps=1e-5,
+                 momentum=0.1):
         super().__init__()
         self.gemm = nn.Linear(in_features, out_features)
         self.scale = nn.Parameter(torch.randn(scale_shape))
@@ -46,7 +51,8 @@ class TorchRef(nn.Module):
 
     def forward(self, x):
         x_fp32 = x if x.dtype == torch.float32 else x.to(torch.float32)
-        y = torch.nn.functional.linear(x_fp32, self.gemm.weight, self.gemm.bias)
+        y = torch.nn.functional.linear(x_fp32, self.gemm.weight,
+                                       self.gemm.bias)
         y = y * self.scale
         return self.bn(y)
 
@@ -58,20 +64,20 @@ def _model(provider, K, N):
         return _MODEL_CACHE[key]
     torch.manual_seed(0)
     if provider == "torch":
-        model = TorchRef(K, N, (N,))
+        model = TorchRef(K, N, (N, ))
     elif provider == "baseline1":
         mod = _load(INPUT_FILE, "k_l2_39_input")
-        model = mod.ModelNew(K, N, (N,))
+        model = mod.ModelNew(K, N, (N, ))
     elif provider == "baseline2":
         try:
             mod = _load(BASE_FILE, "k_l2_39_base")
-            model = mod.ModelNew(K, N, (N,))
+            model = mod.ModelNew(K, N, (N, ))
         except Exception as exc:
             _BASE2_IMPORT_ERROR = type(exc).__name__
             return None
     elif provider == "opt":
         mod = _load(OPT_FILE, "k_l2_39_opt")
-        model = mod.ModelNew(K, N, (N,))
+        model = mod.ModelNew(K, N, (N, ))
     else:
         raise KeyError(provider)
     model.eval().to("npu")
@@ -99,11 +105,15 @@ def _sync():
 
 def _bench_callable(fn):
     try:
-        return triton.testing.do_bench(fn, warmup=25, rep=100, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=25,
+                                       rep=100,
+                                       return_mode="mean")
     except Exception:
         import time
         for _ in range(10):
-            fn(); _sync()
+            fn()
+            _sync()
         t0 = time.perf_counter()
         reps = 50
         for _ in range(reps):
@@ -118,13 +128,15 @@ def _bench_callable(fn):
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=_PROVIDER_KEYS,
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("blue", "-"), ("green", "-"), ("black", "--"), ("red", "-")],
         ylabel="Latency (ms)",
         plot_name="gemm_scale_batchnorm",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     M, K, N = _SHAPE_BY_LABEL[label]
     if provider == "baseline2" and _BASE2_IMPORT_ERROR is not None:
@@ -136,7 +148,9 @@ def benchmark(label, provider):
         _sync()
         return _bench_callable(lambda: _run_provider(provider, x, K, N))
     except Exception as exc:
-        print(f"INFO provider_timing_unavailable {provider} {label}: {type(exc).__name__}")
+        print(
+            f"INFO provider_timing_unavailable {provider} {label}: {type(exc).__name__}"
+        )
         return float("inf")
 
 
@@ -146,7 +160,9 @@ def unit_test():
         x = _make_inputs(M, K)
         ref = _run_provider("torch", x, K, N)
         _sync()
-        for provider, name in [("baseline1", "Baseline Triton1"), ("baseline2", "Baseline Triton2"), ("opt", "Optimized Triton")]:
+        for provider, name in [("baseline1", "Baseline Triton1"),
+                               ("baseline2", "Baseline Triton2"),
+                               ("opt", "Optimized Triton")]:
             try:
                 out = _run_provider(provider, x, K, N)
                 _sync()
@@ -155,9 +171,13 @@ def unit_test():
             except Exception as exc:
                 if provider == "opt":
                     ok = False
-                    print(f"UNIT_TEST_FAILED {name} {label} {type(exc).__name__}")
+                    print(
+                        f"UNIT_TEST_FAILED {name} {label} {type(exc).__name__}"
+                    )
                 else:
-                    print(f"INFO {name} {label} comparison_unavailable_or_mismatch {type(exc).__name__}")
+                    print(
+                        f"INFO {name} {label} comparison_unavailable_or_mismatch {type(exc).__name__}"
+                    )
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
 

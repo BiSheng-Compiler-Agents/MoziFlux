@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import math
 import pathlib
 import sys
 import time
@@ -84,7 +83,8 @@ def _run_provider(provider, x, batch, in_features, out_features, scale):
     if provider == "torch":
         return _run_torch_ref(x, batch, in_features, out_features, scale)
     if provider == "baseline2":
-        raise RuntimeError("baseline2_unavailable_reference_file_not_read_by_sandbox")
+        raise RuntimeError(
+            "baseline2_unavailable_reference_file_not_read_by_sandbox")
     m = _model(provider, batch, in_features, out_features, scale, x.dtype)
     return m(x)
 
@@ -95,7 +95,10 @@ def _sync():
 
 def _bench_call(fn, warmup=10, rep=30):
     if hasattr(triton.testing, "do_bench"):
-        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=warmup,
+                                       rep=rep,
+                                       return_mode="mean")
     for _ in range(warmup):
         fn()
     _sync()
@@ -116,20 +119,31 @@ def unit_test():
         x = _make_input(batch, in_features)
         ref = _run_torch_ref(x, batch, in_features, out_features, 2.0)
         for provider in _PROVIDERS[1:]:
-            display = {"baseline1": "Baseline Triton1", "baseline2": "Baseline Triton2", "optimized": "Optimized Triton"}[provider]
+            display = {
+                "baseline1": "Baseline Triton1",
+                "baseline2": "Baseline Triton2",
+                "optimized": "Optimized Triton"
+            }[provider]
             if provider == "baseline2":
-                print(f"TEST {display} {label}: SKIP_UNAVAILABLE reference_file_not_read max_abs=inf")
+                print(
+                    f"TEST {display} {label}: SKIP_UNAVAILABLE reference_file_not_read max_abs=inf"
+                )
                 continue
             try:
-                y = _run_provider(provider, x, batch, in_features, out_features, 2.0)
+                y = _run_provider(provider, x, batch, in_features,
+                                  out_features, 2.0)
                 _sync()
                 diff = _max_abs(y, ref)
                 passed = diff <= 2e-2
-                print(f"TEST {display} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}")
+                print(
+                    f"TEST {display} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}"
+                )
                 if provider == "optimized" and not passed:
                     ok_opt = False
             except Exception as exc:
-                print(f"TEST {display} {label}: EXCEPTION {type(exc).__name__} max_abs=inf")
+                print(
+                    f"TEST {display} {label}: EXCEPTION {type(exc).__name__} max_abs=inf"
+                )
                 if provider == "optimized":
                     ok_opt = False
     # Forced persistent path for optimized kernel without huge allocation.
@@ -138,17 +152,23 @@ def unit_test():
         old = getattr(opt, "_MAX_PROGRAMS", None)
         opt._MAX_PROGRAMS = 1
         _MODEL_CACHE.clear()
-        label, batch, in_features, out_features = ("forced_persistent_3x1024x8192", 3, 1024, 8192)
+        label, batch, in_features, out_features = (
+            "forced_persistent_3x1024x8192", 3, 1024, 8192)
         x = _make_input(batch, in_features)
         ref = _run_torch_ref(x, batch, in_features, out_features, 2.0)
-        y = _run_provider("optimized", x, batch, in_features, out_features, 2.0)
+        y = _run_provider("optimized", x, batch, in_features, out_features,
+                          2.0)
         _sync()
         diff = _max_abs(y, ref)
         passed = diff <= 2e-2
-        print(f"TEST Optimized Triton {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}")
+        print(
+            f"TEST Optimized Triton {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}"
+        )
         ok_opt = ok_opt and passed
     except Exception as exc:
-        print(f"TEST Optimized Triton forced_persistent: EXCEPTION {type(exc).__name__} max_abs=inf")
+        print(
+            f"TEST Optimized Triton forced_persistent: EXCEPTION {type(exc).__name__} max_abs=inf"
+        )
         ok_opt = False
     finally:
         if 'opt' in locals() and old is not None:
@@ -164,23 +184,32 @@ def unit_test():
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=_PROVIDERS,
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("black", "-"), ("blue", "-"), ("green", "--"), ("red", "-")],
         ylabel="ms",
         plot_name="matmul_swish_scaling_latency",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     _, batch, in_features, out_features = shape
     if provider == "baseline2":
-        print(f"INFO benchmark Baseline Triton2 {label}: inf reference_file_not_read")
+        print(
+            f"INFO benchmark Baseline Triton2 {label}: inf reference_file_not_read"
+        )
         return float("inf")
     x = _make_input(batch, in_features)
     try:
-        fn = lambda: _run_provider(provider, x, batch, in_features, out_features, 2.0)
-        fn(); _sync()
+
+        def fn():
+            return (_run_provider(provider, x, batch, in_features,
+                                  out_features, 2.0))
+
+        fn()
+        _sync()
         return _bench_call(fn)
     except Exception as exc:
         print(f"INFO benchmark {provider} {label}: inf {type(exc).__name__}")

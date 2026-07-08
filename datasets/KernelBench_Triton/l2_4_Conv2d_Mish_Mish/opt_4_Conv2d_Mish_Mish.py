@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 
-
 _BLOCK_SIZE = 16384
 _MAX_GRID = 65535
 _USE_ACL_DISPATCH = True
@@ -22,7 +21,8 @@ def _tanh_softplus_stable(x_f32):
 
 
 @triton.jit
-def _mish_mish_direct_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+def _mish_mish_direct_kernel(x_ptr, y_ptr, n_elements,
+                             BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(0)
     offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     mask = offs < n_elements
@@ -35,9 +35,8 @@ def _mish_mish_direct_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr)
 
 
 @triton.jit
-def _mish_mish_persistent_kernel(
-    x_ptr, y_ptr, n_elements, n_programs, BLOCK_SIZE: tl.constexpr
-):
+def _mish_mish_persistent_kernel(x_ptr, y_ptr, n_elements, n_programs,
+                                 BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(0)
     n_tiles = tl.cdiv(n_elements, BLOCK_SIZE)
     for tile_id in tl.range(pid, n_tiles, n_programs, num_stages=2):
@@ -55,11 +54,14 @@ def _mish_mish_triton_impl(x: torch.Tensor) -> torch.Tensor:
     if x.device.type != "npu":
         raise ValueError("mish_mish_triton expects an Ascend NPU tensor")
     if x.requires_grad:
-        raise ValueError("mish_mish_triton does not support autograd-tracked tensors")
+        raise ValueError(
+            "mish_mish_triton does not support autograd-tracked tensors")
     if x.numel() == 0:
         return torch.empty_like(x)
     if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-        raise TypeError("mish_mish_triton supports only float16, bfloat16, and float32 inputs")
+        raise TypeError(
+            "mish_mish_triton supports only float16, bfloat16, and float32 inputs"
+        )
 
     x_contig = x.contiguous()
     y = torch.empty_like(x_contig)
@@ -68,13 +70,16 @@ def _mish_mish_triton_impl(x: torch.Tensor) -> torch.Tensor:
 
     if n_tiles > _MAX_GRID:
         n_programs = _MAX_GRID
-        _mish_mish_persistent_kernel[(n_programs,)](
-            x_contig, y, n_elements, n_programs, BLOCK_SIZE=_BLOCK_SIZE
-        )
+        _mish_mish_persistent_kernel[(n_programs, )](x_contig,
+                                                     y,
+                                                     n_elements,
+                                                     n_programs,
+                                                     BLOCK_SIZE=_BLOCK_SIZE)
     else:
-        _mish_mish_direct_kernel[(n_tiles,)](
-            x_contig, y, n_elements, BLOCK_SIZE=_BLOCK_SIZE
-        )
+        _mish_mish_direct_kernel[(n_tiles, )](x_contig,
+                                              y,
+                                              n_elements,
+                                              BLOCK_SIZE=_BLOCK_SIZE)
     return y
 
 

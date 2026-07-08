@@ -1,7 +1,5 @@
 import argparse
 import importlib.util
-import math
-import os
 import sys
 import time
 from pathlib import Path
@@ -26,8 +24,7 @@ _MODEL_CACHE = {}
 _MODULE_CACHE = {}
 _BASELINE_SKIP_REASON = (
     "cannsim_probe_bisheng_mlir_abort_for_nested_min_reduction; "
-    "preskipped_to_avoid_npu_context_poisoning"
-)
+    "preskipped_to_avoid_npu_context_poisoning")
 
 
 def _load(path: Path, name: str):
@@ -42,7 +39,8 @@ def _load(path: Path, name: str):
 
 
 def _device():
-    return "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    return "npu" if hasattr(torch,
+                            "npu") and torch.npu.is_available() else "cpu"
 
 
 def _sync():
@@ -53,7 +51,12 @@ def _sync():
 def _make_inputs(label):
     _, batch, in_c, _, h, w, _ = _SHAPE_BY_LABEL[label]
     torch.manual_seed(123)
-    return (torch.rand(batch, in_c, h, w, device=_device(), dtype=torch.float32),)
+    return (torch.rand(batch,
+                       in_c,
+                       h,
+                       w,
+                       device=_device(),
+                       dtype=torch.float32), )
 
 
 def _model(provider, label):
@@ -115,28 +118,40 @@ def unit_test():
         opt = _run_provider("optimized", label, *x)
         _sync()
         ok, msg = _allclose(opt, ref)
-        print(f"UNIT_TEST optimized {label}: {'PASS' if ok else 'UNIT_TEST_FAILED'} {msg}")
+        print(
+            f"UNIT_TEST optimized {label}: {'PASS' if ok else 'UNIT_TEST_FAILED'} {msg}"
+        )
         all_ok = all_ok and ok
         # Keep required comparison providers visible without launching known-toxic kernels.
         print(f"INFO Baseline Triton1 {label}: {_BASELINE_SKIP_REASON}")
         if BASE_FILE.exists():
-            print(f"INFO Baseline Triton2 {label}: read_only_comparison_preskipped")
+            print(
+                f"INFO Baseline Triton2 {label}: read_only_comparison_preskipped"
+            )
     print("UNIT_TEST PASS" if all_ok else "UNIT_TEST_FAILED")
     return all_ok
 
 
 def _bench_one(provider, label):
     if provider in ("baseline1", "baseline2"):
-        print(f"INFO {provider} {label}: returning inf ({_BASELINE_SKIP_REASON})")
+        print(
+            f"INFO {provider} {label}: returning inf ({_BASELINE_SKIP_REASON})"
+        )
         return float("inf")
     x = _make_inputs(label)
-    fn = lambda: _run_provider(provider, label, *x)
+
+    def fn():
+        return _run_provider(provider, label, *x)
+
     # warmup
     for _ in range(5):
         fn()
     _sync()
     try:
-        return triton.testing.do_bench(fn, warmup=10, rep=50, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=10,
+                                       rep=50,
+                                       return_mode="mean")
     except Exception:
         start = time.perf_counter()
         for _ in range(20):
@@ -151,13 +166,15 @@ def _bench_one(provider, label):
         x_vals=[r[0] for r in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=["torch", "baseline1", "baseline2", "optimized"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("blue", "-"), ("red", "--"), ("black", "--"), ("green", "-")],
         ylabel="Latency (ms)",
         plot_name="l2_36_ConvTranspose2d_Min_Sum_GELU_Add",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     return _bench_one(provider, label)
 

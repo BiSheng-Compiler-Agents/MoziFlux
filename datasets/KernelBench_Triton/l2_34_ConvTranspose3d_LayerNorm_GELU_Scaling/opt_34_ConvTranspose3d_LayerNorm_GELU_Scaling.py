@@ -22,13 +22,13 @@ _BLOCK_ROWS = 16
 
 @triton.jit
 def _layernorm_gelu_scale_ncdhw_kernel(
-    x_ptr,          # contiguous N,C,D,H,W convolution output
-    y_ptr,          # contiguous N,C,D,H,W final output
-    w_ptr,          # [C]
-    b_ptr,          # [C]
-    total_rows,     # N * D * H * W
-    channels,       # C
-    spatial_size,   # D * H * W
+    x_ptr,  # contiguous N,C,D,H,W convolution output
+    y_ptr,  # contiguous N,C,D,H,W final output
+    w_ptr,  # [C]
+    b_ptr,  # [C]
+    total_rows,  # N * D * H * W
+    channels,  # C
+    spatial_size,  # D * H * W
     inv_channels,
     eps,
     scale,
@@ -89,13 +89,14 @@ def layernorm_gelu_scale_ncdhw_triton(
     if x.device.type != "npu":
         # CPU fallback keeps local smoke tests importable without Ascend hardware.
         y = x.permute(0, 2, 3, 4, 1).contiguous()
-        y = F.layer_norm(y, (x.shape[1],), weight, bias, eps)
+        y = F.layer_norm(y, (x.shape[1], ), weight, bias, eps)
         y = F.gelu(y, approximate="none") * scale
         return y.permute(0, 4, 1, 2, 3).contiguous()
     if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
         raise TypeError(f"Unsupported dtype for Triton path: {x.dtype}")
     if x.dim() != 5:
-        raise ValueError(f"Expected 5D NCDHW input, got shape={tuple(x.shape)}")
+        raise ValueError(
+            f"Expected 5D NCDHW input, got shape={tuple(x.shape)}")
 
     xc = x.contiguous()
     n, c, d, h, w = xc.shape
@@ -113,12 +114,12 @@ def layernorm_gelu_scale_ncdhw_triton(
         # the standard library LayerNorm/GELU path for this regime; it is ACL-backed
         # on NPU and avoids poisoning the context with coreDim > 65535.
         y = xc.permute(0, 2, 3, 4, 1).contiguous()
-        y = F.layer_norm(y, (c,), weight, bias, eps)
+        y = F.layer_norm(y, (c, ), weight, bias, eps)
         y = F.gelu(y, approximate="none") * scale
         return y.permute(0, 4, 1, 2, 3).contiguous()
 
     n_programs = int(n_tiles)
-    grid = (n_programs,)
+    grid = (n_programs, )
 
     _layernorm_gelu_scale_ncdhw_kernel[grid](
         xc,

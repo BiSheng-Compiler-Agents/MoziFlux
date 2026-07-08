@@ -14,7 +14,9 @@ INPUT_FILE = ROOT / "69_Conv2d_HardSwish_ReLU.py"
 OPT_FILE = ROOT / "opt_69_Conv2d_HardSwish_ReLU.py"
 BASE2_FILE = ROOT / "base_69_Conv2d_HardSwish_ReLU.py"  # sandbox: do not read/import
 
-LINE_NAMES = ["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"]
+LINE_NAMES = [
+    "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"
+]
 LINE_VALS = ["torch", "baseline1", "baseline2", "optimized"]
 _BENCH_SHAPES = [
     ("small_irregular", 1, 8, 33, 35),
@@ -51,6 +53,7 @@ def _module(key):
 
 
 class TorchRef(nn.Module):
+
     def __init__(self, in_channels=8, out_channels=64, kernel_size=3):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
@@ -72,7 +75,12 @@ def _make_inputs(label):
         if item[0] == label:
             _, n, c, h, w = item
             torch.manual_seed(2026 + n + h + w)
-            return (torch.rand(n, c, h, w, device=_device(), dtype=torch.float32),)
+            return (torch.rand(n,
+                               c,
+                               h,
+                               w,
+                               device=_device(),
+                               dtype=torch.float32), )
     raise KeyError(label)
 
 
@@ -110,7 +118,9 @@ def _max_abs(a, b):
 def _test_one_provider(key, label):
     display = LINE_NAMES[LINE_VALS.index(key)]
     if key == "baseline2":
-        print(f"TEST {display} {label}: SKIP_UNAVAILABLE sandbox_do_not_read_base max_abs=inf")
+        print(
+            f"TEST {display} {label}: SKIP_UNAVAILABLE sandbox_do_not_read_base max_abs=inf"
+        )
         return True
     x, = _make_inputs(label)
     try:
@@ -123,11 +133,17 @@ def _test_one_provider(key, label):
         print(f"TEST {display} {label}: {status} max_abs={diff:.6g}")
         return ok if key == "optimized" else True
     except Exception as exc:
-        reason = str(exc).splitlines()[0][:180].replace('ERROR', 'ERR').replace('FAIL', 'FL')
+        reason = str(exc).splitlines()[0][:180].replace('ERROR',
+                                                        'ERR').replace(
+                                                            'FAIL', 'FL')
         if key == "optimized":
-            print(f"TEST {display} {label}: FAIL {type(exc).__name__}:{reason} max_abs=inf")
+            print(
+                f"TEST {display} {label}: FAIL {type(exc).__name__}:{reason} max_abs=inf"
+            )
             return False
-        print(f"TEST {display} {label}: SKIP_UNAVAILABLE {type(exc).__name__}:{reason} max_abs=inf")
+        print(
+            f"TEST {display} {label}: SKIP_UNAVAILABLE {type(exc).__name__}:{reason} max_abs=inf"
+        )
         return True
 
 
@@ -144,7 +160,9 @@ def unit_test():
 def _force_persistent_test():
     mod = _module("optimized")
     if mod is None:
-        print("TEST Optimized Triton forced_persistent: FAIL module_unavailable max_abs=inf")
+        print(
+            "TEST Optimized Triton forced_persistent: FAIL module_unavailable max_abs=inf"
+        )
         return False
     old = getattr(mod, "_MAX_GRID", None)
     try:
@@ -155,11 +173,17 @@ def _force_persistent_test():
         out = _run_provider("optimized", x)
         diff = _max_abs(out, ref)
         ok = math.isfinite(diff) and diff <= 1e-3
-        print(f"TEST Optimized Triton forced_persistent: {'PASS' if ok else 'MISMATCH'} max_abs={diff:.6g}")
+        print(
+            f"TEST Optimized Triton forced_persistent: {'PASS' if ok else 'MISMATCH'} max_abs={diff:.6g}"
+        )
         return ok
     except Exception as exc:
-        reason = str(exc).splitlines()[0][:180].replace('ERROR', 'ERR').replace('FAIL', 'FL')
-        print(f"TEST Optimized Triton forced_persistent: FAIL {type(exc).__name__}:{reason} max_abs=inf")
+        reason = str(exc).splitlines()[0][:180].replace('ERROR',
+                                                        'ERR').replace(
+                                                            'FAIL', 'FL')
+        print(
+            f"TEST Optimized Triton forced_persistent: FAIL {type(exc).__name__}:{reason} max_abs=inf"
+        )
         return False
     finally:
         if old is not None:
@@ -169,7 +193,9 @@ def _force_persistent_test():
 
 def _bench_provider(provider, label):
     if provider == "baseline2":
-        print(f"INFO bench_skip Baseline Triton2 {label}: sandbox_do_not_read_base")
+        print(
+            f"INFO bench_skip Baseline Triton2 {label}: sandbox_do_not_read_base"
+        )
         return float("inf")
     x, = _make_inputs(label)
     try:
@@ -179,12 +205,19 @@ def _bench_provider(provider, label):
             out = _run_provider("optimized", x)
             if _max_abs(out, ref) > 1e-3:
                 return float("inf")
+
         def fn():
             _run_provider(provider, x)
             torch.npu.synchronize()
-        return triton.testing.do_bench(fn, warmup=25, rep=100, return_mode="mean")
+
+        return triton.testing.do_bench(fn,
+                                       warmup=25,
+                                       rep=100,
+                                       return_mode="mean")
     except Exception as exc:
-        print(f"INFO bench_unavailable {LINE_NAMES[LINE_VALS.index(provider)]} {label}: {type(exc).__name__}")
+        print(
+            f"INFO bench_unavailable {LINE_NAMES[LINE_VALS.index(provider)]} {label}: {type(exc).__name__}"
+        )
         return float("inf")
 
 
@@ -199,8 +232,7 @@ def _bench_provider(provider, label):
         ylabel="ms",
         plot_name="l2_69_conv2d_hardswish_relu",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     return _bench_provider(provider, label)
 

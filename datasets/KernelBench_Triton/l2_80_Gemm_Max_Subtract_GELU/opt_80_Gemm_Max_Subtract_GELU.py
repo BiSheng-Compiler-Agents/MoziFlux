@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 
-
 _BLOCK = 1024
 _MAX_PROGRAMS = 65535
 
@@ -16,12 +15,13 @@ def _zero_direct_kernel(out_ptr, n_elements, BLOCK: tl.constexpr):
     mask = offsets < n_elements
     tl.multiple_of(offsets, 16)
     tl.max_contiguous(offsets, BLOCK)
-    z = tl.zeros((BLOCK,), dtype=tl.float32)
+    z = tl.zeros((BLOCK, ), dtype=tl.float32)
     tl.store(out_ptr + offsets, z, mask=mask)
 
 
 @triton.jit
-def _zero_persistent_kernel(out_ptr, n_elements, n_programs, BLOCK: tl.constexpr):
+def _zero_persistent_kernel(out_ptr, n_elements, n_programs,
+                            BLOCK: tl.constexpr):
     pid = tl.program_id(0)
     n_tiles = tl.cdiv(n_elements, BLOCK)
     for tile_id in range(pid, n_tiles, n_programs):
@@ -29,7 +29,7 @@ def _zero_persistent_kernel(out_ptr, n_elements, n_programs, BLOCK: tl.constexpr
         mask = offsets < n_elements
         tl.multiple_of(offsets, 16)
         tl.max_contiguous(offsets, BLOCK)
-        z = tl.zeros((BLOCK,), dtype=tl.float32)
+        z = tl.zeros((BLOCK, ), dtype=tl.float32)
         tl.store(out_ptr + offsets, z, mask=mask)
 
 
@@ -58,9 +58,12 @@ class ModelNew(nn.Module):
         n_tiles = triton.cdiv(n_elements, _BLOCK)
         if n_tiles > _MAX_PROGRAMS:
             n_programs = _MAX_PROGRAMS
-            _zero_persistent_kernel[(n_programs,)](out, n_elements, n_programs, BLOCK=_BLOCK)
+            _zero_persistent_kernel[(n_programs, )](out,
+                                                    n_elements,
+                                                    n_programs,
+                                                    BLOCK=_BLOCK)
         else:
-            _zero_direct_kernel[(n_tiles,)](out, n_elements, BLOCK=_BLOCK)
+            _zero_direct_kernel[(n_tiles, )](out, n_elements, BLOCK=_BLOCK)
         return out
 
     def forward(self, x):

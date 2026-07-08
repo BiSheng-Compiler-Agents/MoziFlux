@@ -20,12 +20,13 @@ def _fill_ones_direct(out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
     mask = offs < n_elements
     tl.multiple_of(offs, 16)
     tl.max_contiguous(offs, BLOCK_SIZE)
-    ones = tl.full((BLOCK_SIZE,), 1.0, tl.float32)
+    ones = tl.full((BLOCK_SIZE, ), 1.0, tl.float32)
     tl.store(out_ptr + offs, ones, mask=mask)
 
 
 @triton.jit
-def _fill_ones_persistent(out_ptr, n_elements, n_programs, BLOCK_SIZE: tl.constexpr):
+def _fill_ones_persistent(out_ptr, n_elements, n_programs,
+                          BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     n_tiles = tl.cdiv(n_elements, BLOCK_SIZE)
     for tile_id in range(pid, n_tiles, n_programs):
@@ -33,7 +34,7 @@ def _fill_ones_persistent(out_ptr, n_elements, n_programs, BLOCK_SIZE: tl.conste
         mask = offs < n_elements
         tl.multiple_of(offs, 16)
         tl.max_contiguous(offs, BLOCK_SIZE)
-        ones = tl.full((BLOCK_SIZE,), 1.0, tl.float32)
+        ones = tl.full((BLOCK_SIZE, ), 1.0, tl.float32)
         tl.store(out_ptr + offs, ones, mask=mask)
 
 
@@ -70,13 +71,18 @@ class ModelNew(nn.Module):
         block = _FILL_BLOCK_SMALL if n_elements <= _FILL_BLOCK_SMALL else _FILL_BLOCK_LARGE
         n_tiles = triton.cdiv(n_elements, block)
         if n_tiles > _MAX_PROGRAMS:
-            _fill_ones_persistent[(_MAX_PROGRAMS,)](
-                out, n_elements, _MAX_PROGRAMS, BLOCK_SIZE=block, num_warps=1, num_stages=2
-            )
+            _fill_ones_persistent[(_MAX_PROGRAMS, )](out,
+                                                     n_elements,
+                                                     _MAX_PROGRAMS,
+                                                     BLOCK_SIZE=block,
+                                                     num_warps=1,
+                                                     num_stages=2)
         else:
-            _fill_ones_direct[(n_tiles,)](
-                out, n_elements, BLOCK_SIZE=block, num_warps=1, num_stages=2
-            )
+            _fill_ones_direct[(n_tiles, )](out,
+                                           n_elements,
+                                           BLOCK_SIZE=block,
+                                           num_warps=1,
+                                           num_stages=2)
         return out
 
 

@@ -39,7 +39,10 @@ def _fused_scale_lrelu_gelu_nc_loop(
     for hw0 in tl.range(0, HW, BLOCK_HW, num_stages=2):
         hw = hw0 + offs
         mask = hw < HW
-        x = tl.load(x_ptr + base + hw, mask=mask, other=0.0, care_padding=False).to(tl.float32)
+        x = tl.load(x_ptr + base + hw,
+                    mask=mask,
+                    other=0.0,
+                    care_padding=False).to(tl.float32)
         v = x * scale
         v = tl.where(v >= 0.0, v, v * negative_slope)
         y = 0.5 * v * (1.0 + tl.erf(v * 0.7071067811865476))
@@ -68,7 +71,10 @@ def _fused_scale_lrelu_gelu_nc_persistent(
         for hw0 in tl.range(0, HW, BLOCK_HW, num_stages=2):
             hw = hw0 + offs
             mask = hw < HW
-            x = tl.load(x_ptr + base + hw, mask=mask, other=0.0, care_padding=False).to(tl.float32)
+            x = tl.load(x_ptr + base + hw,
+                        mask=mask,
+                        other=0.0,
+                        care_padding=False).to(tl.float32)
             v = x * scale
             v = tl.where(v >= 0.0, v, v * negative_slope)
             y = 0.5 * v * (1.0 + tl.erf(v * 0.7071067811865476))
@@ -98,7 +104,8 @@ class ModelNew(nn.Module):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
 
         x = self.conv(x).contiguous()
         N, C, H, W = x.shape
@@ -107,19 +114,37 @@ class ModelNew(nn.Module):
                 f"Multiplier must contain exactly one value per channel, got {self.multiplier.numel()} for C={C}"
             )
         out = torch.empty_like(x)
-        m = self.multiplier.reshape(-1).to(device=x.device, dtype=x.dtype).contiguous()
+        m = self.multiplier.reshape(-1).to(device=x.device,
+                                           dtype=x.dtype).contiguous()
         NC = N * C
         HW = H * W
         if NC <= _MAX_GRID:
-            _fused_scale_lrelu_gelu_nc_loop[(NC,)](
-                x, m, out, NC, HW, C, self.leaky_relu.negative_slope,
-                BLOCK_HW=_BLOCK_HW, num_warps=4, num_stages=2,
+            _fused_scale_lrelu_gelu_nc_loop[(NC, )](
+                x,
+                m,
+                out,
+                NC,
+                HW,
+                C,
+                self.leaky_relu.negative_slope,
+                BLOCK_HW=_BLOCK_HW,
+                num_warps=4,
+                num_stages=2,
             )
         else:
             n_programs = _MAX_GRID
-            _fused_scale_lrelu_gelu_nc_persistent[(n_programs,)](
-                x, m, out, NC, HW, C, n_programs, self.leaky_relu.negative_slope,
-                BLOCK_HW=_BLOCK_HW, num_warps=4, num_stages=2,
+            _fused_scale_lrelu_gelu_nc_persistent[(n_programs, )](
+                x,
+                m,
+                out,
+                NC,
+                HW,
+                C,
+                n_programs,
+                self.leaky_relu.negative_slope,
+                BLOCK_HW=_BLOCK_HW,
+                num_warps=4,
+                num_stages=2,
             )
         return out
 

@@ -1,7 +1,5 @@
 import argparse
 import importlib.util
-import math
-import os
 import sys
 import time
 from pathlib import Path
@@ -40,7 +38,12 @@ def _load(filename, key):
 
 
 class TorchRef(nn.Module):
-    def __init__(self, in_channels=64, out_channels=64, kernel_size=3, multiplier_shape=(64, 1, 1)):
+
+    def __init__(self,
+                 in_channels=64,
+                 out_channels=64,
+                 kernel_size=3,
+                 multiplier_shape=(64, 1, 1)):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
         self.multiplier = nn.Parameter(torch.randn(multiplier_shape))
@@ -55,8 +58,13 @@ class TorchRef(nn.Module):
 
 def _make_inputs(label, batch, channels, height, width, kernel_size):
     torch.manual_seed(123)
-    x = torch.rand(batch, channels, height, width, device="npu", dtype=torch.float32)
-    return (x,)
+    x = torch.rand(batch,
+                   channels,
+                   height,
+                   width,
+                   device="npu",
+                   dtype=torch.float32)
+    return (x, )
 
 
 def _model(key, shape):
@@ -69,7 +77,11 @@ def _model(key, shape):
     if key == "torch_ref":
         model = TorchRef(*init)
     else:
-        filename = {"baseline1": INPUT_FILE, "baseline2": BASE_FILE, "optimized": OPT_FILE}[key]
+        filename = {
+            "baseline1": INPUT_FILE,
+            "baseline2": BASE_FILE,
+            "optimized": OPT_FILE
+        }[key]
         mod = _load(filename, key)
         model = mod.ModelNew(*init)
     model = model.to(device="npu", dtype=torch.float32).eval()
@@ -115,12 +127,16 @@ def unit_test():
         label = shape[0]
         inputs = _make_inputs(*shape)
         ref = _run_torch_ref(inputs, shape)
-        for key, name in [("baseline1", "Baseline Triton1"), ("baseline2", "Baseline Triton2"), ("optimized", "Optimized Triton")]:
+        for key, name in [("baseline1", "Baseline Triton1"),
+                          ("baseline2", "Baseline Triton2"),
+                          ("optimized", "Optimized Triton")]:
             try:
                 out = _run_provider(key, inputs, shape)
                 diff = _max_diff(out, ref)
                 close = diff <= 1e-3
-                print(f"UNIT {label} {name} max_abs_diff={diff:.6g} close={close}")
+                print(
+                    f"UNIT {label} {name} max_abs_diff={diff:.6g} close={close}"
+                )
                 if key == "optimized" and not close:
                     ok = False
             except BaseException as e:
@@ -134,10 +150,14 @@ def unit_test():
                 if pout is not None:
                     diff = _max_diff(pout, ref)
                     close = diff <= 1e-3
-                    print(f"UNIT {label} Optimized Triton forced_persistent max_abs_diff={diff:.6g} close={close}")
+                    print(
+                        f"UNIT {label} Optimized Triton forced_persistent max_abs_diff={diff:.6g} close={close}"
+                    )
                     ok = ok and close
             except BaseException as e:
-                print(f"INFO {label} Optimized Triton forced_persistent unavailable {type(e).__name__}")
+                print(
+                    f"INFO {label} Optimized Triton forced_persistent unavailable {type(e).__name__}"
+                )
                 ok = False
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
@@ -158,11 +178,19 @@ def bench_one(provider, label):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     inputs = _make_inputs(*shape)
     if provider == "torch_ref":
-        fn = lambda: _run_torch_ref(inputs, shape)
+
+        def fn():
+            return _run_torch_ref(inputs, shape)
     else:
-        key = {"baseline1": "baseline1", "baseline2": "baseline2", "optimized": "optimized"}[provider]
+        key = {
+            "baseline1": "baseline1",
+            "baseline2": "baseline2",
+            "optimized": "optimized"
+        }[provider]
+
         def fn():
             return _run_provider(key, inputs, shape)
+
     try:
         ms = triton.testing.do_bench(fn, warmup=10, rep=30, return_mode="mean")
         return ms
@@ -170,7 +198,9 @@ def bench_one(provider, label):
         try:
             return _manual_bench(fn)
         except BaseException as e:
-            print(f"INFO bench {label} {provider} unavailable_or_preskipped {type(e).__name__}")
+            print(
+                f"INFO bench {label} {provider} unavailable_or_preskipped {type(e).__name__}"
+            )
             return float("inf")
 
 
@@ -180,13 +210,15 @@ def bench_one(provider, label):
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=["torch_ref", "baseline1", "baseline2", "optimized"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("blue", "-"), ("green", "-"), ("black", "--"), ("red", "-")],
         ylabel="ms",
         plot_name="l2_54_conv2d_multiply_leakyrelu_gelu",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     return bench_one(provider, label)
 
@@ -201,7 +233,9 @@ def main():
     if args.test:
         unit_test()
     if args.bench:
-        benchmark.run(print_data=True, show_plots=False, save_path=str(THIS_DIR))
+        benchmark.run(print_data=True,
+                      show_plots=False,
+                      save_path=str(THIS_DIR))
 
 
 if __name__ == "__main__":

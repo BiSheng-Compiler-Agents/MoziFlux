@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import math
 import pathlib
 import sys
 import time
@@ -26,7 +25,8 @@ def _load(fname, name):
 
 mods = {}
 load_errors = {}
-for key, fname in [("baseline1", INPUT_FILE), ("baseline2", BASE_FILE), ("optimized", OPT_FILE)]:
+for key, fname in [("baseline1", INPUT_FILE), ("baseline2", BASE_FILE),
+                   ("optimized", OPT_FILE)]:
     try:
         mods[key] = _load(fname, f"k_{key}_{fname.replace('.', '_')}")
     except Exception as exc:
@@ -69,7 +69,8 @@ def _model(key, shape):
         return _MODEL_CACHE[cache_key]
     mod = mods.get(key)
     if mod is None:
-        raise RuntimeError(f"module_unavailable_{key}_{load_errors.get(key, 'unknown')}")
+        raise RuntimeError(
+            f"module_unavailable_{key}_{load_errors.get(key, 'unknown')}")
     torch.manual_seed(0)
     model = mod.ModelNew(*_init_args(shape)).to(_device()).eval()
     _MODEL_CACHE[cache_key] = model
@@ -81,6 +82,7 @@ def _torch_ref_model(shape):
     label, B, IC, OC, H, W, K, subtract, pool_k = shape
     m = torch.nn.Conv2d(IC, OC, K).to(_device()).eval()
     return m
+
 
 _REF_CACHE = {}
 
@@ -114,7 +116,9 @@ def unit_test():
         x = _make_input(shape)
         ref = _run_torch_ref(x, shape)
         _sync()
-        for key, pretty in [("baseline1", "Baseline Triton1"), ("baseline2", "Baseline Triton2"), ("optimized", "Optimized Triton")]:
+        for key, pretty in [("baseline1", "Baseline Triton1"),
+                            ("baseline2", "Baseline Triton2"),
+                            ("optimized", "Optimized Triton")]:
             try:
                 out = _run_provider(key, x, shape)
                 _sync()
@@ -125,7 +129,9 @@ def unit_test():
                     ok = False
                     print(f"CHECK {pretty} {label} FAIL {type(exc).__name__}")
                 else:
-                    print(f"INFO {pretty} {label} unavailable_or_mismatch {type(exc).__name__}")
+                    print(
+                        f"INFO {pretty} {label} unavailable_or_mismatch {type(exc).__name__}"
+                    )
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
 
@@ -151,9 +157,15 @@ def _bench_one(provider, label):
         print(f"INFO bench_preskip {provider} {label} {type(exc).__name__}")
         return float("inf")
     try:
-        return triton.testing.do_bench(lambda: _run_provider(provider, x, shape), warmup=10, rep=30, return_mode="mean")
+        return triton.testing.do_bench(
+            lambda: _run_provider(provider, x, shape),
+            warmup=10,
+            rep=30,
+            return_mode="mean")
     except Exception:
-        return _manual_bench(lambda: _run_provider(provider, x, shape), warmup=5, rep=10)
+        return _manual_bench(lambda: _run_provider(provider, x, shape),
+                             warmup=5,
+                             rep=10)
 
 
 @triton.testing.perf_report(
@@ -162,13 +174,15 @@ def _bench_one(provider, label):
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=["torch", "baseline1", "baseline2", "optimized"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("black", "-"), ("blue", "-"), ("green", "-"), ("red", "-")],
         ylabel="ms",
         plot_name="conv2d_subtract_hswish_maxpool_mish",
         args={},
-    )
-)
+    ))
 def bench(label, provider):
     return _bench_one(provider, label)
 

@@ -212,8 +212,9 @@ class TestEpisodeCRUD:
     def test_restore_on_boot(self, tmp_path, monkeypatch):
         db_path = tmp_path / "boot_restored_episodes.db"
         dump_path = db_path.with_suffix(".sql")
-        dump_path.write_text((_PROJECT_DIR / "episodes.sql").read_text(encoding="utf-8"),
-                             encoding="utf-8")
+        dump_path.write_text(
+            (_PROJECT_DIR / "episodes.sql").read_text(encoding="utf-8"),
+            encoding="utf-8")
         monkeypatch.setenv("KERNEL_EPISODES_DB", str(db_path))
 
         _kernel_episodes._restore_on_boot()

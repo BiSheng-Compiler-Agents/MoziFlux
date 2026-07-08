@@ -7,9 +7,9 @@ import triton.language as tl
 
 @triton.jit
 def _add_bias_expand_kernel(
-    tmp_ptr,        # *fp32, contiguous [N, W]
-    bias_ptr,       # *fp32, contiguous [B, 1, 1]
-    y_ptr,          # *fp32, contiguous [N, B, 1, W]
+    tmp_ptr,  # *fp32, contiguous [N, W]
+    bias_ptr,  # *fp32, contiguous [B, 1, 1]
+    y_ptr,  # *fp32, contiguous [N, B, 1, W]
     N: tl.constexpr,
     BIAS_C: tl.constexpr,
     W: tl.constexpr,
@@ -30,10 +30,13 @@ def _add_bias_expand_kernel(
     mask_w = w_offsets < W
     mask_b = b_offsets < BIAS_C
 
-    vals = tl.load(tmp_ptr + pid_n * W + w_offsets, mask=mask_w, other=0.0).to(tl.float32)
-    bias = tl.load(bias_ptr + b_offsets * sbc, mask=mask_b, other=0.0).to(tl.float32)
+    vals = tl.load(tmp_ptr + pid_n * W + w_offsets, mask=mask_w,
+                   other=0.0).to(tl.float32)
+    bias = tl.load(bias_ptr + b_offsets * sbc, mask=mask_b,
+                   other=0.0).to(tl.float32)
     out = vals[None, :] + bias[:, None]
-    out_ptrs = y_ptr + pid_n * syn + b_offsets[:, None] * syc + w_offsets[None, :] * syw
+    out_ptrs = y_ptr + pid_n * syn + b_offsets[:, None] * syc + w_offsets[
+        None, :] * syw
     tl.store(out_ptrs, out, mask=mask_b[:, None] & mask_w[None, :])
 
 
@@ -41,19 +44,19 @@ class ModelNew(nn.Module):
     """ConvTranspose2d -> min over channel -> sum over height -> GELU -> add bias."""
 
     def __init__(
-        self,
-        in_channels=3,
-        out_channels=16,
-        kernel_size=3,
-        stride=2,
-        padding=1,
-        output_padding=1,
-        bias_shape=(16, 1, 1),
+            self,
+            in_channels=3,
+            out_channels=16,
+            kernel_size=3,
+            stride=2,
+            padding=1,
+            output_padding=1,
+            bias_shape=(16, 1, 1),
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose2d(
-            in_channels, out_channels, kernel_size, stride, padding, output_padding
-        )
+        self.conv_transpose = nn.ConvTranspose2d(in_channels, out_channels,
+                                                 kernel_size, stride, padding,
+                                                 output_padding)
         self.bias = nn.Parameter(torch.randn(bias_shape))
 
     def forward(self, x):
@@ -69,7 +72,9 @@ class ModelNew(nn.Module):
 
         N, _, _, W = gelu_vals.shape
         bias_c = self.bias.shape[0]
-        y = torch.empty((N, bias_c, 1, W), device=gelu_vals.device, dtype=gelu_vals.dtype)
+        y = torch.empty((N, bias_c, 1, W),
+                        device=gelu_vals.device,
+                        dtype=gelu_vals.dtype)
         tmp = gelu_vals.reshape(N, W).contiguous()
         b_c = self.bias.contiguous()
 

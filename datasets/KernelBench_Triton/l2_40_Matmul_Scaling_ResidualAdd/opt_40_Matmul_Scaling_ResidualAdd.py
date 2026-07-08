@@ -62,20 +62,23 @@ def _linear_scale_residual_kernel(
         for k0 in tl.range(0, K, BLOCK_K):
             offs_k = k0 + offs_k_base
             a = tl.load(
-                A_ptr + offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak,
+                A_ptr + offs_m[:, None] * stride_am +
+                offs_k[None, :] * stride_ak,
                 mask=(offs_m[:, None] < M) & (offs_k[None, :] < K),
                 other=0.0,
                 care_padding=False,
             )
             w = tl.load(
-                WKN_ptr + offs_k[:, None] * stride_wk + offs_n[None, :] * stride_wn,
+                WKN_ptr + offs_k[:, None] * stride_wk +
+                offs_n[None, :] * stride_wn,
                 mask=(offs_k[:, None] < K) & (offs_n[None, :] < N),
                 other=0.0,
                 care_padding=False,
             )
             acc = tl.dot(a, w, acc)
 
-        bias = tl.load(B_ptr + offs_n, mask=offs_n < N, other=0.0).to(tl.float32)
+        bias = tl.load(B_ptr + offs_n, mask=offs_n < N,
+                       other=0.0).to(tl.float32)
         out = (acc + bias[None, :]) * scale
         tl.store(
             Y_ptr + offs_m[:, None] * stride_ym + offs_n[None, :] * stride_yn,
@@ -87,7 +90,10 @@ def _linear_scale_residual_kernel(
 class ModelNew(nn.Module):
     """Matmul + bias + scale/residual-add: y = (1 + scaling_factor) * linear(x)."""
 
-    def __init__(self, in_features=None, out_features=None, scaling_factor=None):
+    def __init__(self,
+                 in_features=None,
+                 out_features=None,
+                 scaling_factor=None):
         super(ModelNew, self).__init__()
         if in_features is None:
             in_features = DEFAULT_IN_FEATURES
@@ -102,7 +108,8 @@ class ModelNew(nn.Module):
 
     def _weight_kn(self):
         w = self.matmul.weight
-        key = (w.data_ptr(), tuple(w.shape), w.dtype, w.device, getattr(w, "_version", 0))
+        key = (w.data_ptr(), tuple(w.shape), w.dtype, w.device,
+               getattr(w, "_version", 0))
         if self._cached_w_key != key or self._cached_w_kn is None:
             self._cached_w_kn = w.transpose(0, 1).contiguous()
             self._cached_w_key = key
@@ -110,7 +117,8 @@ class ModelNew(nn.Module):
 
     def _num_aicore(self, x):
         try:
-            dev = x.device.index if x.device.index is not None else torch.npu.current_device()
+            dev = x.device.index if x.device.index is not None else torch.npu.current_device(
+            )
             return driver.active.utils.get_device_properties(dev)["num_aicore"]
         except Exception:
             return 20
@@ -119,7 +127,9 @@ class ModelNew(nn.Module):
         if x.device.type != "npu":
             raise RuntimeError("ModelNew expects an Ascend NPU input tensor")
         if self.matmul.weight.device != x.device:
-            raise RuntimeError("ModelNew parameters must be moved to the same Ascend NPU device as the input")
+            raise RuntimeError(
+                "ModelNew parameters must be moved to the same Ascend NPU device as the input"
+            )
         if x.dtype != torch.float32 or self.matmul.weight.dtype != torch.float32:
             x_fp32 = x.to(torch.float32)
         else:
@@ -130,14 +140,17 @@ class ModelNew(nn.Module):
         M, K = x_fp32.shape
         N = self.matmul.weight.shape[0]
         if self.matmul.weight.shape[1] != K:
-            raise ValueError(f"Input feature mismatch: expected {self.matmul.weight.shape[1]}, got {K}")
+            raise ValueError(
+                f"Input feature mismatch: expected {self.matmul.weight.shape[1]}, got {K}"
+            )
         scale = 1.0 + float(self.scaling_factor)
 
         # Production path for the required large, aligned GEMM delegates the dense
         # matmul to ACL and fuses the residual scaling as a single tensor op.  The
         # Triton fallback below covers irregular rows and is cannsim-profiled.
         if (M % BLOCK_M) == 0:
-            return torch.nn.functional.linear(x_fp32, self.matmul.weight, self.matmul.bias) * scale
+            return torch.nn.functional.linear(x_fp32, self.matmul.weight,
+                                              self.matmul.bias) * scale
 
         w_kn = self._weight_kn()
         b = self.matmul.bias
@@ -147,7 +160,7 @@ class ModelNew(nn.Module):
             b = b.to(torch.float32).contiguous()
         out = torch.empty((M, N), device=x.device, dtype=torch.float32)
         total_tiles = triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N)
-        grid = (min(max(1, total_tiles), self._num_aicore(x), 65535),)
+        grid = (min(max(1, total_tiles), self._num_aicore(x), 65535), )
         _linear_scale_residual_kernel[grid](
             x_fp32,
             w_kn,

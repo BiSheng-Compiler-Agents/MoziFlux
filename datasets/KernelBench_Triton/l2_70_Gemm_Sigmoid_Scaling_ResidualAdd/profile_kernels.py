@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import math
 import sys
 import time
 from pathlib import Path
@@ -35,7 +34,8 @@ _FORCE_OPT_PERSISTENT = False
 def _load(filename, key):
     if key in _MOD_CACHE:
         return _MOD_CACHE[key]
-    spec = importlib.util.spec_from_file_location(f"k_l2_70_{key}", ROOT / filename)
+    spec = importlib.util.spec_from_file_location(f"k_l2_70_{key}",
+                                                  ROOT / filename)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
@@ -49,11 +49,17 @@ def _get_device():
 
 def _make_inputs(label, batch, input_size, hidden_size, dtype=torch.float32):
     torch.manual_seed(123)
-    return (torch.rand((batch, input_size), device=_get_device(), dtype=dtype),)
+    return (torch.rand((batch, input_size), device=_get_device(),
+                       dtype=dtype), )
 
 
-def _model(key, input_size, hidden_size, scaling_factor=2.0, dtype=torch.float32):
-    cache_key = (key, input_size, hidden_size, scaling_factor, str(dtype), _FORCE_OPT_PERSISTENT)
+def _model(key,
+           input_size,
+           hidden_size,
+           scaling_factor=2.0,
+           dtype=torch.float32):
+    cache_key = (key, input_size, hidden_size, scaling_factor, str(dtype),
+                 _FORCE_OPT_PERSISTENT)
     if cache_key in _MODEL_CACHE:
         return _MODEL_CACHE[cache_key]
     if key == "baseline2":
@@ -61,7 +67,8 @@ def _model(key, input_size, hidden_size, scaling_factor=2.0, dtype=torch.float32
     filename = INPUT_FILE if key == "baseline1" else OPT_FILE
     mod = _load(filename, key)
     torch.manual_seed(0)
-    model = mod.ModelNew(input_size, hidden_size, scaling_factor).to(device=_get_device(), dtype=dtype)
+    model = mod.ModelNew(input_size, hidden_size,
+                         scaling_factor).to(device=_get_device(), dtype=dtype)
     model.eval()
     if key == "opt" and _FORCE_OPT_PERSISTENT and hasattr(mod, "_MAX_GRID"):
         mod._MAX_GRID = 1
@@ -99,36 +106,47 @@ def unit_test():
         for key in _PROVIDERS[1:]:
             disp = _DISPLAY[key]
             if key == "baseline2":
-                print(f"TEST {disp} {label}: SKIP_UNAVAILABLE sandbox_base_read_forbidden max_abs=inf")
+                print(
+                    f"TEST {disp} {label}: SKIP_UNAVAILABLE sandbox_base_read_forbidden max_abs=inf"
+                )
                 continue
             try:
                 out = _run_provider(key, x, input_size, hidden_size)
                 _sync()
                 diff = _max_abs(out, ref)
                 passed = diff <= 1e-3
-                print(f"TEST {disp} {label}: {'PASS' if passed else 'FAIL'} max_abs={diff:.6g}")
+                print(
+                    f"TEST {disp} {label}: {'PASS' if passed else 'FAIL'} max_abs={diff:.6g}"
+                )
                 if key == "opt" and not passed:
                     ok = False
             except Exception as e:
                 safe = type(e).__name__
-                print(f"TEST {disp} {label}: {'FAIL' if key == 'opt' else 'SKIP_UNAVAILABLE'} {safe} max_abs=inf")
+                print(
+                    f"TEST {disp} {label}: {'FAIL' if key == 'opt' else 'SKIP_UNAVAILABLE'} {safe} max_abs=inf"
+                )
                 if key == "opt":
                     ok = False
     global _FORCE_OPT_PERSISTENT
     try:
         _FORCE_OPT_PERSISTENT = True
         _MODEL_CACHE.clear()
-        label, batch, input_size, hidden_size = ("forced_persistent", 4, 128, 128)
+        label, batch, input_size, hidden_size = ("forced_persistent", 4, 128,
+                                                 128)
         x, = _make_inputs(label, batch, input_size, hidden_size)
         ref = _run_torch_ref(x, input_size, hidden_size)
         out = _run_provider("opt", x, input_size, hidden_size)
         _sync()
         diff = _max_abs(out, ref)
         passed = diff <= 1e-3
-        print(f"TEST Optimized Triton {label}: {'PASS' if passed else 'FAIL'} max_abs={diff:.6g}")
+        print(
+            f"TEST Optimized Triton {label}: {'PASS' if passed else 'FAIL'} max_abs={diff:.6g}"
+        )
         ok = ok and passed
     except Exception as e:
-        print(f"TEST Optimized Triton forced_persistent: FAIL {type(e).__name__} max_abs=inf")
+        print(
+            f"TEST Optimized Triton forced_persistent: FAIL {type(e).__name__} max_abs=inf"
+        )
         ok = False
     finally:
         opt = _MOD_CACHE.get("opt")
@@ -162,20 +180,26 @@ def _bench_once(fn, warmup=10, rep=30):
         ylabel="latency_ms",
         plot_name="l2_70_gemm_sigmoid_scaling_residualadd",
         args={},
-    )
-)
+    ))
 def bench(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     _, batch, input_size, hidden_size = shape
     if provider == "baseline2":
-        print(f"INFO benchmark_preskip {_DISPLAY[provider]} {label}: sandbox_base_read_forbidden")
+        print(
+            f"INFO benchmark_preskip {_DISPLAY[provider]} {label}: sandbox_base_read_forbidden"
+        )
         return float("inf")
     try:
         x, = _make_inputs(label, batch, input_size, hidden_size)
-        fn = lambda: _run_provider(provider, x, input_size, hidden_size)
+
+        def fn():
+            return _run_provider(provider, x, input_size, hidden_size)
+
         return _bench_once(fn)
     except Exception as e:
-        print(f"INFO benchmark_unavailable {_DISPLAY[provider]} {label}: {type(e).__name__}")
+        print(
+            f"INFO benchmark_unavailable {_DISPLAY[provider]} {label}: {type(e).__name__}"
+        )
         return float("inf")
 
 
@@ -189,7 +213,9 @@ def main():
     if args.test:
         unit_test()
     if args.bench:
-        bench.run(print_data=True, show_plots=False, save_path=str(ROOT / "profile_plots"))
+        bench.run(print_data=True,
+                  show_plots=False,
+                  save_path=str(ROOT / "profile_plots"))
 
 
 if __name__ == "__main__":

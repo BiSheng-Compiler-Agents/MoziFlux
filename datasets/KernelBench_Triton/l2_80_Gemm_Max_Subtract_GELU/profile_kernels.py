@@ -101,15 +101,23 @@ def _bench_one(provider, label):
     row = next(r for r in _BENCH_SHAPES if r[0] == label)
     _, batch, in_features, out_features, max_dim = row
     if provider == "baseline2":
-        print(f"INFO benchmark Baseline Triton2 {label}: unavailable_reference_sandbox -> inf")
+        print(
+            f"INFO benchmark Baseline Triton2 {label}: unavailable_reference_sandbox -> inf"
+        )
         return float("inf")
     x = _make_inputs(batch, in_features)
+
     def fn():
         with torch.no_grad():
-            return _run_provider(provider, x, in_features, out_features, max_dim)
+            return _run_provider(provider, x, in_features, out_features,
+                                 max_dim)
+
     try:
         if hasattr(triton.testing, "do_bench"):
-            return triton.testing.do_bench(fn, warmup=10, rep=50, return_mode="mean")
+            return triton.testing.do_bench(fn,
+                                           warmup=10,
+                                           rep=50,
+                                           return_mode="mean")
         return _time_call(fn)
     except Exception as e:
         print(f"INFO benchmark {provider} {label}: {type(e).__name__} -> inf")
@@ -122,13 +130,15 @@ def _bench_one(provider, label):
         x_vals=[r[0] for r in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=["torch", "baseline1", "baseline2", "optimized"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("blue", "-"), ("red", "-"), ("black", "--"), ("green", "-")],
         ylabel="ms",
         plot_name="l2_80_gemm_max_subtract_gelu",
         args={},
-    )
-)
+    ))
 def bench(label, provider):
     return _bench_one(provider, label)
 
@@ -145,17 +155,25 @@ def unit_test():
             ("optimized", "Optimized Triton"),
         ]:
             if provider == "baseline2":
-                print(f"TEST {display} {label}: SKIP_REFERENCE_SANDBOX max_abs=inf")
+                print(
+                    f"TEST {display} {label}: SKIP_REFERENCE_SANDBOX max_abs=inf"
+                )
                 continue
             try:
                 with torch.no_grad():
-                    out = _run_provider(provider, x, in_features, out_features, max_dim)
-                max_abs = (out - ref).abs().max().item() if out.numel() else 0.0
+                    out = _run_provider(provider, x, in_features, out_features,
+                                        max_dim)
+                max_abs = (out -
+                           ref).abs().max().item() if out.numel() else 0.0
                 passed = out.shape == ref.shape and max_abs <= 1e-3
-                print(f"TEST {display} {label}: {'PASS' if passed else 'FAIL'} max_abs={max_abs:.6g}")
+                print(
+                    f"TEST {display} {label}: {'PASS' if passed else 'FAIL'} max_abs={max_abs:.6g}"
+                )
                 ok = ok and passed
             except Exception as e:
-                print(f"TEST {display} {label}: FAIL {type(e).__name__} max_abs=inf")
+                print(
+                    f"TEST {display} {label}: FAIL {type(e).__name__} max_abs=inf"
+                )
                 if provider == "optimized":
                     ok = False
         if label == "small":
@@ -163,15 +181,21 @@ def unit_test():
             old = opt._MAX_PROGRAMS
             try:
                 opt._MAX_PROGRAMS = 1
-                _MODEL_CACHE.pop(("optimized", in_features, out_features, max_dim), None)
-                out = _run_provider("optimized", x, in_features, out_features, max_dim)
-                max_abs = (out - ref).abs().max().item() if out.numel() else 0.0
+                _MODEL_CACHE.pop(
+                    ("optimized", in_features, out_features, max_dim), None)
+                out = _run_provider("optimized", x, in_features, out_features,
+                                    max_dim)
+                max_abs = (out -
+                           ref).abs().max().item() if out.numel() else 0.0
                 passed = out.shape == ref.shape and max_abs <= 1e-3
-                print(f"TEST Optimized Triton forced_persistent_{label}: {'PASS' if passed else 'FAIL'} max_abs={max_abs:.6g}")
+                print(
+                    f"TEST Optimized Triton forced_persistent_{label}: {'PASS' if passed else 'FAIL'} max_abs={max_abs:.6g}"
+                )
                 ok = ok and passed
             finally:
                 opt._MAX_PROGRAMS = old
-                _MODEL_CACHE.pop(("optimized", in_features, out_features, max_dim), None)
+                _MODEL_CACHE.pop(
+                    ("optimized", in_features, out_features, max_dim), None)
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
 

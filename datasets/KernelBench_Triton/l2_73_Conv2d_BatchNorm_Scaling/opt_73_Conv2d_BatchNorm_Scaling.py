@@ -16,7 +16,8 @@ _SCALE_BLOCK = 4096
 
 
 @triton.jit
-def _scale_direct_kernel(x_ptr, y_ptr, scale, n_elements, BLOCK_SIZE: tl.constexpr):
+def _scale_direct_kernel(x_ptr, y_ptr, scale, n_elements,
+                         BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     mask = offs < n_elements
@@ -26,7 +27,8 @@ def _scale_direct_kernel(x_ptr, y_ptr, scale, n_elements, BLOCK_SIZE: tl.constex
 
 
 @triton.jit
-def _scale_persistent_kernel(x_ptr, y_ptr, scale, n_elements, n_programs, BLOCK_SIZE: tl.constexpr):
+def _scale_persistent_kernel(x_ptr, y_ptr, scale, n_elements, n_programs,
+                             BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     n_tiles = tl.cdiv(n_elements, BLOCK_SIZE)
     for tile_id in range(pid, n_tiles, n_programs):
@@ -37,7 +39,9 @@ def _scale_persistent_kernel(x_ptr, y_ptr, scale, n_elements, n_programs, BLOCK_
         tl.store(y_ptr + offs, y, mask=mask)
 
 
-def _scale_triton(x: torch.Tensor, scale: float, force_persistent: bool = False) -> torch.Tensor:
+def _scale_triton(x: torch.Tensor,
+                  scale: float,
+                  force_persistent: bool = False) -> torch.Tensor:
     if x.device.type != "npu":
         raise RuntimeError("_scale_triton expects an Ascend NPU tensor input")
     x_contig = x.contiguous()
@@ -47,10 +51,23 @@ def _scale_triton(x: torch.Tensor, scale: float, force_persistent: bool = False)
         return y
     n_tiles = triton.cdiv(n_elements, _SCALE_BLOCK)
     if force_persistent or n_tiles > _MAX_PROGRAMS:
-        grid = (min(n_tiles, _MAX_PROGRAMS),)
-        _scale_persistent_kernel[grid](x_contig, y, float(scale), n_elements, grid[0], BLOCK_SIZE=_SCALE_BLOCK, num_warps=4, num_stages=2)
+        grid = (min(n_tiles, _MAX_PROGRAMS), )
+        _scale_persistent_kernel[grid](x_contig,
+                                       y,
+                                       float(scale),
+                                       n_elements,
+                                       grid[0],
+                                       BLOCK_SIZE=_SCALE_BLOCK,
+                                       num_warps=4,
+                                       num_stages=2)
     else:
-        _scale_direct_kernel[(n_tiles,)](x_contig, y, float(scale), n_elements, BLOCK_SIZE=_SCALE_BLOCK, num_warps=4, num_stages=2)
+        _scale_direct_kernel[(n_tiles, )](x_contig,
+                                          y,
+                                          float(scale),
+                                          n_elements,
+                                          BLOCK_SIZE=_SCALE_BLOCK,
+                                          num_warps=4,
+                                          num_stages=2)
     return y
 
 
@@ -62,7 +79,11 @@ class ModelNew(nn.Module):
     Conv+BN+scale folded weights/bias until any source tensor version changes.
     """
 
-    def __init__(self, in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, scaling_factor=scaling_factor):
+    def __init__(self,
+                 in_channels=in_channels,
+                 out_channels=out_channels,
+                 kernel_size=kernel_size,
+                 scaling_factor=scaling_factor):
         super(ModelNew, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
         self.bn = nn.BatchNorm2d(out_channels)
@@ -108,7 +129,8 @@ class ModelNew(nn.Module):
             beta_t = beta.to(device=W.device, dtype=dtype)
         mean = self.bn.running_mean.to(device=W.device, dtype=dtype)
         var = self.bn.running_var.to(device=W.device, dtype=dtype)
-        conv_bias = B if B is not None else torch.zeros(C, device=W.device, dtype=dtype)
+        conv_bias = B if B is not None else torch.zeros(
+            C, device=W.device, dtype=dtype)
         inv_std = torch.rsqrt(var + self.bn.eps)
         g = gamma_t * float(self.scaling_factor) * inv_std
         b = beta_t * float(self.scaling_factor) + (conv_bias - mean) * g
@@ -123,8 +145,8 @@ class ModelNew(nn.Module):
         if torch.is_grad_enabled():
             if self.bn.affine:
                 return self.bn.weight * s, self.bn.bias * s
-            return (torch.full((C,), s, device=x.device, dtype=x.dtype),
-                    torch.zeros((C,), device=x.device, dtype=x.dtype))
+            return (torch.full((C, ), s, device=x.device, dtype=x.dtype),
+                    torch.zeros((C, ), device=x.device, dtype=x.dtype))
         key = (
             self._tensor_key(self.bn.weight if self.bn.affine else None),
             self._tensor_key(self.bn.bias if self.bn.affine else None),
@@ -138,8 +160,8 @@ class ModelNew(nn.Module):
         if self.bn.affine:
             value = (self.bn.weight * s, self.bn.bias * s)
         else:
-            value = (torch.full((C,), s, device=x.device, dtype=x.dtype),
-                     torch.zeros((C,), device=x.device, dtype=x.dtype))
+            value = (torch.full((C, ), s, device=x.device, dtype=x.dtype),
+                     torch.zeros((C, ), device=x.device, dtype=x.dtype))
         self._bn_affine_cache_key = key
         self._bn_affine_cache_value = value
         return value
@@ -147,7 +169,13 @@ class ModelNew(nn.Module):
     def forward(self, x):
         if (not self.bn.training) and self.bn.track_running_stats:
             W_fused, b_fused = self._get_eval_fused_weight_bias()
-            return F.conv2d(x, W_fused, b_fused, stride=self.conv.stride, padding=self.conv.padding, dilation=self.conv.dilation, groups=self.conv.groups)
+            return F.conv2d(x,
+                            W_fused,
+                            b_fused,
+                            stride=self.conv.stride,
+                            padding=self.conv.padding,
+                            dilation=self.conv.dilation,
+                            groups=self.conv.groups)
 
         x = self.conv(x)
         training_flag = self.bn.training or not self.bn.track_running_stats
@@ -155,7 +183,14 @@ class ModelNew(nn.Module):
         running_var = self.bn.running_var if self.bn.track_running_stats else None
         weight, bias = self._get_scaled_bn_affine(x)
         momentum = self.bn.momentum if self.bn.momentum is not None else 0.0
-        return F.batch_norm(x, running_mean=running_mean, running_var=running_var, weight=weight, bias=bias, training=training_flag, momentum=momentum, eps=self.bn.eps)
+        return F.batch_norm(x,
+                            running_mean=running_mean,
+                            running_var=running_var,
+                            weight=weight,
+                            bias=bias,
+                            training=training_flag,
+                            momentum=momentum,
+                            eps=self.bn.eps)
 
 
 def get_inputs():

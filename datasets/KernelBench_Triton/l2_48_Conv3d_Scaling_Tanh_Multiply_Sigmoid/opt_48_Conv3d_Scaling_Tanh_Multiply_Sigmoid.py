@@ -24,12 +24,12 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 @triton.jit
 def _fused_pointwise_ncdhw_direct_kernel(
-    x_ptr,       # *f32 contiguous NCDHW conv output, in-place
-    sf_ptr,      # *f32, shape [C]
-    bias_ptr,    # *f32, shape [C]
-    out_ptr,     # *f32
+    x_ptr,  # *f32 contiguous NCDHW conv output, in-place
+    sf_ptr,  # *f32, shape [C]
+    bias_ptr,  # *f32, shape [C]
+    out_ptr,  # *f32
     total_segments: tl.constexpr,  # N*C
-    DHW: tl.constexpr,             # D*H*W
+    DHW: tl.constexpr,  # D*H*W
     tiles_per_segment: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
 ):
@@ -165,6 +165,7 @@ def _fused_pointwise_ncdhw_persistent_generic_kernel(
         x = 1.0 / (1.0 + tl.exp(-x))
         tl.store(out_ptr + base, x, mask=mask)
 
+
 class ModelNew(nn.Module):
     """
     Model that performs a 3D convolution, scales the output, applies tanh,
@@ -182,7 +183,8 @@ class ModelNew(nn.Module):
         super(ModelNew, self).__init__()
         self.conv = nn.Conv3d(in_channels, out_channels, kernel_size)
         self.scaling_factor_value = scaling_factor
-        self.scaling_factor = nn.Parameter(torch.full(bias_shape, float(scaling_factor)))
+        self.scaling_factor = nn.Parameter(
+            torch.full(bias_shape, float(scaling_factor)))
         self.bias = nn.Parameter(torch.randn(bias_shape))
 
     def forward(self, x):
@@ -199,7 +201,7 @@ class ModelNew(nn.Module):
         total_segments = x.numel() // DHW
         tiles_per_segment = triton.cdiv(DHW, _BLOCK_SIZE)
         total_tiles = total_segments * tiles_per_segment
-        grid = (min(total_tiles, _MAX_GRID),)
+        grid = (min(total_tiles, _MAX_GRID), )
 
         sf = self.scaling_factor.reshape(C).contiguous()
         bs = self.bias.reshape(C).contiguous()
@@ -208,23 +210,53 @@ class ModelNew(nn.Module):
 
         if C == 16 and not use_persistent:
             _fused_pointwise_ncdhw_direct_kernel[grid](
-                x, sf, bs, x, total_segments, DHW, tiles_per_segment,
-                BLOCK_SIZE=_BLOCK_SIZE, num_warps=8,
+                x,
+                sf,
+                bs,
+                x,
+                total_segments,
+                DHW,
+                tiles_per_segment,
+                BLOCK_SIZE=_BLOCK_SIZE,
+                num_warps=8,
             )
         elif C == 16:
             _fused_pointwise_ncdhw_persistent_kernel[grid](
-                x, sf, bs, x, total_segments, DHW, tiles_per_segment,
-                BLOCK_SIZE=_BLOCK_SIZE, num_warps=8,
+                x,
+                sf,
+                bs,
+                x,
+                total_segments,
+                DHW,
+                tiles_per_segment,
+                BLOCK_SIZE=_BLOCK_SIZE,
+                num_warps=8,
             )
         elif not use_persistent:
             _fused_pointwise_ncdhw_direct_generic_kernel[grid](
-                x, sf, bs, x, C, total_segments, DHW, tiles_per_segment,
-                BLOCK_SIZE=_BLOCK_SIZE, num_warps=8,
+                x,
+                sf,
+                bs,
+                x,
+                C,
+                total_segments,
+                DHW,
+                tiles_per_segment,
+                BLOCK_SIZE=_BLOCK_SIZE,
+                num_warps=8,
             )
         else:
             _fused_pointwise_ncdhw_persistent_generic_kernel[grid](
-                x, sf, bs, x, C, total_segments, DHW, tiles_per_segment,
-                BLOCK_SIZE=_BLOCK_SIZE, num_warps=8,
+                x,
+                sf,
+                bs,
+                x,
+                C,
+                total_segments,
+                DHW,
+                tiles_per_segment,
+                BLOCK_SIZE=_BLOCK_SIZE,
+                num_warps=8,
             )
         return x
 

@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import math
 import sys
 import time
 from pathlib import Path
@@ -62,7 +61,7 @@ def _model(key):
 
 def _make_inputs(label, n, c, d, h, w):
     torch.manual_seed(123)
-    return (torch.rand(n, c, d, h, w, device="npu"),)
+    return (torch.rand(n, c, d, h, w, device="npu"), )
 
 
 def _run_torch_ref(*args):
@@ -99,22 +98,29 @@ def unit_test():
                 ("optimized", "Optimized Triton"),
             ]:
                 if key == "baseline2":
-                    print(f"TEST {display} {label}: SKIP_UNAVAILABLE sandboxed_base_file_not_read max_abs=inf")
+                    print(
+                        f"TEST {display} {label}: SKIP_UNAVAILABLE sandboxed_base_file_not_read max_abs=inf"
+                    )
                     continue
                 try:
                     out = _run_provider(key, *args)
                     diff = _max_abs(out, ref)
                     passed = diff <= 1e-3
-                    print(f"TEST {display} {label}: {'PASS' if passed else 'FAIL'} max_abs={diff:.6g}")
+                    print(
+                        f"TEST {display} {label}: {'PASS' if passed else 'FAIL'} max_abs={diff:.6g}"
+                    )
                     if key == "optimized" and not passed:
                         ok = False
                 except Exception as e:
                     tag = type(e).__name__
                     if key == "optimized":
-                        print(f"TEST {display} {label}: FAIL {tag} max_abs=inf")
+                        print(
+                            f"TEST {display} {label}: FAIL {tag} max_abs=inf")
                         ok = False
                     else:
-                        print(f"TEST {display} {label}: SKIP_UNAVAILABLE {tag} max_abs=inf")
+                        print(
+                            f"TEST {display} {label}: SKIP_UNAVAILABLE {tag} max_abs=inf"
+                        )
 
         # Force both hidden Triton fallback paths while production uses ACL dispatch.
         try:
@@ -128,7 +134,9 @@ def unit_test():
             out = _run_provider("optimized", *args)
             diff = _max_abs(out, ref)
             passed = diff <= 1e-3
-            print(f"TEST Optimized Triton forced_direct_fallback: {'PASS' if passed else 'FAIL'} max_abs={diff:.6g}")
+            print(
+                f"TEST Optimized Triton forced_direct_fallback: {'PASS' if passed else 'FAIL'} max_abs={diff:.6g}"
+            )
             ok = ok and passed
 
             opt._MAX_GRID = 1
@@ -138,13 +146,17 @@ def unit_test():
             out = _run_provider("optimized", *args)
             diff = _max_abs(out, ref)
             passed = diff <= 1e-3
-            print(f"TEST Optimized Triton forced_persistent_fallback: {'PASS' if passed else 'FAIL'} max_abs={diff:.6g}")
+            print(
+                f"TEST Optimized Triton forced_persistent_fallback: {'PASS' if passed else 'FAIL'} max_abs={diff:.6g}"
+            )
             ok = ok and passed
             opt._MAX_GRID = old_grid
             opt._USE_ACL_DISPATCH = old_acl
             _MODELS.pop("optimized", None)
         except Exception as e:
-            print(f"TEST Optimized Triton forced_fallbacks: FAIL {type(e).__name__} max_abs=inf")
+            print(
+                f"TEST Optimized Triton forced_fallbacks: FAIL {type(e).__name__} max_abs=inf"
+            )
             ok = False
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
@@ -152,7 +164,10 @@ def unit_test():
 
 def _bench_ms(fn, warmup=3, rep=10):
     try:
-        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=warmup,
+                                       rep=rep,
+                                       return_mode="mean")
     except Exception:
         for _ in range(warmup):
             fn()
@@ -170,20 +185,24 @@ def _bench_ms(fn, warmup=3, rep=10):
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=["torch_ref", "baseline1", "baseline2", "optimized"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("blue", "-"), ("green", "-"), ("black", "--"), ("red", "-")],
         ylabel="ms",
         plot_name="l2_78_ConvTranspose3d_Max_Max_Sum",
         args={},
-    )
-)
+    ))
 def bench(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     args = _make_inputs(*shape)
     if provider == "baseline2":
         return float("inf")
     if provider == "baseline1" and label == "default_direct":
-        print(f"INFO comparison_provider_preskipped Baseline Triton1 {label} avoid_slow_autotune")
+        print(
+            f"INFO comparison_provider_preskipped Baseline Triton1 {label} avoid_slow_autotune"
+        )
         return float("inf")
     try:
         with torch.no_grad():
@@ -191,7 +210,9 @@ def bench(label, provider):
             torch.npu.synchronize()
             return _bench_ms(lambda: _run_provider(provider, *args))
     except Exception as e:
-        print(f"INFO benchmark_unavailable {provider} {label} {type(e).__name__}")
+        print(
+            f"INFO benchmark_unavailable {provider} {label} {type(e).__name__}"
+        )
         return float("inf")
 
 
@@ -205,7 +226,9 @@ def main():
     if args.test:
         unit_test()
     if args.bench:
-        bench.run(print_data=True, show_plots=False, save_path=str(ROOT / "profile_plots"))
+        bench.run(print_data=True,
+                  show_plots=False,
+                  save_path=str(ROOT / "profile_plots"))
 
 
 if __name__ == "__main__":

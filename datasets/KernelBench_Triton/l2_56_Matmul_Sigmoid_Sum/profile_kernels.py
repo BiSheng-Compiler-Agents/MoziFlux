@@ -43,35 +43,40 @@ def _load(path: Path, key: str):
     return mod
 
 
-def _model(provider: str, I: int, H: int):
-    key = (provider, I, H)
+def _model(provider: str, IN_FEATURES: int, H: int):
+    key = (provider, IN_FEATURES, H)
     if key in _MODEL_CACHE:
         return _MODEL_CACHE[key]
     torch.manual_seed(0)
     if provider == "torch":
-        model = nn.Linear(I, H).npu().eval()
+        model = nn.Linear(IN_FEATURES, H).npu().eval()
     else:
-        path = {"baseline1": INPUT_FILE, "baseline2": BASE_FILE, "opt": OPT_FILE}[provider]
+        path = {
+            "baseline1": INPUT_FILE,
+            "baseline2": BASE_FILE,
+            "opt": OPT_FILE
+        }[provider]
         mod = _load(path, provider)
-        model = mod.ModelNew(I, H).npu().eval()
+        model = mod.ModelNew(IN_FEATURES, H).npu().eval()
     _MODEL_CACHE[key] = model
     return model
 
 
-def _make_inputs(B: int, I: int):
+def _make_inputs(B: int, IN_FEATURES: int):
     torch.manual_seed(123)
-    return torch.rand((B, I), device="npu", dtype=torch.float32)
+    return torch.rand((B, IN_FEATURES), device="npu", dtype=torch.float32)
 
 
-def _run_torch_ref(x, I: int, H: int):
-    model = _model("torch", I, H)
-    return torch.sigmoid(F.linear(x, model.weight, model.bias)).sum(dim=1, keepdim=True)
+def _run_torch_ref(x, IN_FEATURES: int, H: int):
+    model = _model("torch", IN_FEATURES, H)
+    return torch.sigmoid(F.linear(x, model.weight,
+                                  model.bias)).sum(dim=1, keepdim=True)
 
 
-def _run_provider(provider: str, x, I: int, H: int):
+def _run_provider(provider: str, x, IN_FEATURES: int, H: int):
     if provider == "torch":
-        return _run_torch_ref(x, I, H)
-    model = _model(provider, I, H)
+        return _run_torch_ref(x, IN_FEATURES, H)
+    model = _model(provider, IN_FEATURES, H)
     return model(x)
 
 
@@ -82,18 +87,20 @@ def _max_abs(a, b):
 def unit_test():
     ok = True
     providers = ["baseline1", "baseline2", "opt"]
-    for label, B, I, H in _BENCH_SHAPES:
-        x = _make_inputs(B, I)
-        ref = _run_torch_ref(x, I, H)
+    for label, B, IN_FEATURES, H in _BENCH_SHAPES:
+        x = _make_inputs(B, IN_FEATURES)
+        ref = _run_torch_ref(x, IN_FEATURES, H)
         _sync()
         for provider in providers:
             try:
-                y = _run_provider(provider, x, I, H)
+                y = _run_provider(provider, x, IN_FEATURES, H)
                 _sync()
                 diff = _max_abs(y.float(), ref.float())
                 tol = 5e-2 if provider == "opt" else 1e-2
                 if not math.isfinite(diff) or diff > tol:
-                    print(f"UNIT {provider} {label} MISMATCH max_abs={diff:.6g} tol={tol}")
+                    print(
+                        f"UNIT {provider} {label} MISMATCH max_abs={diff:.6g} tol={tol}"
+                    )
                     if provider == "opt":
                         ok = False
                 else:
@@ -101,7 +108,9 @@ def unit_test():
             except BaseException as exc:
                 safe = type(exc).__name__
                 if provider == "baseline2":
-                    print(f"INFO baseline2 {label} unavailable_or_preskipped {safe}")
+                    print(
+                        f"INFO baseline2 {label} unavailable_or_preskipped {safe}"
+                    )
                 else:
                     print(f"UNIT {provider} {label} EXCEPTION {safe}")
                     if provider == "opt":
@@ -131,32 +140,38 @@ def _bench_once(fn, warmup=5, rep=20):
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=["torch", "baseline1", "baseline2", "opt"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("blue", "-"), ("red", "-"), ("black", "--"), ("green", "-")],
         ylabel="ms",
         plot_name="matmul_sigmoid_sum_latency",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
-    _, B, I, H = shape
+    _, B, IN_FEATURES, H = shape
     if provider == "baseline2" and not BASE_FILE.exists():
         print(f"INFO baseline2 {label} missing")
         return float("inf")
     try:
-        x = _make_inputs(B, I)
+        x = _make_inputs(B, IN_FEATURES)
         # Compile/warm model outside measured lambda when possible.
-        _run_provider(provider, x, I, H)
+        _run_provider(provider, x, IN_FEATURES, H)
         _sync()
-        return _bench_once(lambda: _run_provider(provider, x, I, H))
+        return _bench_once(lambda: _run_provider(provider, x, IN_FEATURES, H))
     except BaseException as exc:
-        print(f"INFO {provider} {label} benchmark_unavailable {type(exc).__name__}")
+        print(
+            f"INFO {provider} {label} benchmark_unavailable {type(exc).__name__}"
+        )
         return float("inf")
 
 
 def run_bench():
-    benchmark.run(print_data=True, show_plots=False, save_path=str(ROOT / "remote_results"))
+    benchmark.run(print_data=True,
+                  show_plots=False,
+                  save_path=str(ROOT / "remote_results"))
 
 
 def main():

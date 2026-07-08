@@ -21,4 +21,3 @@ conv2d_batchnorm_scaling:
 0   small_direct       0.242323          0.224978               inf          0.197309
 1  medium_direct       1.921494          1.574609               inf          1.539209
 2        default      27.749615         20.992706               inf         21.022699
-

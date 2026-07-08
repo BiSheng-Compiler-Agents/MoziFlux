@@ -36,7 +36,8 @@ def _relu_direct_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
 
 
 @triton.jit
-def _relu_persistent_kernel(x_ptr, y_ptr, n_elements, n_programs, BLOCK_SIZE: tl.constexpr):
+def _relu_persistent_kernel(x_ptr, y_ptr, n_elements, n_programs,
+                            BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(0)
     n_tiles = tl.cdiv(n_elements, BLOCK_SIZE)
     for tile_id in range(pid, n_tiles, n_programs):
@@ -55,9 +56,20 @@ def _relu_triton(x: torch.Tensor) -> torch.Tensor:
         return y
     if n_tiles > _MAX_GRID:
         n_programs = _MAX_GRID
-        _relu_persistent_kernel[(n_programs,)](x, y, n_elements, n_programs, BLOCK_SIZE=_RELU_BLOCK, num_warps=8, num_stages=2)
+        _relu_persistent_kernel[(n_programs, )](x,
+                                                y,
+                                                n_elements,
+                                                n_programs,
+                                                BLOCK_SIZE=_RELU_BLOCK,
+                                                num_warps=8,
+                                                num_stages=2)
     else:
-        _relu_direct_kernel[(n_tiles,)](x, y, n_elements, BLOCK_SIZE=_RELU_BLOCK, num_warps=8, num_stages=2)
+        _relu_direct_kernel[(n_tiles, )](x,
+                                         y,
+                                         n_elements,
+                                         BLOCK_SIZE=_RELU_BLOCK,
+                                         num_warps=8,
+                                         num_stages=2)
     return y
 
 
@@ -74,14 +86,20 @@ class ModelNew(nn.Module):
         eps=DEFAULT_EPS,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose3d(in_channels, out_channels, kernel_size, bias=bias)
-        self.group_norm = nn.GroupNorm(num_groups=groups, num_channels=out_channels, eps=eps)
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 bias=bias)
+        self.group_norm = nn.GroupNorm(num_groups=groups,
+                                       num_channels=out_channels,
+                                       eps=eps)
 
     def forward(self, x):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
         y = self.conv_transpose(x)
         if _USE_ACL_DISPATCH:
             y = torch.relu(y)

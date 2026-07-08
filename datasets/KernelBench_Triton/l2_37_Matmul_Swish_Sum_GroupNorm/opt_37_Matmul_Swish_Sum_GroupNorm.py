@@ -5,7 +5,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 _MAX_GRID = 65535
 _MAX_GROUP_ELEMS = 2048
 
@@ -50,19 +49,32 @@ def _swish_bias_groupnorm_chunked(
     safe_ch_idx = tl.where(elem_mask, ch_idx, 0)
     row_off = n * C
 
-    x = tl.load(X_ptr + row_off + safe_ch_idx, mask=mask, other=0.0, care_padding=False).to(tl.float32)
+    x = tl.load(X_ptr + row_off + safe_ch_idx,
+                mask=mask,
+                other=0.0,
+                care_padding=False).to(tl.float32)
     x_swish = x * tl.sigmoid(x)
-    extra_b = tl.load(EXTRA_BIAS_ptr + safe_ch_idx, mask=elem_mask, other=0.0, care_padding=False).to(tl.float32)
+    extra_b = tl.load(EXTRA_BIAS_ptr + safe_ch_idx,
+                      mask=elem_mask,
+                      other=0.0,
+                      care_padding=False).to(tl.float32)
     y = x_swish + extra_b
 
     y_grp = tl.where(elem_mask, y, 0.0)
     mean = tl.sum(y_grp, axis=1) / group_size
     centered = y - mean[:, None]
-    var = tl.sum(tl.where(elem_mask, centered * centered, 0.0), axis=1) / group_size
+    var = tl.sum(tl.where(elem_mask, centered * centered, 0.0),
+                 axis=1) / group_size
     inv_std = tl.rsqrt(tl.maximum(var, 0.0) + EPS)
 
-    gamma = tl.load(GAMMA_ptr + safe_ch_idx, mask=elem_mask, other=1.0, care_padding=False).to(tl.float32)
-    beta = tl.load(BETA_ptr + safe_ch_idx, mask=elem_mask, other=0.0, care_padding=False).to(tl.float32)
+    gamma = tl.load(GAMMA_ptr + safe_ch_idx,
+                    mask=elem_mask,
+                    other=1.0,
+                    care_padding=False).to(tl.float32)
+    beta = tl.load(BETA_ptr + safe_ch_idx,
+                   mask=elem_mask,
+                   other=0.0,
+                   care_padding=False).to(tl.float32)
     out = centered * inv_std[:, None] * gamma + beta
     tl.store(Y_ptr + row_off + safe_ch_idx, out, mask=mask)
 
@@ -79,7 +91,7 @@ class ModelNew(nn.Module):
     ):
         super(ModelNew, self).__init__()
         if bias_shape is None:
-            bias_shape = (out_features,)
+            bias_shape = (out_features, )
         self.matmul = nn.Linear(in_features, out_features)
         self.bias = nn.Parameter(torch.randn(bias_shape))
         self.group_norm = nn.GroupNorm(num_groups, out_features)
@@ -87,7 +99,9 @@ class ModelNew(nn.Module):
     def forward(self, x):
         z = self.matmul(x)
         if not _is_npu_tensor(z):
-            raise RuntimeError("ModelNew expects NPU tensors and does not support CPU/CUDA fallback")
+            raise RuntimeError(
+                "ModelNew expects NPU tensors and does not support CPU/CUDA fallback"
+            )
 
         B, C = z.shape
         G = self.group_norm.num_groups
@@ -98,12 +112,15 @@ class ModelNew(nn.Module):
         # chunked Triton kernel above is retained as a legal, cannsim-profiled fallback
         # implementation for the fused epilogue body.
         y = F.silu(z) + self.bias
-        return F.group_norm(y, G, self.group_norm.weight, self.group_norm.bias, self.group_norm.eps)
+        return F.group_norm(y, G, self.group_norm.weight, self.group_norm.bias,
+                            self.group_norm.eps)
 
     def forward_triton_epilogue(self, x):
         z = self.matmul(x)
         if not _is_npu_tensor(z):
-            raise RuntimeError("ModelNew expects NPU tensors and does not support CPU/CUDA fallback")
+            raise RuntimeError(
+                "ModelNew expects NPU tensors and does not support CPU/CUDA fallback"
+            )
         B, C = z.shape
         G = self.group_norm.num_groups
         assert C % G == 0, "out_features must be divisible by num_groups for GroupNorm"
@@ -116,9 +133,20 @@ class ModelNew(nn.Module):
         z = z.contiguous()
         for tile_offset in range(0, total_tiles, _MAX_GRID):
             chunk_tiles = min(_MAX_GRID, total_tiles - tile_offset)
-            _swish_bias_groupnorm_chunked[(chunk_tiles,)](
-                z, self.bias, self.group_norm.weight, self.group_norm.bias, out, tile_offset,
-                B, C, G, self.group_norm.eps, num_group_tiles, group_block, block_size,
+            _swish_bias_groupnorm_chunked[(chunk_tiles, )](
+                z,
+                self.bias,
+                self.group_norm.weight,
+                self.group_norm.bias,
+                out,
+                tile_offset,
+                B,
+                C,
+                G,
+                self.group_norm.eps,
+                num_group_tiles,
+                group_block,
+                block_size,
             )
         return out
 
@@ -127,7 +155,7 @@ batch_size = 32768
 in_features = 1024
 out_features = 4096
 num_groups = 64
-bias_shape = (out_features,)
+bias_shape = (out_features, )
 
 
 def get_inputs():

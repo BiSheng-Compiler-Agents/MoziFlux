@@ -63,7 +63,8 @@ def _avg_pool3d_k4s4_rowblock_direct_kernel(
         for kh in range(4):
             plane_base = in_base + kd * H * W + kh * W
             for kw in range(4):
-                vals = tl.load(x_ptr + plane_base + kw, mask=mask, other=0.0).to(tl.float32)
+                vals = tl.load(x_ptr + plane_base + kw, mask=mask,
+                               other=0.0).to(tl.float32)
                 acc += vals
 
     y_off = row * OW + w_out
@@ -112,7 +113,9 @@ def _avg_pool3d_k4s4_rowblock_persistent_kernel(
             for kh in range(4):
                 plane_base = in_base + kd * H * W + kh * W
                 for kw in range(4):
-                    vals = tl.load(x_ptr + plane_base + kw, mask=mask, other=0.0).to(tl.float32)
+                    vals = tl.load(x_ptr + plane_base + kw,
+                                   mask=mask,
+                                   other=0.0).to(tl.float32)
                     acc += vals
 
         y_off = row * OW + w_out
@@ -121,11 +124,14 @@ def _avg_pool3d_k4s4_rowblock_persistent_kernel(
 
 def _avg_pool3d_k4s4_triton(x: torch.Tensor) -> torch.Tensor:
     if not _is_npu_tensor(x):
-        raise RuntimeError("The fused AvgPool3d Triton wrapper expects an Ascend NPU tensor.")
+        raise RuntimeError(
+            "The fused AvgPool3d Triton wrapper expects an Ascend NPU tensor.")
     x = x.contiguous()
     N, C, D, H, W = x.shape
     if _USE_ACL_DISPATCH:
-        return F.avg_pool3d(F.avg_pool3d(x, kernel_size=2, stride=2), kernel_size=2, stride=2)
+        return F.avg_pool3d(F.avg_pool3d(x, kernel_size=2, stride=2),
+                            kernel_size=2,
+                            stride=2)
 
     OD, OH, OW = D // 4, H // 4, W // 4
     y = torch.empty((N, C, OD, OH, OW), device=x.device, dtype=x.dtype)
@@ -133,17 +139,40 @@ def _avg_pool3d_k4s4_triton(x: torch.Tensor) -> torch.Tensor:
         return y
 
     total_rows = N * C * OD * OH
-    n_tiles = triton.cdiv(total_rows, _ROWS_PER_CTA) * triton.cdiv(OW, _BLOCK_W)
+    n_tiles = triton.cdiv(total_rows, _ROWS_PER_CTA) * triton.cdiv(
+        OW, _BLOCK_W)
     if n_tiles > _MAX_GRID:
         n_programs = _MAX_GRID
-        _avg_pool3d_k4s4_rowblock_persistent_kernel[(n_programs,)](
-            x, y, total_rows, n_tiles, n_programs, C, D, H, W, OD, OH, OW,
-            ROWS_PER_CTA=_ROWS_PER_CTA, BLOCK_W=_BLOCK_W,
+        _avg_pool3d_k4s4_rowblock_persistent_kernel[(n_programs, )](
+            x,
+            y,
+            total_rows,
+            n_tiles,
+            n_programs,
+            C,
+            D,
+            H,
+            W,
+            OD,
+            OH,
+            OW,
+            ROWS_PER_CTA=_ROWS_PER_CTA,
+            BLOCK_W=_BLOCK_W,
         )
     else:
-        _avg_pool3d_k4s4_rowblock_direct_kernel[(n_tiles,)](
-            x, y, total_rows, C, D, H, W, OD, OH, OW,
-            ROWS_PER_CTA=_ROWS_PER_CTA, BLOCK_W=_BLOCK_W,
+        _avg_pool3d_k4s4_rowblock_direct_kernel[(n_tiles, )](
+            x,
+            y,
+            total_rows,
+            C,
+            D,
+            H,
+            W,
+            OD,
+            OH,
+            OW,
+            ROWS_PER_CTA=_ROWS_PER_CTA,
+            BLOCK_W=_BLOCK_W,
         )
     return y
 
@@ -161,9 +190,11 @@ class ModelNew(nn.Module):
         bias_shape=DEFAULT_BIAS_SHAPE,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose3d(
-            in_channels, out_channels, kernel_size, stride=stride, padding=padding
-        )
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding)
         self.batch_norm = nn.BatchNorm3d(out_channels)
         self.bias_shape = bias_shape
 
@@ -173,13 +204,21 @@ class ModelNew(nn.Module):
                 "ModelNew expects Ascend NPU inputs; the Triton kernel path is the only supported runtime."
             )
         if not _is_npu_tensor(self.conv_transpose.weight):
-            raise RuntimeError("ModelNew weights must be moved to Ascend NPU before execution.")
-        if self.conv_transpose.bias is not None and not _is_npu_tensor(self.conv_transpose.bias):
-            raise RuntimeError("ModelNew bias must be moved to Ascend NPU before execution.")
+            raise RuntimeError(
+                "ModelNew weights must be moved to Ascend NPU before execution."
+            )
+        if self.conv_transpose.bias is not None and not _is_npu_tensor(
+                self.conv_transpose.bias):
+            raise RuntimeError(
+                "ModelNew bias must be moved to Ascend NPU before execution.")
         if not _is_npu_tensor(self.batch_norm.weight):
-            raise RuntimeError("ModelNew batch-norm weights must be moved to Ascend NPU before execution.")
+            raise RuntimeError(
+                "ModelNew batch-norm weights must be moved to Ascend NPU before execution."
+            )
         if not _is_npu_tensor(self.batch_norm.bias):
-            raise RuntimeError("ModelNew batch-norm bias must be moved to Ascend NPU before execution.")
+            raise RuntimeError(
+                "ModelNew batch-norm bias must be moved to Ascend NPU before execution."
+            )
 
         x = self.conv_transpose(x)
         x = self.batch_norm(x)
@@ -201,4 +240,6 @@ def get_inputs():
 
 
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, bias_shape]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding, bias_shape
+    ]

@@ -23,7 +23,9 @@ _BENCH_SHAPES = [
 ]
 
 _LINE_VALS = ["torch", "baseline1", "baseline2", "optimized"]
-_LINE_NAMES = ["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"]
+_LINE_NAMES = [
+    "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"
+]
 _STYLES = [("blue", "-"), ("red", "--"), ("black", "--"), ("green", "-")]
 _MODEL_CACHE = {}
 _MOD_CACHE = {}
@@ -41,22 +43,36 @@ def _load(path: Path, key: str):
 
 
 class TorchRef(nn.Module):
-    def __init__(self, in_channels=64, out_channels=128, kernel_size=3, groups=8, bias=False, eps=1e-5):
+
+    def __init__(self,
+                 in_channels=64,
+                 out_channels=128,
+                 kernel_size=3,
+                 groups=8,
+                 bias=False,
+                 eps=1e-5):
         super().__init__()
-        self.conv_transpose = nn.ConvTranspose3d(in_channels, out_channels, kernel_size, bias=bias)
-        self.group_norm = nn.GroupNorm(num_groups=groups, num_channels=out_channels, eps=eps)
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 bias=bias)
+        self.group_norm = nn.GroupNorm(num_groups=groups,
+                                       num_channels=out_channels,
+                                       eps=eps)
 
     def forward(self, x):
         y = self.conv_transpose(x)
         y = torch.relu(y)
-        return F.group_norm(y, self.group_norm.num_groups, self.group_norm.weight, self.group_norm.bias, self.group_norm.eps)
+        return F.group_norm(y, self.group_norm.num_groups,
+                            self.group_norm.weight, self.group_norm.bias,
+                            self.group_norm.eps)
 
 
 def _make_inputs(label):
     rec = next(s for s in _BENCH_SHAPES if s[0] == label)
     _, n, c, d, h, w = rec
     torch.manual_seed(123)
-    return (torch.rand(n, c, d, h, w, device="npu", dtype=torch.float32),)
+    return (torch.rand(n, c, d, h, w, device="npu", dtype=torch.float32), )
 
 
 def _model(key):
@@ -84,7 +100,8 @@ def _run_torch_ref(x):
 
 def _run_provider(provider, x):
     if provider == "baseline2":
-        raise RuntimeError("Baseline Triton2 skipped: sandbox forbids reading base_*.py")
+        raise RuntimeError(
+            "Baseline Triton2 skipped: sandbox forbids reading base_*.py")
     with torch.no_grad():
         return _model(provider)(x)
 
@@ -103,21 +120,28 @@ def unit_test():
                 print(f"TEST {name} {label}: PASS max_abs=0.0")
                 continue
             if provider == "baseline2":
-                print(f"TEST {name} {label}: SKIP_UNAVAILABLE sandbox_base_read_prohibited max_abs=inf")
+                print(
+                    f"TEST {name} {label}: SKIP_UNAVAILABLE sandbox_base_read_prohibited max_abs=inf"
+                )
                 continue
             if provider == "baseline1" and label == "target":
-                print(f"TEST {name} {label}: SKIP_COMPARISON target_preskipped_to_bound_runtime max_abs=inf")
+                print(
+                    f"TEST {name} {label}: SKIP_COMPARISON target_preskipped_to_bound_runtime max_abs=inf"
+                )
                 continue
             try:
                 y = _run_provider(provider, x)
                 diff = _max_abs(y, ref)
                 passed = math.isfinite(diff) and diff <= 1e-3
-                print(f"TEST {name} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}")
+                print(
+                    f"TEST {name} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}"
+                )
                 if provider == "optimized" and not passed:
                     ok = False
             except Exception as exc:
                 tag = type(exc).__name__
-                print(f"TEST {name} {label}: SKIP_UNAVAILABLE {tag} max_abs=inf")
+                print(
+                    f"TEST {name} {label}: SKIP_UNAVAILABLE {tag} max_abs=inf")
                 if provider == "optimized":
                     ok = False
     ok = _test_optimized_triton_fallbacks() and ok
@@ -140,10 +164,14 @@ def _test_optimized_triton_fallbacks():
             ref = _run_torch_ref(x)
             diff = _max_abs(y, ref)
             path_ok = math.isfinite(diff) and diff <= 1e-3
-            print(f"TEST Optimized Triton fallback_{path_name}: {'PASS' if path_ok else 'MISMATCH'} max_abs={diff:.6g}")
+            print(
+                f"TEST Optimized Triton fallback_{path_name}: {'PASS' if path_ok else 'MISMATCH'} max_abs={diff:.6g}"
+            )
             passed = passed and path_ok
         except Exception as exc:
-            print(f"TEST Optimized Triton fallback_{path_name}: SKIP_UNAVAILABLE {type(exc).__name__} max_abs=inf")
+            print(
+                f"TEST Optimized Triton fallback_{path_name}: SKIP_UNAVAILABLE {type(exc).__name__} max_abs=inf"
+            )
             passed = False
     setattr(mod, "_USE_ACL_DISPATCH", old_acl)
     setattr(mod, "_MAX_GRID", old_grid)
@@ -164,19 +192,29 @@ def _time_ms(fn, warmup=10, rep=30):
 
 def _bench_one(provider, label):
     if provider == "baseline2":
-        print(f"INFO benchmark_preskip Baseline Triton2 {label}: sandbox_base_read_prohibited")
+        print(
+            f"INFO benchmark_preskip Baseline Triton2 {label}: sandbox_base_read_prohibited"
+        )
         return float("inf")
     if provider == "baseline1" and label == "target":
-        print(f"INFO benchmark_preskip Baseline Triton1 {label}: target_runtime_bounded")
+        print(
+            f"INFO benchmark_preskip Baseline Triton1 {label}: target_runtime_bounded"
+        )
         return float("inf")
     x, = _make_inputs(label)
     try:
-        fn = lambda: _run_torch_ref(x) if provider == "torch" else _run_provider(provider, x)
+
+        def fn():
+            return _run_torch_ref(x) if provider == "torch" else _run_provider(
+                provider, x)
+
         reps = {"tiny": 20, "medium": 5, "target": 1}[label]
         warmup = {"tiny": 5, "medium": 2, "target": 0}[label]
         return _time_ms(fn, warmup=warmup, rep=reps)
     except Exception as exc:
-        print(f"INFO benchmark_unavailable {_LINE_NAMES[_LINE_VALS.index(provider)]} {label}: {type(exc).__name__}")
+        print(
+            f"INFO benchmark_unavailable {_LINE_NAMES[_LINE_VALS.index(provider)]} {label}: {type(exc).__name__}"
+        )
         return float("inf")
 
 
@@ -191,8 +229,7 @@ def _bench_one(provider, label):
         ylabel="ms",
         plot_name="convtranspose3d_relu_groupnorm",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     return _bench_one(provider, label)
 

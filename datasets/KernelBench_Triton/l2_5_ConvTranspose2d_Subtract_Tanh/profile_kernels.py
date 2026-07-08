@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import math
 import sys
 import time
 from pathlib import Path
@@ -69,10 +68,16 @@ def _make_input(shape):
 
 
 class TorchRef(nn.Module):
+
     def __init__(self):
         super().__init__()
         torch.manual_seed(0)
-        self.conv_transpose = nn.ConvTranspose2d(64, 64, 4, stride=2, padding=1, output_padding=1)
+        self.conv_transpose = nn.ConvTranspose2d(64,
+                                                 64,
+                                                 4,
+                                                 stride=2,
+                                                 padding=1,
+                                                 output_padding=1)
         self.bias = nn.Parameter(torch.randn((64, 1, 1)))
 
     def forward(self, x):
@@ -112,9 +117,13 @@ def _run_provider(key, x, shape=None):
     if key == "torch_ref":
         return _run_torch_ref(x)
     if key == "baseline2":
-        raise RuntimeError("Baseline Triton2 intentionally unavailable: reference file is read-protected by sandbox")
-    if key == "baseline1" and shape is not None and _baseline1_would_overflow(shape):
-        raise RuntimeError("Baseline Triton1 preskipped: direct grid exceeds Ascend FFTS cap")
+        raise RuntimeError(
+            "Baseline Triton2 intentionally unavailable: reference file is read-protected by sandbox"
+        )
+    if key == "baseline1" and shape is not None and _baseline1_would_overflow(
+            shape):
+        raise RuntimeError(
+            "Baseline Triton1 preskipped: direct grid exceeds Ascend FFTS cap")
     with torch.no_grad():
         return _model(key)(x)
 
@@ -129,7 +138,9 @@ def unit_test():
         label = shape[0]
         x = _make_input(shape)
         ref = _run_torch_ref(x)
-        for key, display in [("baseline1", "Baseline Triton1"), ("baseline2", "Baseline Triton2"), ("optimized", "Optimized Triton")]:
+        for key, display in [("baseline1", "Baseline Triton1"),
+                             ("baseline2", "Baseline Triton2"),
+                             ("optimized", "Optimized Triton")]:
             if key == "baseline2":
                 print(f"TEST {display} {label}: SKIP_UNAVAILABLE max_abs=inf")
                 continue
@@ -138,15 +149,21 @@ def unit_test():
                 _sync()
                 max_abs = _max_abs(out, ref)
                 passed = max_abs <= 1e-3
-                print(f"TEST {display} {label}: {'PASS' if passed else 'FAIL'} max_abs={max_abs:.6g}")
+                print(
+                    f"TEST {display} {label}: {'PASS' if passed else 'FAIL'} max_abs={max_abs:.6g}"
+                )
                 if key == "optimized" and not passed:
                     ok = False
             except Exception as e:
                 if key == "optimized":
-                    print(f"TEST {display} {label}: FAIL {type(e).__name__} max_abs=inf")
+                    print(
+                        f"TEST {display} {label}: FAIL {type(e).__name__} max_abs=inf"
+                    )
                     ok = False
                 else:
-                    print(f"TEST {display} {label}: SKIP_UNAVAILABLE {type(e).__name__} max_abs=inf")
+                    print(
+                        f"TEST {display} {label}: SKIP_UNAVAILABLE {type(e).__name__} max_abs=inf"
+                    )
 
     # Force optimized persistent path on a modest tensor without allocating the huge default.
     try:
@@ -161,11 +178,15 @@ def unit_test():
         _sync()
         max_abs = _max_abs(out, ref)
         passed = max_abs <= 1e-3
-        print(f"TEST Optimized Triton forced_persistent: {'PASS' if passed else 'FAIL'} max_abs={max_abs:.6g}")
+        print(
+            f"TEST Optimized Triton forced_persistent: {'PASS' if passed else 'FAIL'} max_abs={max_abs:.6g}"
+        )
         ok = ok and passed
         opt._MAX_PROGRAMS = old
     except Exception as e:
-        print(f"TEST Optimized Triton forced_persistent: FAIL {type(e).__name__} max_abs=inf")
+        print(
+            f"TEST Optimized Triton forced_persistent: FAIL {type(e).__name__} max_abs=inf"
+        )
         ok = False
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
@@ -173,7 +194,10 @@ def unit_test():
 
 def _bench_once(fn, warmup=10, rep=30):
     try:
-        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=warmup,
+                                       rep=rep,
+                                       return_mode="mean")
     except Exception:
         for _ in range(3):
             fn()
@@ -189,14 +213,18 @@ def bench_provider(provider, label):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     x = _make_input(shape)
     if provider == "baseline2":
-        print(f"INFO benchmark Baseline Triton2 {label}: unavailable_read_protected")
+        print(
+            f"INFO benchmark Baseline Triton2 {label}: unavailable_read_protected"
+        )
         return float("inf")
     if provider == "baseline1" and _baseline1_would_overflow(shape):
         print(f"INFO benchmark Baseline Triton1 {label}: preskipped_grid_cap")
         return float("inf")
     try:
+
         def fn():
             return _run_provider(provider, x, shape)
+
         return _bench_once(fn)
     except Exception as e:
         print(f"INFO benchmark {provider} {label}: {type(e).__name__}")
@@ -209,13 +237,15 @@ def bench_provider(provider, label):
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=["torch_ref", "baseline1", "baseline2", "optimized"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("blue", "-"), ("green", "-"), ("black", "--"), ("red", "-")],
         ylabel="Latency (ms)",
         plot_name="convtranspose2d_subtract_tanh_latency",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     return bench_provider(provider, label)
 

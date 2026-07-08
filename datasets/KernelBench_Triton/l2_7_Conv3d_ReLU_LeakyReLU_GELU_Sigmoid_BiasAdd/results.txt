@@ -22,4 +22,3 @@ l2_7_conv3d_postops_biasadd:
 0    small       0.206402          0.361933               inf          0.144910
 1   medium       0.494866          2.919591               inf          0.444751
 2  default     109.769173               inf               inf        102.081329
-

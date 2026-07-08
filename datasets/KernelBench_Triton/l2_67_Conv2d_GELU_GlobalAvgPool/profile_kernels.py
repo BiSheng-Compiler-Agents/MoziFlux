@@ -1,10 +1,9 @@
 import argparse
 import importlib.util
-import math
 import pathlib
 import sys
 import time
-from typing import Dict, Tuple
+from typing import Dict
 
 import torch
 import torch.nn as nn
@@ -53,6 +52,7 @@ def _init_args():
 
 
 class TorchRef(nn.Module):
+
     def __init__(self, in_channels, out_channels, kernel_size):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
@@ -70,7 +70,8 @@ def _model(key: str):
     if key == "torch_ref":
         model = TorchRef(*init)
     elif key == "baseline1":
-        model = _load(INPUT_FILE, "k_baseline1_67_conv2d_gelu_gap").ModelNew(*init)
+        model = _load(INPUT_FILE,
+                      "k_baseline1_67_conv2d_gelu_gap").ModelNew(*init)
     elif key == "optimized":
         model = _load(OPT_FILE, "k_opt_67_conv2d_gelu_gap").ModelNew(*init)
     else:
@@ -83,7 +84,12 @@ def _model(key: str):
 def _make_inputs(label: str):
     batch, channels, height, width = _SHAPE_BY_LABEL[label]
     torch.manual_seed(1234)
-    return torch.rand(batch, channels, height, width, device="npu", dtype=torch.float32)
+    return torch.rand(batch,
+                      channels,
+                      height,
+                      width,
+                      device="npu",
+                      dtype=torch.float32)
 
 
 def _run_provider(provider: str, label: str):
@@ -92,7 +98,11 @@ def _run_provider(provider: str, label: str):
         raise SkipProvider("sandbox_forbids_base_reference_import")
     if provider == "baseline1" and label == "exact_256":
         raise SkipProvider("comparison_provider_preskipped_to_avoid_timeout")
-    key = {"torch": "torch_ref", "baseline1": "baseline1", "opt": "optimized"}[provider]
+    key = {
+        "torch": "torch_ref",
+        "baseline1": "baseline1",
+        "opt": "optimized"
+    }[provider]
     with torch.no_grad():
         return _model(key)(x)
 
@@ -112,7 +122,10 @@ def _time_ms(fn, label: str) -> float:
     warmup = 5 if label == "exact_256" else 10
     rep = 20 if label == "exact_256" else 50
     try:
-        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=warmup,
+                                       rep=rep,
+                                       return_mode="mean")
     except Exception:
         for _ in range(warmup):
             fn()
@@ -127,10 +140,14 @@ def _time_ms(fn, label: str) -> float:
 def _bench_cell(provider: str, label: str) -> float:
     try:
         if provider == "baseline2":
-            print(f"INFO benchmark Baseline Triton2 {label}: unavailable sandbox_forbids_base_reference_import")
+            print(
+                f"INFO benchmark Baseline Triton2 {label}: unavailable sandbox_forbids_base_reference_import"
+            )
             return float("inf")
         if provider == "baseline1" and label == "exact_256":
-            print(f"INFO benchmark Baseline Triton1 {label}: inf comparison_provider_preskipped_to_avoid_timeout")
+            print(
+                f"INFO benchmark Baseline Triton1 {label}: inf comparison_provider_preskipped_to_avoid_timeout"
+            )
             return float("inf")
         # Build model once and input once for timing this cell.
         x = _make_inputs(label)
@@ -143,7 +160,9 @@ def _bench_cell(provider: str, label: str) -> float:
         with torch.no_grad():
             return _time_ms(lambda: model(x), label)
     except Exception as exc:
-        print(f"INFO benchmark_provider_unavailable {provider} {label}: {type(exc).__name__}")
+        print(
+            f"INFO benchmark_provider_unavailable {provider} {label}: {type(exc).__name__}"
+        )
         return float("inf")
 
 
@@ -153,13 +172,15 @@ def _bench_cell(provider: str, label: str) -> float:
         x_vals=[row[0] for row in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=["torch", "baseline1", "baseline2", "opt"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("blue", "-"), ("red", "-"), ("black", "--"), ("green", "-")],
         ylabel="ms",
         plot_name="conv2d-gelu-globalavgpool",
         args={},
-    )
-)
+    ))
 def bench(label, provider):
     return _bench_cell(provider, label)
 
@@ -171,7 +192,9 @@ def unit_test() -> bool:
             ref = _run_torch_ref(label)
             print(f"TEST PyTorch / ACL {label}: PASS max_abs=0.0")
         except Exception as exc:
-            print(f"TEST PyTorch / ACL {label}: UNAVAILABLE {type(exc).__name__} max_abs=inf")
+            print(
+                f"TEST PyTorch / ACL {label}: UNAVAILABLE {type(exc).__name__} max_abs=inf"
+            )
             ok = False
             continue
         for provider, display in [
@@ -183,14 +206,21 @@ def unit_test() -> bool:
                 out = _run_provider(provider, label)
                 _sync()
                 max_abs = (out.float() - ref.float()).abs().max().item()
-                passed = bool(torch.isfinite(torch.tensor(max_abs)) and max_abs <= 1e-3)
-                print(f"TEST {display} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={max_abs:.6g}")
+                passed = bool(
+                    torch.isfinite(torch.tensor(max_abs)) and max_abs <= 1e-3)
+                print(
+                    f"TEST {display} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={max_abs:.6g}"
+                )
                 if provider == "opt" and not passed:
                     ok = False
             except SkipProvider as exc:
-                print(f"TEST {display} {label}: SKIP_COMPARISON {str(exc)} max_abs=inf")
+                print(
+                    f"TEST {display} {label}: SKIP_COMPARISON {str(exc)} max_abs=inf"
+                )
             except Exception as exc:
-                print(f"TEST {display} {label}: UNAVAILABLE {type(exc).__name__} max_abs=inf")
+                print(
+                    f"TEST {display} {label}: UNAVAILABLE {type(exc).__name__} max_abs=inf"
+                )
                 if provider == "opt":
                     ok = False
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
@@ -213,4 +243,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

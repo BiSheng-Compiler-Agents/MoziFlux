@@ -33,7 +33,12 @@ _BASELINE2_SKIP = "sandbox_reference_file_do_not_read"
 
 
 class TorchRef(nn.Module):
-    def __init__(self, in_channels=8, out_channels=64, kernel_size=3, divisor=2):
+
+    def __init__(self,
+                 in_channels=8,
+                 out_channels=64,
+                 kernel_size=3,
+                 divisor=2):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
         self.divisor = divisor
@@ -108,7 +113,9 @@ def _check_one(provider, label):
     ref = _run_provider("torch", x)
     _sync()
     if provider == "baseline2":
-        print(f"TEST {_DISPLAY[provider]} {label}: SKIP_UNAVAILABLE {_BASELINE2_SKIP} max_abs=inf")
+        print(
+            f"TEST {_DISPLAY[provider]} {label}: SKIP_UNAVAILABLE {_BASELINE2_SKIP} max_abs=inf"
+        )
         return True
     try:
         out = _run_provider(provider, x)
@@ -116,14 +123,19 @@ def _check_one(provider, label):
         diff = _max_abs(out, ref)
         ok = math.isfinite(diff) and diff <= 1e-3
         status = "PASS" if ok else "MISMATCH"
-        print(f"TEST {_DISPLAY[provider]} {label}: {status} max_abs={diff:.6g}")
+        print(
+            f"TEST {_DISPLAY[provider]} {label}: {status} max_abs={diff:.6g}")
         return ok or provider != "optimized"
     except Exception as exc:
         etype = type(exc).__name__
         if provider == "optimized":
-            print(f"TEST {_DISPLAY[provider]} {label}: MISMATCH {etype} max_abs=inf")
+            print(
+                f"TEST {_DISPLAY[provider]} {label}: MISMATCH {etype} max_abs=inf"
+            )
             return False
-        print(f"TEST {_DISPLAY[provider]} {label}: SKIP_UNAVAILABLE {etype} max_abs=inf")
+        print(
+            f"TEST {_DISPLAY[provider]} {label}: SKIP_UNAVAILABLE {etype} max_abs=inf"
+        )
         return True
 
 
@@ -154,10 +166,14 @@ def _forced_persistent_test():
         _sync()
         diff = _max_abs(out, ref)
         ok = math.isfinite(diff) and diff <= 1e-3
-        print(f"TEST Optimized Triton forced_persistent: {'PASS' if ok else 'MISMATCH'} max_abs={diff:.6g}")
+        print(
+            f"TEST Optimized Triton forced_persistent: {'PASS' if ok else 'MISMATCH'} max_abs={diff:.6g}"
+        )
         return ok
     except Exception as exc:
-        print(f"TEST Optimized Triton forced_persistent: MISMATCH {type(exc).__name__} max_abs=inf")
+        print(
+            f"TEST Optimized Triton forced_persistent: MISMATCH {type(exc).__name__} max_abs=inf"
+        )
         return False
     finally:
         try:
@@ -180,7 +196,9 @@ def _time_ms(fn, warmup=3, rep=10):
 
 def _bench_provider(provider, label):
     if provider == "baseline2":
-        print(f"INFO benchmark_preskip {_DISPLAY[provider]} {label}: {_BASELINE2_SKIP}")
+        print(
+            f"INFO benchmark_preskip {_DISPLAY[provider]} {label}: {_BASELINE2_SKIP}"
+        )
         return float("inf")
     x = _make_input(label)
     try:
@@ -188,7 +206,9 @@ def _bench_provider(provider, label):
         _sync()
         return _time_ms(lambda: _run_provider(provider, x))
     except Exception as exc:
-        print(f"INFO benchmark_unavailable {_DISPLAY[provider]} {label}: {type(exc).__name__}")
+        print(
+            f"INFO benchmark_unavailable {_DISPLAY[provider]} {label}: {type(exc).__name__}"
+        )
         return float("inf")
 
 
@@ -203,8 +223,7 @@ def _bench_provider(provider, label):
         ylabel="ms",
         plot_name="conv2d_divide_leakyrelu",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     return _bench_provider(provider, label)
 
@@ -220,7 +239,9 @@ def main():
     if args.test:
         unit_test()
     if args.bench:
-        benchmark.run(print_data=True, show_plots=False, save_path=str(ROOT / "remote_results"))
+        benchmark.run(print_data=True,
+                      show_plots=False,
+                      save_path=str(ROOT / "remote_results"))
 
 
 if __name__ == "__main__":

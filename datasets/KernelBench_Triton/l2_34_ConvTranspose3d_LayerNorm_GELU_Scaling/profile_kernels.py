@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import math
 import sys
 import time
 from pathlib import Path
@@ -42,6 +41,7 @@ def _load(path: Path, key: str):
     spec.loader.exec_module(mod)
     return mod
 
+
 _MODULES = {
     "baseline1": _load(INPUT_FILE, "baseline1"),
     "optimized": _load(OPT_FILE, "optimized"),
@@ -59,6 +59,7 @@ _MODELS = {}
 
 
 class TorchRefModel(nn.Module):
+
     def __init__(
         self,
         in_channels=IN_CHANNELS,
@@ -71,22 +72,27 @@ class TorchRefModel(nn.Module):
         scaling_factor=SCALING_FACTOR,
     ):
         super().__init__()
-        self.conv_transpose = nn.ConvTranspose3d(
-            in_channels, out_channels, kernel_size, stride=stride, padding=padding, bias=bias
-        )
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding,
+                                                 bias=bias)
         self.layer_norm = nn.LayerNorm(out_channels, eps=eps)
         self.scaling_factor = scaling_factor
 
     def forward(self, x):
         y = self.conv_transpose(x)
         y = y.permute(0, 2, 3, 4, 1).contiguous()
-        y = F.layer_norm(y, (y.shape[-1],), self.layer_norm.weight, self.layer_norm.bias, self.layer_norm.eps)
+        y = F.layer_norm(y, (y.shape[-1], ), self.layer_norm.weight,
+                         self.layer_norm.bias, self.layer_norm.eps)
         y = F.gelu(y, approximate="none") * self.scaling_factor
         return y.permute(0, 4, 1, 2, 3).contiguous()
 
 
 def _device():
-    return "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    return "npu" if hasattr(torch,
+                            "npu") and torch.npu.is_available() else "cpu"
 
 
 def _sync():
@@ -95,7 +101,10 @@ def _sync():
 
 
 def _init_args():
-    return [IN_CHANNELS, OUT_CHANNELS, KERNEL_SIZE, STRIDE, PADDING, BIAS, EPS, SCALING_FACTOR]
+    return [
+        IN_CHANNELS, OUT_CHANNELS, KERNEL_SIZE, STRIDE, PADDING, BIAS, EPS,
+        SCALING_FACTOR
+    ]
 
 
 def _model(key: str):
@@ -132,7 +141,8 @@ def _baseline_grid_overflows(shape):
 
 
 def _run_provider(key, x, shape=None):
-    if key in ("baseline1", "baseline2") and shape is not None and _baseline_grid_overflows(shape):
+    if key in ("baseline1", "baseline2"
+               ) and shape is not None and _baseline_grid_overflows(shape):
         raise RuntimeError("preskipped_grid_overflow_coreDim_gt_65535")
     with torch.no_grad():
         return _model(key)(x)
@@ -140,7 +150,10 @@ def _run_provider(key, x, shape=None):
 
 def _bench_ms(fn, warmup=10, rep=30):
     try:
-        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=warmup,
+                                       rep=rep,
+                                       return_mode="mean")
     except Exception:
         for _ in range(warmup):
             fn()
@@ -164,11 +177,15 @@ def unit_test():
         label = shape[0]
         x = _make_input(shape)
         ref = _run_torch_ref(x)
-        for key, pretty in [("baseline1", "Baseline Triton1"), ("baseline2", "Baseline Triton2"), ("optimized", "Optimized Triton")]:
+        for key, pretty in [("baseline1", "Baseline Triton1"),
+                            ("baseline2", "Baseline Triton2"),
+                            ("optimized", "Optimized Triton")]:
             if key == "baseline2" and not _HAS_BASELINE2:
                 continue
             if key in _MODULE_ERRORS:
-                print(f"INFO {pretty}/{label}: unavailable_or_preskipped {_MODULE_ERRORS[key]}")
+                print(
+                    f"INFO {pretty}/{label}: unavailable_or_preskipped {_MODULE_ERRORS[key]}"
+                )
                 continue
             if key not in _MODULES:
                 continue
@@ -181,7 +198,9 @@ def unit_test():
                     ok = False
                     print(f"CHECK {pretty}/{label}: FAIL {type(e).__name__}")
                 else:
-                    print(f"INFO {pretty}/{label}: unavailable_or_preskipped {type(e).__name__}")
+                    print(
+                        f"INFO {pretty}/{label}: unavailable_or_preskipped {type(e).__name__}"
+                    )
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
 
@@ -191,29 +210,47 @@ def unit_test():
         x_names=["label"],
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
-        line_vals=["torch_ref", "baseline1", "baseline2", "optimized"] if _HAS_BASELINE2 else ["torch_ref", "baseline1", "optimized"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"] if _HAS_BASELINE2 else ["PyTorch / ACL", "Baseline Triton", "Optimized Triton"],
-        styles=[("black", "-"), ("blue", "--"), ("green", "--"), ("red", "-")] if _HAS_BASELINE2 else [("black", "-"), ("blue", "--"), ("red", "-")],
+        line_vals=["torch_ref", "baseline1", "baseline2", "optimized"]
+        if _HAS_BASELINE2 else ["torch_ref", "baseline1", "optimized"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ] if _HAS_BASELINE2 else
+        ["PyTorch / ACL", "Baseline Triton", "Optimized Triton"],
+        styles=[("black", "-"), ("blue", "--"), ("green", "--"),
+                ("red", "-")] if _HAS_BASELINE2 else [("black", "-"),
+                                                      ("blue", "--"),
+                                                      ("red", "-")],
         ylabel="ms",
         plot_name="convtranspose3d_layernorm_gelu_scaling",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     x = _make_input(shape)
     try:
         if provider == "torch_ref":
-            fn = lambda: _run_torch_ref(x)
+
+            def fn():
+                return _run_torch_ref(x)
         else:
             if provider in _MODULE_ERRORS:
-                print(f"INFO {provider}/{label}: inf comparison_provider_unavailable {_MODULE_ERRORS[provider]}")
+                print(
+                    f"INFO {provider}/{label}: inf comparison_provider_unavailable {_MODULE_ERRORS[provider]}"
+                )
                 return float("inf")
-            if provider in ("baseline1", "baseline2") and _baseline_grid_overflows(shape):
-                print(f"INFO {provider}/{label}: inf comparison_provider_preskipped_grid_overflow")
+            if provider in ("baseline1",
+                            "baseline2") and _baseline_grid_overflows(shape):
+                print(
+                    f"INFO {provider}/{label}: inf comparison_provider_preskipped_grid_overflow"
+                )
                 return float("inf")
-            fn = lambda: _run_provider(provider, x, shape)
-        fn(); _sync()
+
+            def fn():
+                return _run_provider(provider, x, shape)
+
+        fn()
+        _sync()
         return _bench_ms(fn)
     except Exception as e:
         print(f"INFO {provider}/{label}: inf {type(e).__name__}")

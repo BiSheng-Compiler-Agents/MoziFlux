@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import math
 import pathlib
 import sys
 import time
@@ -24,7 +23,9 @@ _BENCH_SHAPES = [
 ]
 DIVISOR = 2.0
 DTYPE = torch.float32
-PROVIDERS = ["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"]
+PROVIDERS = [
+    "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"
+]
 _MODULES = {}
 _MODELS = {}
 _REF_WEIGHTS = {}
@@ -51,7 +52,7 @@ def _module_for(provider):
 
 def _make_inputs(batch, in_features, out_features):
     torch.manual_seed(123)
-    return (torch.rand(batch, in_features, device="npu", dtype=DTYPE),)
+    return (torch.rand(batch, in_features, device="npu", dtype=DTYPE), )
 
 
 def _init_args(batch, in_features, out_features):
@@ -66,7 +67,9 @@ def _model(provider, batch, in_features, out_features):
     if mod is None:
         return None
     torch.manual_seed(0)
-    model = mod.ModelNew(*_init_args(batch, in_features, out_features), dtype=DTYPE, device="npu")
+    model = mod.ModelNew(*_init_args(batch, in_features, out_features),
+                         dtype=DTYPE,
+                         device="npu")
     model.eval()
     _MODELS[key] = model
     return model
@@ -76,7 +79,11 @@ def _ref_weight_bias(in_features, out_features):
     key = (in_features, out_features)
     if key not in _REF_WEIGHTS:
         torch.manual_seed(0)
-        linear = nn.Linear(in_features, out_features, bias=True, device="npu", dtype=DTYPE)
+        linear = nn.Linear(in_features,
+                           out_features,
+                           bias=True,
+                           device="npu",
+                           dtype=DTYPE)
         linear.eval()
         _REF_WEIGHTS[key] = (linear.weight.detach(), linear.bias.detach())
     return _REF_WEIGHTS[key]
@@ -112,19 +119,26 @@ def unit_test():
         ref = _run_torch_ref(x, batch, in_features, out_features)
         for provider in PROVIDERS[1:]:
             if _is_skip_provider(provider):
-                print(f"TEST {provider} {label}: SKIP_REFERENCE_FILE_NOT_READ max_abs=inf")
+                print(
+                    f"TEST {provider} {label}: SKIP_REFERENCE_FILE_NOT_READ max_abs=inf"
+                )
                 continue
             try:
-                out = _run_provider(provider, x, batch, in_features, out_features)
+                out = _run_provider(provider, x, batch, in_features,
+                                    out_features)
                 torch.npu.synchronize()
                 diff = _max_abs(out, ref)
                 passed = diff <= 1e-3
-                print(f"TEST {provider} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}")
+                print(
+                    f"TEST {provider} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}"
+                )
                 if provider == "Optimized Triton" and not passed:
                     ok = False
             except Exception as exc:
                 etype = type(exc).__name__
-                print(f"TEST {provider} {label}: SKIP_UNAVAILABLE {etype} max_abs=inf")
+                print(
+                    f"TEST {provider} {label}: SKIP_UNAVAILABLE {etype} max_abs=inf"
+                )
                 if provider == "Optimized Triton":
                     ok = False
 
@@ -137,14 +151,19 @@ def unit_test():
         batch, in_features, out_features = 3, 4096, 64
         x = _make_inputs(batch, in_features, out_features)[0]
         ref = _run_torch_ref(x, batch, in_features, out_features)
-        out = _run_provider("Optimized Triton", x, batch, in_features, out_features)
+        out = _run_provider("Optimized Triton", x, batch, in_features,
+                            out_features)
         torch.npu.synchronize()
         diff = _max_abs(out, ref)
         passed = diff <= 1e-3
-        print(f"TEST Optimized Triton forced_persistent: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}")
+        print(
+            f"TEST Optimized Triton forced_persistent: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}"
+        )
         ok = ok and passed
     except Exception as exc:
-        print(f"TEST Optimized Triton forced_persistent: SKIP_UNAVAILABLE {type(exc).__name__} max_abs=inf")
+        print(
+            f"TEST Optimized Triton forced_persistent: SKIP_UNAVAILABLE {type(exc).__name__} max_abs=inf"
+        )
         ok = False
     finally:
         try:
@@ -174,9 +193,11 @@ def _bench_cell(provider, label, batch, in_features, out_features):
         return float("inf")
     x = _make_inputs(batch, in_features, out_features)[0]
     try:
-        return _time_ms(lambda: _run_provider(provider, x, batch, in_features, out_features))
+        return _time_ms(lambda: _run_provider(provider, x, batch, in_features,
+                                              out_features))
     except Exception as exc:
-        print(f"INFO bench_unavailable {provider} {label}: {type(exc).__name__}")
+        print(
+            f"INFO bench_unavailable {provider} {label}: {type(exc).__name__}")
         return float("inf")
 
 
@@ -191,8 +212,7 @@ def _bench_cell(provider, label, batch, in_features, out_features):
         ylabel="Latency (ms)",
         plot_name="gemm_relu_divide_latency",
         args={},
-    )
-)
+    ))
 def bench(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     _, batch, in_features, out_features = shape

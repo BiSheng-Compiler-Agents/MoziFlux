@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import math
 import sys
 import time
 from pathlib import Path
@@ -58,6 +57,7 @@ def _opt_mod():
 
 
 class TorchRef(nn.Module):
+
     def __init__(self, in_channels, out_channels, kernel_size, bias_shape):
         super().__init__()
         self.conv = nn.Conv3d(in_channels, out_channels, kernel_size)
@@ -106,7 +106,13 @@ def _model(provider, shape):
 def _make_input(shape):
     label, batch, in_c, out_c, depth, height, width, k = shape
     _seed(123)
-    return torch.rand(batch, in_c, depth, height, width, device="npu", dtype=torch.float32)
+    return torch.rand(batch,
+                      in_c,
+                      depth,
+                      height,
+                      width,
+                      device="npu",
+                      dtype=torch.float32)
 
 
 def _reference(x, shape):
@@ -145,7 +151,9 @@ def unit_test():
         try:
             ref = _reference(x, shape)
         except Exception as e:
-            print(f"TEST PyTorch / ACL {label}: FAIL {type(e).__name__} max_abs=inf")
+            print(
+                f"TEST PyTorch / ACL {label}: FAIL {type(e).__name__} max_abs=inf"
+            )
             ok = False
             continue
         print(f"TEST PyTorch / ACL {label}: PASS max_abs=0.000000e+00")
@@ -159,12 +167,16 @@ def unit_test():
                 out = _run_provider(provider, x, shape)
                 diff = _max_abs(out, ref)
                 passed = diff <= 1e-3
-                print(f"TEST {display} {label}: {'PASS' if passed else 'FAIL'} max_abs={diff:.6e}")
+                print(
+                    f"TEST {display} {label}: {'PASS' if passed else 'FAIL'} max_abs={diff:.6e}"
+                )
                 if provider == "optimized" and not passed:
                     ok = False
             except Exception as e:
                 safe = type(e).__name__
-                print(f"TEST {display} {label}: {'FAIL' if provider == 'optimized' else 'SKIP_UNAVAILABLE'} {safe} max_abs=inf")
+                print(
+                    f"TEST {display} {label}: {'FAIL' if provider == 'optimized' else 'SKIP_UNAVAILABLE'} {safe} max_abs=inf"
+                )
                 if provider == "optimized":
                     ok = False
     # Force the optimized persistent path on a modest tensor without allocating the huge default shape.
@@ -179,12 +191,16 @@ def unit_test():
         out = _run_provider("optimized", x, shape)
         diff = _max_abs(out, ref)
         passed = diff <= 1e-3
-        print(f"TEST Optimized Triton forced_persistent: {'PASS' if passed else 'FAIL'} max_abs={diff:.6e}")
+        print(
+            f"TEST Optimized Triton forced_persistent: {'PASS' if passed else 'FAIL'} max_abs={diff:.6e}"
+        )
         ok = ok and passed
         opt._MAX_GRID = old
         _MODELS.pop(("optimized", "small"), None)
     except Exception as e:
-        print(f"TEST Optimized Triton forced_persistent: FAIL {type(e).__name__} max_abs=inf")
+        print(
+            f"TEST Optimized Triton forced_persistent: FAIL {type(e).__name__} max_abs=inf"
+        )
         ok = False
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
@@ -192,13 +208,18 @@ def unit_test():
 
 def _time_ms(fn, warmup=5, rep=20):
     try:
-        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=warmup,
+                                       rep=rep,
+                                       return_mode="mean")
     except Exception:
         for _ in range(max(1, min(warmup, 2))):
-            fn(); torch.npu.synchronize()
+            fn()
+            torch.npu.synchronize()
         start = time.perf_counter()
         for _ in range(max(1, min(rep, 5))):
-            fn(); torch.npu.synchronize()
+            fn()
+            torch.npu.synchronize()
         return (time.perf_counter() - start) * 1000.0 / max(1, min(rep, 5))
 
 
@@ -213,8 +234,7 @@ def _time_ms(fn, warmup=5, rep=20):
         ylabel="ms",
         plot_name="l2_7_conv3d_postops_biasadd",
         args={},
-    )
-)
+    ))
 def bench(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     reason = _skip_reason(provider, shape)
@@ -224,12 +244,19 @@ def bench(label, provider):
     try:
         x = _make_input(shape)
         if provider == "torch":
-            fn = lambda: _reference(x, shape)
+
+            def fn():
+                return _reference(x, shape)
         else:
-            fn = lambda: _run_provider(provider, x, shape)
+
+            def fn():
+                return _run_provider(provider, x, shape)
+
         return _time_ms(fn)
     except Exception as e:
-        print(f"INFO bench_unavailable {_DISPLAY[provider]} {label}: {type(e).__name__}")
+        print(
+            f"INFO bench_unavailable {_DISPLAY[provider]} {label}: {type(e).__name__}"
+        )
         return float("inf")
 
 

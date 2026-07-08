@@ -76,8 +76,12 @@ def _pool6_sum_c_direct_kernel(
             h_off = (h_base + kh) * stride_h
             for kw in range(0, kwin):
                 w_off = (w_base + kw) * stride_w
-                ptrs = x_ptr + base_n + c_offsets[:, None] * stride_c + d_off + h_off[None, :] + w_off[None, :]
-                vals = tl.load(ptrs, mask=mask_c[:, None] & mask_hw[None, :], other=-float("inf"))
+                ptrs = x_ptr + base_n + c_offsets[:,
+                                                  None] * stride_c + d_off + h_off[
+                                                      None, :] + w_off[None, :]
+                vals = tl.load(ptrs,
+                               mask=mask_c[:, None] & mask_hw[None, :],
+                               other=-float("inf"))
                 m = tl.maximum(m, vals.to(tl.float32))
 
     partial = tl.sum(tl.where(mask_c[:, None], m, 0.0), axis=0)
@@ -140,8 +144,13 @@ def _pool6_sum_c_persistent_kernel(
                 h_off = (h_base + kh) * stride_h
                 for kw in range(0, kwin):
                     w_off = (w_base + kw) * stride_w
-                    ptrs = x_ptr + base_n + c_offsets[:, None] * stride_c + d_off + h_off[None, :] + w_off[None, :]
-                    vals = tl.load(ptrs, mask=mask_c[:, None] & mask_hw[None, :], other=-float("inf"))
+                    ptrs = x_ptr + base_n + c_offsets[:,
+                                                      None] * stride_c + d_off + h_off[
+                                                          None, :] + w_off[
+                                                              None, :]
+                    vals = tl.load(ptrs,
+                                   mask=mask_c[:, None] & mask_hw[None, :],
+                                   other=-float("inf"))
                     m = tl.maximum(m, vals.to(tl.float32))
 
         partial = tl.sum(tl.where(mask_c[:, None], m, 0.0), axis=0)
@@ -151,14 +160,17 @@ def _pool6_sum_c_persistent_kernel(
 
 def _fused_two_pools_sum_channels(x: torch.Tensor) -> torch.Tensor:
     if not _is_npu_tensor(x):
-        raise RuntimeError("optimized fused pool+sum expects an Ascend NPU tensor")
+        raise RuntimeError(
+            "optimized fused pool+sum expects an Ascend NPU tensor")
     if x.ndim != 5:
         raise ValueError(f"expected 5D NCDHW tensor, got {tuple(x.shape)}")
 
     x = x.contiguous()
     N, C, D, H, W = x.shape
     if D < 6 or H < 6 or W < 6:
-        raise ValueError("input spatial dimensions must be at least 6 for fused MaxPool3d(2)->MaxPool3d(3)")
+        raise ValueError(
+            "input spatial dimensions must be at least 6 for fused MaxPool3d(2)->MaxPool3d(3)"
+        )
 
     D2 = (D - 6) // 6 + 1
     H2 = (H - 6) // 6 + 1
@@ -173,15 +185,49 @@ def _fused_two_pools_sum_channels(x: torch.Tensor) -> torch.Tensor:
     total_tiles = N * D2 * n_hw_tiles * n_cblocks
     if total_tiles > _MAX_GRID:
         n_programs = _MAX_GRID
-        _pool6_sum_c_persistent_kernel[(n_programs,)](
-            x, out, 6, total_tiles, n_programs, C, D2, H2, W2, sN, sC, sD, sH, sW, oN, oD, oH, oW,
-            n_hw_tiles, n_cblocks, BLOCK_HW=_BLOCK_HW, C_BLOCK=_C_BLOCK
-        )
+        _pool6_sum_c_persistent_kernel[(n_programs, )](x,
+                                                       out,
+                                                       6,
+                                                       total_tiles,
+                                                       n_programs,
+                                                       C,
+                                                       D2,
+                                                       H2,
+                                                       W2,
+                                                       sN,
+                                                       sC,
+                                                       sD,
+                                                       sH,
+                                                       sW,
+                                                       oN,
+                                                       oD,
+                                                       oH,
+                                                       oW,
+                                                       n_hw_tiles,
+                                                       n_cblocks,
+                                                       BLOCK_HW=_BLOCK_HW,
+                                                       C_BLOCK=_C_BLOCK)
     else:
-        _pool6_sum_c_direct_kernel[(total_tiles,)](
-            x, out, 6, C, D2, H2, W2, sN, sC, sD, sH, sW, oN, oD, oH, oW, n_hw_tiles, n_cblocks,
-            BLOCK_HW=_BLOCK_HW, C_BLOCK=_C_BLOCK
-        )
+        _pool6_sum_c_direct_kernel[(total_tiles, )](x,
+                                                    out,
+                                                    6,
+                                                    C,
+                                                    D2,
+                                                    H2,
+                                                    W2,
+                                                    sN,
+                                                    sC,
+                                                    sD,
+                                                    sH,
+                                                    sW,
+                                                    oN,
+                                                    oD,
+                                                    oH,
+                                                    oW,
+                                                    n_hw_tiles,
+                                                    n_cblocks,
+                                                    BLOCK_HW=_BLOCK_HW,
+                                                    C_BLOCK=_C_BLOCK)
     return out
 
 
@@ -197,17 +243,23 @@ class ModelNew(nn.Module):
         padding: int = DEFAULT_PADDING,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose3d(
-            in_channels, out_channels, kernel_size, stride=stride, padding=padding
-        )
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding)
 
     def forward(self, x):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects Ascend NPU inputs")
         if not _is_npu_tensor(self.conv_transpose.weight):
-            raise RuntimeError("ModelNew weights must be moved to Ascend NPU before execution")
-        if self.conv_transpose.bias is not None and not _is_npu_tensor(self.conv_transpose.bias):
-            raise RuntimeError("ModelNew bias must be moved to Ascend NPU before execution")
+            raise RuntimeError(
+                "ModelNew weights must be moved to Ascend NPU before execution"
+            )
+        if self.conv_transpose.bias is not None and not _is_npu_tensor(
+                self.conv_transpose.bias):
+            raise RuntimeError(
+                "ModelNew bias must be moved to Ascend NPU before execution")
         x = self.conv_transpose(x)
         if _USE_ACL_DISPATCH:
             x = F.max_pool3d(x, kernel_size=2, stride=2)

@@ -28,7 +28,8 @@ def _load(path: Path, key: str):
     if key in _PROVIDER_CACHE:
         return _PROVIDER_CACHE[key]
     try:
-        spec = importlib.util.spec_from_file_location(f"k55_{key}_{path.stem}", path)
+        spec = importlib.util.spec_from_file_location(f"k55_{key}_{path.stem}",
+                                                      path)
         mod = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = mod
         spec.loader.exec_module(mod)
@@ -44,28 +45,35 @@ def _device():
     return torch.device("npu")
 
 
-def _make_inputs(B, I, dtype=torch.float32):
+def _make_inputs(B, IN_FEATURES, dtype=torch.float32):
     torch.manual_seed(123)
-    return torch.rand((B, I), device=_device(), dtype=dtype)
+    return torch.rand((B, IN_FEATURES), device=_device(), dtype=dtype)
 
 
-def _make_ref_model(I, O, KERNEL, scale, dtype=torch.float32):
-    key = (I, O, KERNEL, float(scale), dtype)
+def _make_ref_model(IN_FEATURES,
+                    OUT_FEATURES,
+                    KERNEL,
+                    scale,
+                    dtype=torch.float32):
+    key = (IN_FEATURES, OUT_FEATURES, KERNEL, float(scale), dtype)
     if key not in _REF_CACHE:
         torch.manual_seed(0)
-        _REF_CACHE[key] = nn.Linear(I, O).to(device=_device(), dtype=dtype)
+        _REF_CACHE[key] = nn.Linear(IN_FEATURES,
+                                    OUT_FEATURES).to(device=_device(),
+                                                     dtype=dtype)
     return _REF_CACHE[key]
 
 
-def _run_torch_ref(x, I, O, KERNEL, scale):
-    model = _make_ref_model(I, O, KERNEL, scale, x.dtype)
+def _run_torch_ref(x, IN_FEATURES, OUT_FEATURES, KERNEL, scale):
+    model = _make_ref_model(IN_FEATURES, OUT_FEATURES, KERNEL, scale, x.dtype)
     z = F.linear(x, model.weight, model.bias)
-    pooled = F.max_pool1d(z.unsqueeze(1), kernel_size=KERNEL, stride=KERNEL).squeeze(1)
+    pooled = F.max_pool1d(z.unsqueeze(1), kernel_size=KERNEL,
+                          stride=KERNEL).squeeze(1)
     return pooled.sum(dim=1) * float(scale)
 
 
-def _model(provider, I, O, KERNEL, scale):
-    key = (provider, I, O, KERNEL, float(scale))
+def _model(provider, IN_FEATURES, OUT_FEATURES, KERNEL, scale):
+    key = (provider, IN_FEATURES, OUT_FEATURES, KERNEL, float(scale))
     if key in _MODEL_CACHE:
         return _MODEL_CACHE[key]
     file_key = {
@@ -79,7 +87,8 @@ def _model(provider, I, O, KERNEL, scale):
         return None
     torch.manual_seed(0)
     try:
-        m = mod.ModelNew(I, O, KERNEL, scale).to(device=_device(), dtype=torch.float32)
+        m = mod.ModelNew(IN_FEATURES, OUT_FEATURES, KERNEL,
+                         scale).to(device=_device(), dtype=torch.float32)
     except Exception as exc:
         print(f"INFO model_unavailable {provider}: {type(exc).__name__}")
         return None
@@ -87,10 +96,10 @@ def _model(provider, I, O, KERNEL, scale):
     return m
 
 
-def _run_provider(provider, x, I, O, KERNEL, scale):
+def _run_provider(provider, x, IN_FEATURES, OUT_FEATURES, KERNEL, scale):
     if provider == "torch":
-        return _run_torch_ref(x, I, O, KERNEL, scale)
-    m = _model(provider, I, O, KERNEL, scale)
+        return _run_torch_ref(x, IN_FEATURES, OUT_FEATURES, KERNEL, scale)
+    m = _model(provider, IN_FEATURES, OUT_FEATURES, KERNEL, scale)
     if m is None:
         raise RuntimeError("provider unavailable")
     if provider == "opt_fallback":
@@ -113,46 +122,68 @@ def _max_abs(a, b):
 def unit_test():
     ok = True
     providers = ["baseline1", "baseline2", "optimized", "opt_fallback"]
-    for label, B, I, O, KERNEL, scale in _BENCH_SHAPES:
-        x = _make_inputs(B, I)
-        ref = _run_torch_ref(x, I, O, KERNEL, scale)
+    for label, B, IN_FEATURES, OUT_FEATURES, KERNEL, scale in _BENCH_SHAPES:
+        x = _make_inputs(B, IN_FEATURES)
+        ref = _run_torch_ref(x, IN_FEATURES, OUT_FEATURES, KERNEL, scale)
         for provider in providers:
-            if label == "default_acl" and provider in ("baseline1", "baseline2", "opt_fallback"):
+            if label == "default_acl" and provider in ("baseline1",
+                                                       "baseline2",
+                                                       "opt_fallback"):
                 if provider == "baseline2":
-                    print(f"TEST {provider} {label}: SKIP huge_custom_path max_abs=inf")
+                    print(
+                        f"TEST {provider} {label}: SKIP huge_custom_path max_abs=inf"
+                    )
                 else:
-                    print(f"INFO test_skip {provider} {label}: huge custom Triton comparison path preskipped")
+                    print(
+                        f"INFO test_skip {provider} {label}: huge custom Triton comparison path preskipped"
+                    )
                 continue
             try:
-                y = _run_provider(provider, x, I, O, KERNEL, scale)
+                y = _run_provider(provider, x, IN_FEATURES, OUT_FEATURES,
+                                  KERNEL, scale)
                 torch.npu.synchronize()
                 diff = _max_abs(y, ref)
                 passed = math.isfinite(diff) and diff <= 1e-3
-                print(f"TEST {provider} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}")
-                ok = ok and (passed or provider in ("baseline2",))
+                print(
+                    f"TEST {provider} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}"
+                )
+                ok = ok and (passed or provider in ("baseline2", ))
             except Exception as exc:
                 if provider == "baseline2":
-                    print(f"TEST {provider} {label}: UNAVAILABLE {type(exc).__name__} max_abs=inf")
+                    print(
+                        f"TEST {provider} {label}: UNAVAILABLE {type(exc).__name__} max_abs=inf"
+                    )
                 else:
-                    print(f"INFO test_unavailable {provider} {label}: {type(exc).__name__}")
-                if provider in ("optimized", "opt_fallback") and not (provider == "opt_fallback" and label == "default_acl"):
+                    print(
+                        f"INFO test_unavailable {provider} {label}: {type(exc).__name__}"
+                    )
+                if provider in ("optimized", "opt_fallback") and not (
+                        provider == "opt_fallback" and label == "default_acl"):
                     ok = False
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
 
 
-def _bench_once(provider, label, B, I, O, KERNEL, scale):
-    if label == "default_acl" and provider in ("baseline1", "baseline2", "opt_fallback"):
-        print(f"INFO bench_skip {provider} {label}: huge custom Triton comparison path preskipped_to_avoid_timeout")
+def _bench_once(provider, label, B, IN_FEATURES, OUT_FEATURES, KERNEL, scale):
+    if label == "default_acl" and provider in ("baseline1", "baseline2",
+                                               "opt_fallback"):
+        print(
+            f"INFO bench_skip {provider} {label}: huge custom Triton comparison path preskipped_to_avoid_timeout"
+        )
         return float("inf")
     try:
-        x = _make_inputs(B, I)
+        x = _make_inputs(B, IN_FEATURES)
         # Compile/warmup once before do_bench's timed loop.
-        _run_provider(provider, x, I, O, KERNEL, scale)
+        _run_provider(provider, x, IN_FEATURES, OUT_FEATURES, KERNEL, scale)
         torch.npu.synchronize()
-        return triton.testing.do_bench(lambda: _run_provider(provider, x, I, O, KERNEL, scale), warmup=10, rep=50, return_mode="mean")
+        return triton.testing.do_bench(lambda: _run_provider(
+            provider, x, IN_FEATURES, OUT_FEATURES, KERNEL, scale),
+                                       warmup=10,
+                                       rep=50,
+                                       return_mode="mean")
     except Exception as exc:
-        print(f"INFO bench_unavailable {provider} {label}: {type(exc).__name__}")
+        print(
+            f"INFO bench_unavailable {provider} {label}: {type(exc).__name__}")
         return float("inf")
 
 
@@ -161,18 +192,24 @@ def _bench_once(provider, label, B, I, O, KERNEL, scale):
         x_names=["label"],
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
-        line_vals=["torch", "baseline1", "baseline2", "optimized", "opt_fallback"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton", "Optimized TritonFallback"],
-        styles=[("black", "-"), ("red", "--"), ("orange", "--"), ("green", "-"), ("blue", "-")],
+        line_vals=[
+            "torch", "baseline1", "baseline2", "optimized", "opt_fallback"
+        ],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton", "Optimized TritonFallback"
+        ],
+        styles=[("black", "-"), ("red", "--"), ("orange", "--"),
+                ("green", "-"), ("blue", "-")],
         ylabel="latency ms",
         plot_name="matmul_maxpool_sum_scale",
         args={},
-    )
-)
+    ))
 def bench(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
-    _, B, I, O, KERNEL, scale = shape
-    return _bench_once(provider, label, B, I, O, KERNEL, scale)
+    _, B, IN_FEATURES, OUT_FEATURES, KERNEL, scale = shape
+    return _bench_once(provider, label, B, IN_FEATURES, OUT_FEATURES, KERNEL,
+                       scale)
 
 
 def main():

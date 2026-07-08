@@ -5,13 +5,13 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 _EPILOGUE_BLOCK_SIZE = 4096
 _MAX_PROGRAMS = 65535
 
 
 @triton.jit
-def _relu_scale_direct_kernel(x_ptr, n_elements, scale, BLOCK_SIZE: tl.constexpr):
+def _relu_scale_direct_kernel(x_ptr, n_elements, scale,
+                              BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     mask = offsets < n_elements
@@ -51,7 +51,7 @@ def _launch_relu_scale_inplace(y, scale):
         return y
     n_tiles = triton.cdiv(n_elements, _EPILOGUE_BLOCK_SIZE)
     if n_tiles > _MAX_PROGRAMS:
-        grid = (_MAX_PROGRAMS,)
+        grid = (_MAX_PROGRAMS, )
         _relu_scale_persistent_kernel[grid](
             y,
             n_elements,
@@ -62,7 +62,7 @@ def _launch_relu_scale_inplace(y, scale):
             num_stages=2,
         )
     else:
-        grid = (n_tiles,)
+        grid = (n_tiles, )
         _relu_scale_direct_kernel[grid](
             y,
             n_elements,
@@ -79,7 +79,8 @@ def gemm_relu_divide(x, weight, bias, divisor):
     _require_npu_tensor("weight", weight)
     _require_npu_tensor("bias", bias)
     if x.device != weight.device or x.device != bias.device:
-        raise RuntimeError("x, weight, and bias must be on the same NPU device")
+        raise RuntimeError(
+            "x, weight, and bias must be on the same NPU device")
 
     divisor = float(divisor)
     if divisor == 0.0:

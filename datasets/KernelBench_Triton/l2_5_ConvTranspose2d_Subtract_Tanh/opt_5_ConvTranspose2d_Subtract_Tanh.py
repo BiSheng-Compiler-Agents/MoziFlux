@@ -6,7 +6,6 @@ import triton
 import triton.language as tl
 from triton.language.math import tanh as tl_tanh
 
-
 _BLOCK_HW = 4096
 _MAX_PROGRAMS = 65535  # Ascend FFTS grid cap
 
@@ -68,7 +67,8 @@ def _bias_sub_tanh_plane_persistent(
 
 def _bias_sub_tanh_fused(x: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
     if x.device.type != "npu":
-        raise RuntimeError("The fused Triton kernel only supports Ascend NPU tensors.")
+        raise RuntimeError(
+            "The fused Triton kernel only supports Ascend NPU tensors.")
     x = x.contiguous()
     b = bias.reshape(-1).to(device=x.device, dtype=x.dtype).contiguous()
     y = torch.empty_like(x)
@@ -80,19 +80,30 @@ def _bias_sub_tanh_fused(x: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
     total_tiles = n_planes * num_hw_tiles
 
     if total_tiles > _MAX_PROGRAMS:
-        grid = (_MAX_PROGRAMS,)
+        grid = (_MAX_PROGRAMS, )
         _bias_sub_tanh_plane_persistent[grid](
-            x, b, y, _MAX_PROGRAMS,
-            HW, C, total_tiles, num_hw_tiles,
+            x,
+            b,
+            y,
+            _MAX_PROGRAMS,
+            HW,
+            C,
+            total_tiles,
+            num_hw_tiles,
             BLOCK_HW=_BLOCK_HW,
             num_warps=8,
             num_stages=2,
         )
     else:
-        grid = (total_tiles,)
+        grid = (total_tiles, )
         _bias_sub_tanh_plane_direct[grid](
-            x, b, y,
-            HW, C, total_tiles, num_hw_tiles,
+            x,
+            b,
+            y,
+            HW,
+            C,
+            total_tiles,
+            num_hw_tiles,
             BLOCK_HW=_BLOCK_HW,
             num_warps=8,
             num_stages=2,
@@ -112,9 +123,11 @@ def conv_transpose2d_subtract_tanh(
     groups: int = 1,
 ) -> torch.Tensor:
     if x.device.type != "npu" or weight.device.type != "npu" or subtract_bias.device.type != "npu":
-        raise RuntimeError("conv_transpose2d_subtract_tanh expects NPU tensors.")
+        raise RuntimeError(
+            "conv_transpose2d_subtract_tanh expects NPU tensors.")
     if conv_bias is not None and conv_bias.device.type != "npu":
-        raise RuntimeError("conv_transpose2d_subtract_tanh expects conv_bias on NPU.")
+        raise RuntimeError(
+            "conv_transpose2d_subtract_tanh expects conv_bias on NPU.")
 
     x = F.conv_transpose2d(
         x,
@@ -132,8 +145,14 @@ def conv_transpose2d_subtract_tanh(
 class ModelNew(nn.Module):
     """Model that performs transposed convolution, subtracts channel bias, and applies tanh."""
 
-    def __init__(self, in_channels, out_channels, kernel_size, bias_shape,
-                 stride=2, padding=1, output_padding=1):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size,
+                 bias_shape,
+                 stride=2,
+                 padding=1,
+                 output_padding=1):
         super(ModelNew, self).__init__()
         self.conv_transpose = nn.ConvTranspose2d(
             in_channels,

@@ -50,4 +50,3 @@
 | default | 57.263958 | inf | inf | 60.777836 | 0.942x |
 
 Conclusion: the optimized Triton reduction is correct and improves the custom strided reduction trace shape, but full medium/default hardware latency is slower than pure ACL because the `permute(...).contiguous()` materialization offsets the faster contiguous Triton reduction.
-

@@ -1,14 +1,11 @@
 import argparse
 import importlib.util
-import math
-import os
 import sys
 import time
 from pathlib import Path
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import triton
 
 ROOT = Path(__file__).resolve().parent
@@ -27,7 +24,8 @@ def _load(path: Path, name: str):
 
 _MODS = {}
 _LOAD_ERRORS = {}
-for key, path in [("baseline1", INPUT_FILE), ("baseline2", BASE_FILE), ("optimized", OPT_FILE)]:
+for key, path in [("baseline1", INPUT_FILE), ("baseline2", BASE_FILE),
+                  ("optimized", OPT_FILE)]:
     try:
         _MODS[key] = _load(path, f"k46_{key}_{path.stem}")
     except Exception as exc:
@@ -35,7 +33,9 @@ for key, path in [("baseline1", INPUT_FILE), ("baseline2", BASE_FILE), ("optimiz
 
 
 class TorchRef(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, subtract1_value, subtract2_value, kernel_size_pool):
+
+    def __init__(self, in_channels, out_channels, kernel_size, subtract1_value,
+                 subtract2_value, kernel_size_pool):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
         self.subtract1_value = float(subtract1_value)
@@ -44,7 +44,8 @@ class TorchRef(nn.Module):
 
     def forward(self, x):
         x = self.conv(x.to(dtype=torch.float32))
-        return self.avgpool(torch.tanh(x - self.subtract1_value)) - self.subtract2_value
+        return self.avgpool(
+            torch.tanh(x - self.subtract1_value)) - self.subtract2_value
 
 
 _MODEL_CACHE = {}
@@ -64,10 +65,12 @@ def _model(key):
     if key == "torch_ref":
         model = TorchRef(*_init_args())
     elif key == "opt_triton_direct":
-        model = _MODS["optimized"].ModelNew(*_init_args(), use_triton_epilogue=True)
+        model = _MODS["optimized"].ModelNew(*_init_args(),
+                                            use_triton_epilogue=True)
         _MODS["optimized"]._MAX_GRID = 10**9
     elif key == "opt_triton_persistent":
-        model = _MODS["optimized"].ModelNew(*_init_args(), use_triton_epilogue=True)
+        model = _MODS["optimized"].ModelNew(*_init_args(),
+                                            use_triton_epilogue=True)
         _MODS["optimized"]._MAX_GRID = 1
     else:
         model = _MODS[key].ModelNew(*_init_args())
@@ -85,7 +88,7 @@ _BENCH_SHAPES = [
 
 def _make_inputs(label, B, C, H, W):
     torch.manual_seed(123)
-    return (torch.rand(B, C, H, W, device="npu", dtype=torch.float32),)
+    return (torch.rand(B, C, H, W, device="npu", dtype=torch.float32), )
 
 
 def _run_torch_ref(x):
@@ -95,7 +98,8 @@ def _run_torch_ref(x):
 
 def _run_provider(provider, x):
     if provider in _LOAD_ERRORS:
-        raise RuntimeError(f"provider_unavailable:{provider}:{_LOAD_ERRORS[provider]}")
+        raise RuntimeError(
+            f"provider_unavailable:{provider}:{_LOAD_ERRORS[provider]}")
     with torch.no_grad():
         return _model(provider)(x)
 
@@ -120,7 +124,9 @@ def unit_test():
                 out = _run_provider(provider, x)
                 diff = _max_abs(out, ref)
                 passed = diff <= 1e-3
-                print(f"UNIT {label} {provider}: max_abs={diff:.6g} {'PASS' if passed else 'MISMATCH'}")
+                print(
+                    f"UNIT {label} {provider}: max_abs={diff:.6g} {'PASS' if passed else 'MISMATCH'}"
+                )
                 if provider == "optimized" and not passed:
                     ok = False
             except Exception as exc:
@@ -129,7 +135,10 @@ def unit_test():
                 if provider == "optimized":
                     ok = False
     # Explicitly exercise both optimized Triton dispatch paths without making them the production default.
-    for path_key, shape in [("opt_triton_direct", ("forced_direct", 2, 64, 16, 16)), ("opt_triton_persistent", ("forced_persistent", 2, 64, 16, 16))]:
+    for path_key, shape in [
+        ("opt_triton_direct", ("forced_direct", 2, 64, 16, 16)),
+        ("opt_triton_persistent", ("forced_persistent", 2, 64, 16, 16))
+    ]:
         label, B, C, H, W = shape
         try:
             x, = _make_inputs(label, B, C, H, W)
@@ -137,7 +146,9 @@ def unit_test():
             out = _run_optimized_triton_path(path_key, x)
             diff = _max_abs(out, ref)
             passed = diff <= 2e-3
-            print(f"UNIT {label} {path_key}: max_abs={diff:.6g} {'PASS' if passed else 'MISMATCH'}")
+            print(
+                f"UNIT {label} {path_key}: max_abs={diff:.6g} {'PASS' if passed else 'MISMATCH'}"
+            )
             ok = ok and passed
         except Exception as exc:
             print(f"ERROR {label} {path_key}: {type(exc).__name__}")
@@ -148,7 +159,10 @@ def unit_test():
 
 def _bench_ms(fn, warmup=10, rep=50):
     try:
-        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=warmup,
+                                       rep=rep,
+                                       return_mode="mean")
     except Exception:
         for _ in range(warmup):
             fn()
@@ -166,18 +180,22 @@ def _bench_ms(fn, warmup=10, rep=50):
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=["torch_ref", "baseline1", "baseline2", "optimized"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("black", "-"), ("blue", "-"), ("red", "--"), ("green", "-")],
         ylabel="Latency (ms)",
         plot_name="conv2d_subtract_tanh_subtract_avgpool",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     x, = _make_inputs(*shape)
     if provider in _LOAD_ERRORS:
-        print(f"INFO {provider} unavailable_or_preskipped {_LOAD_ERRORS[provider]}")
+        print(
+            f"INFO {provider} unavailable_or_preskipped {_LOAD_ERRORS[provider]}"
+        )
         return float("inf")
     try:
         if provider == "torch_ref":

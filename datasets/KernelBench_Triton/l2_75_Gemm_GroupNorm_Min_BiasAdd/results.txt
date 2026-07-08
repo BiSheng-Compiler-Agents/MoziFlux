@@ -13,4 +13,3 @@ gemm_groupnorm_min_bias_add:
            label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
 0     small_N128       4.278572          4.619391               inf          4.265512
 1  default_N1024      20.418920         22.344521               inf         20.398811
-

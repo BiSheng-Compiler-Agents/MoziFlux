@@ -17,4 +17,3 @@ gemm_scale_batchnorm_perf:
 0     small_K1024       0.409222          1.508298               inf          0.611062
 1    medium_K4096       1.973866         50.022953               inf          4.568573
 2  required_K8192      17.538818        733.081360               inf         48.622585
-

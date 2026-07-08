@@ -4,7 +4,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 _MAX_GRID = 65535
 _BLOCK_SIZE = 8192
 
@@ -101,12 +100,15 @@ class ModelNew(nn.Module):
         n_tiles = triton.cdiv(n_elements, _BLOCK_SIZE)
 
         if n_tiles <= _MAX_GRID:
-            _div_leakyrelu_direct_kernel[(n_tiles,)](
-                conv_out, out, n_elements, inv_div, neg_slope, BLOCK_SIZE=_BLOCK_SIZE
-            )
+            _div_leakyrelu_direct_kernel[(n_tiles, )](conv_out,
+                                                      out,
+                                                      n_elements,
+                                                      inv_div,
+                                                      neg_slope,
+                                                      BLOCK_SIZE=_BLOCK_SIZE)
         else:
             n_programs = _MAX_GRID
-            _div_leakyrelu_persistent_kernel[(n_programs,)](
+            _div_leakyrelu_persistent_kernel[(n_programs, )](
                 conv_out,
                 out,
                 n_elements,

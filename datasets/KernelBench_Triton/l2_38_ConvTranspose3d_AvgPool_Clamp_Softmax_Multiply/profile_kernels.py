@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import math
 import pathlib
 import sys
 import time
@@ -8,7 +7,6 @@ from typing import Dict, Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import triton
 
 try:
@@ -32,7 +30,9 @@ _PROVIDER_FILES = {
     "Baseline Triton2": BASELINE2_FILE,
     "Optimized Triton": OPT_FILE,
 }
-_PROVIDER_ORDER = ["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"]
+_PROVIDER_ORDER = [
+    "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"
+]
 _MODULES: Dict[str, object] = {}
 _MODELS: Dict[str, nn.Module] = {}
 
@@ -50,13 +50,24 @@ def _load(path_name: str, key: str):
 
 
 class TorchRef(nn.Module):
-    def __init__(self, in_channels=32, out_channels=64, kernel_size=3, stride=2,
-                 padding=1, output_padding=1, pool_kernel_size=2,
-                 clamp_min=0.0, clamp_max=1.0):
+
+    def __init__(self,
+                 in_channels=32,
+                 out_channels=64,
+                 kernel_size=3,
+                 stride=2,
+                 padding=1,
+                 output_padding=1,
+                 pool_kernel_size=2,
+                 clamp_min=0.0,
+                 clamp_max=1.0):
         super().__init__()
-        self.conv_transpose = nn.ConvTranspose3d(
-            in_channels, out_channels, kernel_size, stride=stride,
-            padding=padding, output_padding=output_padding)
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding,
+                                                 output_padding=output_padding)
         self.avg_pool = nn.AvgPool3d(pool_kernel_size)
         self.clamp_min = float(clamp_min)
         self.clamp_max = float(clamp_max)
@@ -126,9 +137,13 @@ def unit_test() -> bool:
                 if provider == "Optimized Triton":
                     ok = False
                     detail = str(exc).replace("\n", " ")[:180]
-                    print(f"UNIT_TEST_FAILED Optimized Triton {label}: {type(exc).__name__} {detail}")
+                    print(
+                        f"UNIT_TEST_FAILED Optimized Triton {label}: {type(exc).__name__} {detail}"
+                    )
                 else:
-                    print(f"INFO comparison_provider_unavailable {provider} {label}: {type(exc).__name__}")
+                    print(
+                        f"INFO comparison_provider_unavailable {provider} {label}: {type(exc).__name__}"
+                    )
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
 
@@ -138,23 +153,36 @@ def _bench_once(provider: str, shape: Tuple) -> float:
     try:
         # Guard known baseline1 default-shape grid poison: N*cdiv(DHW,64)=65536.
         if provider == "Baseline Triton1" and shape[0] == "target_acl":
-            print("INFO comparison_provider_preskipped Baseline Triton1 target_acl grid_cap")
+            print(
+                "INFO comparison_provider_preskipped Baseline Triton1 target_acl grid_cap"
+            )
             return float("inf")
         _run_provider(provider, x)
         _sync()
+
         def fn():
             _run_provider(provider, x)
+
         try:
-            return triton.testing.do_bench(fn, warmup=10, rep=50, return_mode="mean")
+            return triton.testing.do_bench(fn,
+                                           warmup=10,
+                                           rep=50,
+                                           return_mode="mean")
         except Exception:
             times = []
             for _ in range(5):
-                fn(); _sync()
+                fn()
+                _sync()
             for _ in range(20):
-                t0 = time.perf_counter(); fn(); _sync(); times.append((time.perf_counter() - t0) * 1000.0)
+                t0 = time.perf_counter()
+                fn()
+                _sync()
+                times.append((time.perf_counter() - t0) * 1000.0)
             return sum(times) / len(times)
     except Exception as exc:
-        print(f"INFO bench_unavailable {provider} {shape[0]}: {type(exc).__name__}")
+        print(
+            f"INFO bench_unavailable {provider} {shape[0]}: {type(exc).__name__}"
+        )
         return float("inf")
 
 
@@ -169,8 +197,7 @@ def _bench_once(provider: str, shape: Tuple) -> float:
         ylabel="ms",
         plot_name="convtranspose3d_avgpool_clamp_softmax_multiply",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     return _bench_once(provider, shape)

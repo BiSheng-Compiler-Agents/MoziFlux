@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 _MAX_PROGRAMS = 65535
 _TRITON_MAX_C = 128
 
@@ -35,7 +34,8 @@ def _softmax_sigmoid_singlepass_5d(
     d_idx = tmp % D
     n_idx = tmp // D
 
-    base = (n_idx * stride_n + d_idx * stride_d + h_idx * stride_h + w_idx * stride_w).to(tl.int64)
+    base = (n_idx * stride_n + d_idx * stride_d + h_idx * stride_h +
+            w_idx * stride_w).to(tl.int64)
     ch = tl.arange(0, BLOCK_C)
     mask = row_mask & (ch < C)
     ptrs = x_ptr + base + ch * stride_c
@@ -78,7 +78,8 @@ class ModelNew(nn.Module):
         if x.device.type != "npu":
             raise RuntimeError("ModelNew requires execution on Ascend NPU.")
         if x.dtype not in (torch.float16, torch.float32):
-            raise RuntimeError(f"Unsupported dtype for optimized path: {x.dtype}")
+            raise RuntimeError(
+                f"Unsupported dtype for optimized path: {x.dtype}")
 
         N, C, D, H, W = x.shape
         total_rows = N * D * H * W
@@ -93,13 +94,33 @@ class ModelNew(nn.Module):
         sN, sC, sD, sH, sW = x.stride()
         block_c = triton.next_power_of_2(C)
         if block_c <= 64:
-            _softmax_sigmoid_singlepass_5d[(total_rows,)](
-                x, y, N, C, D, H, W, sN, sC, sD, sH, sW, BLOCK_C=64
-            )
+            _softmax_sigmoid_singlepass_5d[(total_rows, )](x,
+                                                           y,
+                                                           N,
+                                                           C,
+                                                           D,
+                                                           H,
+                                                           W,
+                                                           sN,
+                                                           sC,
+                                                           sD,
+                                                           sH,
+                                                           sW,
+                                                           BLOCK_C=64)
         else:
-            _softmax_sigmoid_singlepass_5d[(total_rows,)](
-                x, y, N, C, D, H, W, sN, sC, sD, sH, sW, BLOCK_C=128
-            )
+            _softmax_sigmoid_singlepass_5d[(total_rows, )](x,
+                                                           y,
+                                                           N,
+                                                           C,
+                                                           D,
+                                                           H,
+                                                           W,
+                                                           sN,
+                                                           sC,
+                                                           sD,
+                                                           sH,
+                                                           sW,
+                                                           BLOCK_C=128)
         return y
 
 
@@ -118,4 +139,6 @@ def get_inputs():
 
 
 def get_init_inputs():
-    return [in_channels, out_channels, kernel_size, stride, padding, output_padding]
+    return [
+        in_channels, out_channels, kernel_size, stride, padding, output_padding
+    ]

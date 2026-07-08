@@ -18,8 +18,8 @@ def _is_npu_tensor(x: torch.Tensor) -> bool:
 
 @triton.jit
 def _lse_relu_lastdim_kernel(
-    x_ptr,       # contiguous NHWDC-like buffer, flattened [M, C]
-    out_ptr,     # flattened output [M]
+    x_ptr,  # contiguous NHWDC-like buffer, flattened [M, C]
+    out_ptr,  # flattened output [M]
     M,
     C: tl.constexpr,
     BLOCK_M: tl.constexpr,
@@ -32,7 +32,9 @@ def _lse_relu_lastdim_kernel(
     col_mask = cols < C
 
     offsets = rows[:, None] * C + cols[None, :]
-    vals = tl.load(x_ptr + offsets, mask=row_mask[:, None] & col_mask[None, :], other=-float("inf"))
+    vals = tl.load(x_ptr + offsets,
+                   mask=row_mask[:, None] & col_mask[None, :],
+                   other=-float("inf"))
     vals = vals.to(tl.float32)
 
     m = tl.max(vals, axis=1)
@@ -61,9 +63,14 @@ def _lse_relu_triton_lastdim(x_nhwc: torch.Tensor, out_shape) -> torch.Tensor:
 
     block_c = _next_power_of_2(C)
     block_m = 16 if block_c >= 64 else 32
-    y_flat = torch.empty((M,), device=x_nhwc.device, dtype=torch.float32)
-    grid = (triton.cdiv(M, block_m),)
-    _lse_relu_lastdim_kernel[grid](x_nhwc, y_flat, M, C=C, BLOCK_M=block_m, BLOCK_C=block_c)
+    y_flat = torch.empty((M, ), device=x_nhwc.device, dtype=torch.float32)
+    grid = (triton.cdiv(M, block_m), )
+    _lse_relu_lastdim_kernel[grid](x_nhwc,
+                                   y_flat,
+                                   M,
+                                   C=C,
+                                   BLOCK_M=block_m,
+                                   BLOCK_C=block_c)
     return y_flat.reshape(out_shape).to(x_nhwc.dtype)
 
 
@@ -83,7 +90,11 @@ class ModelNew(nn.Module):
         padding=DEFAULT_PADDING,
     ):
         super(ModelNew, self).__init__()
-        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        self.conv = nn.Conv3d(in_channels,
+                              out_channels,
+                              kernel_size,
+                              stride=stride,
+                              padding=padding)
         self.max_pool = nn.MaxPool3d(kernel_size=2, stride=2)
 
     def forward(self, x):

@@ -2,7 +2,6 @@ import os
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 try:
     import triton
@@ -58,7 +57,8 @@ if _TRITON_AVAILABLE:
         for rr in range(0, K):
             row_off = base_in + rr * W
             for ss in range(0, K):
-                vals = tl.load(x_ptr + row_off + ss, mask=mask_hw, other=0.0).to(tl.float32)
+                vals = tl.load(x_ptr + row_off + ss, mask=mask_hw,
+                               other=0.0).to(tl.float32)
                 acc += _fast_tanh(vals - subtract1)
 
         out_val = acc * (1.0 / (K * K)) - subtract2
@@ -102,7 +102,9 @@ if _TRITON_AVAILABLE:
             for rr in range(0, K):
                 row_off = base_in + rr * W
                 for ss in range(0, K):
-                    vals = tl.load(x_ptr + row_off + ss, mask=mask_hw, other=0.0).to(tl.float32)
+                    vals = tl.load(x_ptr + row_off + ss,
+                                   mask=mask_hw,
+                                   other=0.0).to(tl.float32)
                     acc += _fast_tanh(vals - subtract1)
 
             out_val = acc * (1.0 / (K * K)) - subtract2
@@ -133,7 +135,8 @@ class ModelNew(nn.Module):
 
     def _triton_epilogue(self, x):
         if not _TRITON_AVAILABLE:
-            raise RuntimeError("Triton is required for the Triton epilogue path")
+            raise RuntimeError(
+                "Triton is required for the Triton epilogue path")
         x = x.contiguous()
         N, C, H, W = x.shape
         K = int(self.kernel_size_pool)
@@ -143,16 +146,41 @@ class ModelNew(nn.Module):
         n_tiles = N * C * triton.cdiv(outH * outW, _BLOCK_HW)
         if n_tiles > _MAX_GRID:
             n_programs = _MAX_GRID
-            _tanh_avgpool_persistent_kernel[(n_programs,)](
-                x, y, N, C, H, W, outH, outW, n_tiles, n_programs,
-                self.subtract1_value, self.subtract2_value,
-                BLOCK_HW=_BLOCK_HW, K=K, num_warps=4, num_stages=2,
+            _tanh_avgpool_persistent_kernel[(n_programs, )](
+                x,
+                y,
+                N,
+                C,
+                H,
+                W,
+                outH,
+                outW,
+                n_tiles,
+                n_programs,
+                self.subtract1_value,
+                self.subtract2_value,
+                BLOCK_HW=_BLOCK_HW,
+                K=K,
+                num_warps=4,
+                num_stages=2,
             )
         else:
-            _tanh_avgpool_direct_kernel[(n_tiles,)](
-                x, y, N, C, H, W, outH, outW, n_tiles,
-                self.subtract1_value, self.subtract2_value,
-                BLOCK_HW=_BLOCK_HW, K=K, num_warps=4, num_stages=2,
+            _tanh_avgpool_direct_kernel[(n_tiles, )](
+                x,
+                y,
+                N,
+                C,
+                H,
+                W,
+                outH,
+                outW,
+                n_tiles,
+                self.subtract1_value,
+                self.subtract2_value,
+                BLOCK_HW=_BLOCK_HW,
+                K=K,
+                num_warps=4,
+                num_stages=2,
             )
         return y
 
@@ -162,7 +190,8 @@ class ModelNew(nn.Module):
             return self._triton_epilogue(x)
         # Production fast path: CANN/ACL kernels avoid the custom epilogue's scalar-heavy
         # NCHW/pool index math and avoid the default-shape Triton grid-cap boundary.
-        return self.avgpool(torch.tanh(x - self.subtract1_value)) - self.subtract2_value
+        return self.avgpool(
+            torch.tanh(x - self.subtract1_value)) - self.subtract2_value
 
 
 _MODEL_CACHE = {}
@@ -173,7 +202,8 @@ def conv2d_subtract_tanh_subtract_avgpool(x):
     module = _MODEL_CACHE.get(cache_key)
     if module is None:
         torch.manual_seed(0)
-        module = ModelNew(*get_init_inputs()).to(device=x.device, dtype=torch.float32).eval()
+        module = ModelNew(*get_init_inputs()).to(device=x.device,
+                                                 dtype=torch.float32).eval()
         _MODEL_CACHE[cache_key] = module
     with torch.no_grad():
         return module(x)

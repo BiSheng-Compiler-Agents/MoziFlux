@@ -4,7 +4,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 _BLOCK_N = 1024
 _MAX_GRID = 65535
 
@@ -14,17 +13,22 @@ def _zero_fill_direct(out_ptr, n_elements, BLOCK_N: tl.constexpr):
     pid = tl.program_id(0)
     offs = pid * BLOCK_N + tl.arange(0, BLOCK_N)
     mask = offs < n_elements
-    tl.store(out_ptr + offs, tl.zeros((BLOCK_N,), dtype=tl.float32), mask=mask)
+    tl.store(out_ptr + offs,
+             tl.zeros((BLOCK_N, ), dtype=tl.float32),
+             mask=mask)
 
 
 @triton.jit
-def _zero_fill_persistent(out_ptr, n_elements, n_programs, BLOCK_N: tl.constexpr):
+def _zero_fill_persistent(out_ptr, n_elements, n_programs,
+                          BLOCK_N: tl.constexpr):
     pid = tl.program_id(0)
     n_tiles = tl.cdiv(n_elements, BLOCK_N)
     for tile_id in range(pid, n_tiles, n_programs):
         offs = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
         mask = offs < n_elements
-        tl.store(out_ptr + offs, tl.zeros((BLOCK_N,), dtype=tl.float32), mask=mask)
+        tl.store(out_ptr + offs,
+                 tl.zeros((BLOCK_N, ), dtype=tl.float32),
+                 mask=mask)
 
 
 class ModelNew(nn.Module):
@@ -54,19 +58,21 @@ class ModelNew(nn.Module):
         if x.device.type != "npu":
             raise RuntimeError("ModelNew expects inputs on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked inputs")
 
         n_elements = x.shape[0]
         out = torch.empty((n_elements, 1), device=x.device, dtype=x.dtype)
         n_tiles = triton.cdiv(n_elements, _BLOCK_N)
         if n_tiles > _MAX_GRID:
-            _zero_fill_persistent[(_MAX_GRID,)](
-                out, n_elements, _MAX_GRID, BLOCK_N=_BLOCK_N
-            )
+            _zero_fill_persistent[(_MAX_GRID, )](out,
+                                                 n_elements,
+                                                 _MAX_GRID,
+                                                 BLOCK_N=_BLOCK_N)
         else:
-            _zero_fill_direct[(max(1, n_tiles),)](
-                out, n_elements, BLOCK_N=_BLOCK_N
-            )
+            _zero_fill_direct[(max(1, n_tiles), )](out,
+                                                   n_elements,
+                                                   BLOCK_N=_BLOCK_N)
         return out
 
 

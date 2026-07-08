@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import math
 import pathlib
 import sys
 import time
@@ -8,7 +7,6 @@ import time
 import torch
 import torch_npu  # noqa: F401
 import torch.nn as nn
-import torch.nn.functional as F
 import triton
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -51,7 +49,9 @@ def _module(key):
 
 
 class TorchRef(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, pool_kernel_size):
+
+    def __init__(self, in_channels, out_channels, kernel_size,
+                 pool_kernel_size):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
         self.avg_pool = nn.AvgPool2d(pool_kernel_size)
@@ -119,25 +119,35 @@ def unit_test():
                 ("opt", "Optimized Triton"),
             ]:
                 if key == "baseline2":
-                    print(f"TEST {display} {label}: SKIP_UNAVAILABLE sandbox_base_file_read_disallowed max_abs=inf")
+                    print(
+                        f"TEST {display} {label}: SKIP_UNAVAILABLE sandbox_base_file_read_disallowed max_abs=inf"
+                    )
                     continue
                 if key == "baseline1" and label == "target":
-                    print(f"TEST {display} {label}: SKIP_COMPARISON target_custom_triton_too_slow max_abs=inf")
+                    print(
+                        f"TEST {display} {label}: SKIP_COMPARISON target_custom_triton_too_slow max_abs=inf"
+                    )
                     continue
                 try:
                     out = _run_provider(key, shape, inputs)
                     diff = _max_abs(out, ref)
                     passed = diff <= 1e-3
-                    print(f"TEST {display} {label}: {'PASS' if passed else 'FAIL'} max_abs={diff:.6g}")
+                    print(
+                        f"TEST {display} {label}: {'PASS' if passed else 'FAIL'} max_abs={diff:.6g}"
+                    )
                     if key == "opt" and not passed:
                         ok = False
                 except Exception as exc:
                     tag = type(exc).__name__
                     if key == "opt":
-                        print(f"TEST {display} {label}: FAIL_EXCEPTION {tag} max_abs=inf")
+                        print(
+                            f"TEST {display} {label}: FAIL_EXCEPTION {tag} max_abs=inf"
+                        )
                         ok = False
                     else:
-                        print(f"TEST {display} {label}: SKIP_UNAVAILABLE {tag} max_abs=inf")
+                        print(
+                            f"TEST {display} {label}: SKIP_UNAVAILABLE {tag} max_abs=inf"
+                        )
         torch.npu.synchronize()
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
@@ -146,21 +156,35 @@ def unit_test():
 def _bench_one(provider, shape):
     label = shape[0]
     if provider == "Baseline Triton2":
-        print(f"INFO bench_skip {provider} {label}: sandbox_base_file_read_disallowed")
+        print(
+            f"INFO bench_skip {provider} {label}: sandbox_base_file_read_disallowed"
+        )
         return float("inf")
-    key = {"PyTorch / ACL": "ref", "Baseline Triton1": "baseline1", "Optimized Triton": "opt"}[provider]
+    key = {
+        "PyTorch / ACL": "ref",
+        "Baseline Triton1": "baseline1",
+        "Optimized Triton": "opt"
+    }[provider]
     if key == "baseline1" and label == "target":
-        print(f"INFO bench_skip {provider} {label}: target_custom_triton_too_slow")
+        print(
+            f"INFO bench_skip {provider} {label}: target_custom_triton_too_slow"
+        )
         return float("inf")
     inputs = _make_inputs(shape)
     try:
         # Warm-up first; if triton.testing.do_bench is unavailable/unreliable, use perf_counter.
-        fn = lambda: (_run_torch_ref(shape, inputs) if key == "ref" else _run_provider(key, shape, inputs))
+        def fn():
+            return (_run_torch_ref(shape, inputs)
+                    if key == "ref" else _run_provider(key, shape, inputs))
+
         for _ in range(5):
             fn()
         torch.npu.synchronize()
         if hasattr(triton.testing, "do_bench"):
-            return triton.testing.do_bench(fn, warmup=10, rep=30, return_mode="mean")
+            return triton.testing.do_bench(fn,
+                                           warmup=10,
+                                           rep=30,
+                                           return_mode="mean")
         times = []
         for _ in range(30):
             t0 = time.perf_counter()
@@ -169,7 +193,8 @@ def _bench_one(provider, shape):
             times.append((time.perf_counter() - t0) * 1000.0)
         return sum(times) / len(times)
     except Exception as exc:
-        print(f"INFO bench_unavailable {provider} {label}: {type(exc).__name__}")
+        print(
+            f"INFO bench_unavailable {provider} {label}: {type(exc).__name__}")
         return float("inf")
 
 
@@ -178,14 +203,19 @@ def _bench_one(provider, shape):
         x_names=["label"],
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
-        line_vals=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_vals=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("blue", "-"), ("red", "-"), ("black", "--"), ("green", "-")],
         ylabel="Latency (ms)",
         plot_name="conv2d_avgpool_sigmoid_sum",
         args={},
-    )
-)
+    ))
 def bench(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     return _bench_one(provider, shape)

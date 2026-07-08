@@ -1,7 +1,6 @@
 import argparse
 import importlib.util
 import math
-import os
 import sys
 import time
 from pathlib import Path
@@ -20,7 +19,9 @@ _BENCH_SHAPES = [
     ("required_acl_16384x4096x4096", 16384, 4096, 4096, 0.5),
 ]
 
-_PROVIDERS = ["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"]
+_PROVIDERS = [
+    "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"
+]
 _MODEL_CACHE = {}
 _MODULE_CACHE = {}
 
@@ -44,7 +45,8 @@ def _safe_load(path: Path, key: str):
         return None
 
 
-def _model(key: str, in_features: int, out_features: int, scaling_factor: float):
+def _model(key: str, in_features: int, out_features: int,
+           scaling_factor: float):
     cache_key = (key, in_features, out_features, scaling_factor)
     if cache_key in _MODEL_CACHE:
         return _MODEL_CACHE[cache_key]
@@ -54,7 +56,8 @@ def _model(key: str, in_features: int, out_features: int, scaling_factor: float)
         _MODEL_CACHE[cache_key] = None
         return None
     torch.manual_seed(0)
-    model = mod.ModelNew(in_features, out_features, scaling_factor).eval().npu()
+    model = mod.ModelNew(in_features, out_features,
+                         scaling_factor).eval().npu()
     _MODEL_CACHE[cache_key] = model
     return model
 
@@ -68,12 +71,16 @@ def _ref_model(in_features: int, out_features: int, scaling_factor: float):
     return _model("input", in_features, out_features, scaling_factor)
 
 
-def _run_torch_ref(x, in_features: int, out_features: int, scaling_factor: float):
+def _run_torch_ref(x, in_features: int, out_features: int,
+                   scaling_factor: float):
     model = _ref_model(in_features, out_features, scaling_factor)
-    return torch.nn.functional.linear(x, model.matmul.weight, model.matmul.bias) * (1.0 + float(scaling_factor))
+    return torch.nn.functional.linear(
+        x, model.matmul.weight,
+        model.matmul.bias) * (1.0 + float(scaling_factor))
 
 
-def _run_provider(provider: str, x, in_features: int, out_features: int, scaling_factor: float):
+def _run_provider(provider: str, x, in_features: int, out_features: int,
+                  scaling_factor: float):
     if provider == "PyTorch / ACL":
         return _run_torch_ref(x, in_features, out_features, scaling_factor)
     key = {
@@ -110,11 +117,15 @@ def unit_test():
                 torch.npu.synchronize()
                 diff = _max_abs(y, ref)
                 passed = math.isfinite(diff) and diff <= 1e-2
-                print(f"UNIT {provider} {label} max_abs_diff={diff:.6g} {'PASS' if passed else 'MISMATCH'}")
+                print(
+                    f"UNIT {provider} {label} max_abs_diff={diff:.6g} {'PASS' if passed else 'MISMATCH'}"
+                )
                 if provider == "Optimized Triton" and not passed:
                     ok = False
             except Exception as exc:
-                print(f"INFO unit_provider_skip {provider} {label}: {type(exc).__name__}")
+                print(
+                    f"INFO unit_provider_skip {provider} {label}: {type(exc).__name__}"
+                )
                 if provider == "Optimized Triton":
                     ok = False
         del x, ref
@@ -125,7 +136,10 @@ def unit_test():
 
 def _time_ms(fn, warmup=5, rep=20):
     try:
-        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=warmup,
+                                       rep=rep,
+                                       return_mode="mean")
     except Exception:
         for _ in range(warmup):
             fn()
@@ -148,8 +162,7 @@ def _time_ms(fn, warmup=5, rep=20):
         ylabel="ms",
         plot_name="l2_40_matmul_scaling_residualadd",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     _, M, K, N, scale = _shape_by_label(label)
     x = _make_inputs(M, K)
@@ -160,10 +173,14 @@ def benchmark(label, provider):
             ref = _run_torch_ref(x, K, N, scale)
             diff = _max_abs(y, ref)
             if provider == "Optimized Triton" and diff > 1e-2:
-                print(f"INFO benchmark_skip_mismatch {provider} {label} diff={diff:.6g}")
+                print(
+                    f"INFO benchmark_skip_mismatch {provider} {label} diff={diff:.6g}"
+                )
                 return float("inf")
         except Exception as exc:
-            print(f"INFO benchmark_provider_unavailable {provider} {label}: {type(exc).__name__}")
+            print(
+                f"INFO benchmark_provider_unavailable {provider} {label}: {type(exc).__name__}"
+            )
             return float("inf")
 
     def fn():
@@ -172,7 +189,9 @@ def benchmark(label, provider):
     try:
         return _time_ms(fn)
     except Exception as exc:
-        print(f"INFO benchmark_provider_failed {provider} {label}: {type(exc).__name__}")
+        print(
+            f"INFO benchmark_provider_failed {provider} {label}: {type(exc).__name__}"
+        )
         return float("inf")
 
 

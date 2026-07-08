@@ -4,7 +4,6 @@ import triton
 import triton.language as tl
 from triton.language.math import tanh as tl_tanh
 
-
 _MAX_GRID = 65535
 _BLOCK_SIZE = 4096
 
@@ -24,7 +23,8 @@ def _tanh_mish_stable(x_f32):
 
 
 @triton.jit
-def _mish_tanh_direct_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+def _mish_tanh_direct_kernel(x_ptr, y_ptr, n_elements,
+                             BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     tl.multiple_of(offs, 16)
@@ -39,7 +39,8 @@ def _mish_tanh_direct_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr)
 
 
 @triton.jit
-def _mish_tanh_persistent_kernel(x_ptr, y_ptr, n_elements, n_programs, BLOCK_SIZE: tl.constexpr):
+def _mish_tanh_persistent_kernel(x_ptr, y_ptr, n_elements, n_programs,
+                                 BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     n_tiles = tl.cdiv(n_elements, BLOCK_SIZE)
     for tile_id in tl.range(pid, n_tiles, n_programs, num_stages=2):
@@ -65,23 +66,38 @@ def fused_mish_tanh(x: torch.Tensor) -> torch.Tensor:
     n_tiles = triton.cdiv(n_elements, _BLOCK_SIZE)
     if n_tiles > _MAX_GRID:
         n_programs = _MAX_GRID
-        _mish_tanh_persistent_kernel[(n_programs,)](x_contig, y, n_elements, n_programs,
-                                                    BLOCK_SIZE=_BLOCK_SIZE, num_warps=8,
-                                                    num_stages=2)
+        _mish_tanh_persistent_kernel[(n_programs, )](x_contig,
+                                                     y,
+                                                     n_elements,
+                                                     n_programs,
+                                                     BLOCK_SIZE=_BLOCK_SIZE,
+                                                     num_warps=8,
+                                                     num_stages=2)
     else:
-        _mish_tanh_direct_kernel[(n_tiles,)](x_contig, y, n_elements,
-                                             BLOCK_SIZE=_BLOCK_SIZE, num_warps=8,
-                                             num_stages=2)
+        _mish_tanh_direct_kernel[(n_tiles, )](x_contig,
+                                              y,
+                                              n_elements,
+                                              BLOCK_SIZE=_BLOCK_SIZE,
+                                              num_warps=8,
+                                              num_stages=2)
     return y
 
 
 class ModelNew(nn.Module):
     """3D convolution followed by fused Mish and Tanh activation."""
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size,
+                 stride=1,
+                 padding=0):
         super(ModelNew, self).__init__()
-        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size,
-                              stride=stride, padding=padding)
+        self.conv = nn.Conv3d(in_channels,
+                              out_channels,
+                              kernel_size,
+                              stride=stride,
+                              padding=padding)
 
     def forward(self, x):
         if not _is_npu_tensor(x):

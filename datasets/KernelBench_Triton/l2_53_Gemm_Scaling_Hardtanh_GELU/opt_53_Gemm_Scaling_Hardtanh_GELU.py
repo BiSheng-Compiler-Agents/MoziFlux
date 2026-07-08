@@ -5,7 +5,6 @@ import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
 
-
 _MAX_PROGRAMS = 65535
 _BLOCK_SIZE = 4096
 
@@ -84,7 +83,7 @@ class ModelNew(nn.Module):
         n_tiles = triton.cdiv(n_elements, _BLOCK_SIZE)
         if n_tiles > _MAX_PROGRAMS:
             n_programs = _MAX_PROGRAMS
-            _scale_hardtanh_gelu_persistent_kernel[(n_programs,)](
+            _scale_hardtanh_gelu_persistent_kernel[(n_programs, )](
                 y,
                 y,
                 n_elements,
@@ -96,7 +95,7 @@ class ModelNew(nn.Module):
                 num_stages=2,
             )
         else:
-            _scale_hardtanh_gelu_flat_kernel[(n_tiles,)](
+            _scale_hardtanh_gelu_flat_kernel[(n_tiles, )](
                 y,
                 y,
                 n_elements,
@@ -115,7 +114,8 @@ class ModelNew(nn.Module):
         if x.dtype not in supported_dtypes:
             raise RuntimeError(f"Unsupported dtype for ModelNew: {x.dtype}")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-tracked inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-tracked inputs")
         y = self.gemm(x)
         return self._post_ops_triton(y)
 
@@ -133,4 +133,6 @@ def get_inputs():
 
 
 def get_init_inputs():
-    return [in_features, out_features, scaling_factor, hardtanh_min, hardtanh_max]
+    return [
+        in_features, out_features, scaling_factor, hardtanh_min, hardtanh_max
+    ]

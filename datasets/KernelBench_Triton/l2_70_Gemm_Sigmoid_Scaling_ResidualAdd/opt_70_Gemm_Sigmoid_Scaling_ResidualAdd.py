@@ -60,13 +60,18 @@ class ModelNew(nn.Module):
         if not _is_npu_tensor(x):
             raise RuntimeError("ModelNew expects input tensors on Ascend NPU")
         if x.requires_grad:
-            raise RuntimeError("ModelNew does not support autograd-enabled inputs")
+            raise RuntimeError(
+                "ModelNew does not support autograd-enabled inputs")
         if x.dtype not in (torch.float16, torch.float32):
-            raise RuntimeError("ModelNew supports only float16 and float32 inputs")
+            raise RuntimeError(
+                "ModelNew supports only float16 and float32 inputs")
         if not _is_npu_tensor(self.gemm.weight):
-            raise RuntimeError("ModelNew weights must be placed on Ascend NPU before execution")
+            raise RuntimeError(
+                "ModelNew weights must be placed on Ascend NPU before execution"
+            )
         if self.gemm.bias is not None and not _is_npu_tensor(self.gemm.bias):
-            raise RuntimeError("ModelNew bias must be placed on Ascend NPU before execution")
+            raise RuntimeError(
+                "ModelNew bias must be placed on Ascend NPU before execution")
 
         x = self.gemm(x).contiguous()
         n_elements = x.numel()
@@ -74,14 +79,25 @@ class ModelNew(nn.Module):
         n_tiles = triton.cdiv(n_elements, _BLOCK_SIZE)
         if n_tiles > _MAX_GRID:
             n_programs = _MAX_GRID
-            _sigmoid_scale_residual_persistent[(n_programs,)](
-                x, y, n_elements, self.scaling_factor, n_programs,
-                BLOCK_SIZE=_BLOCK_SIZE, num_warps=4, num_stages=2,
+            _sigmoid_scale_residual_persistent[(n_programs, )](
+                x,
+                y,
+                n_elements,
+                self.scaling_factor,
+                n_programs,
+                BLOCK_SIZE=_BLOCK_SIZE,
+                num_warps=4,
+                num_stages=2,
             )
         else:
-            _sigmoid_scale_residual_direct[(n_tiles,)](
-                x, y, n_elements, self.scaling_factor,
-                BLOCK_SIZE=_BLOCK_SIZE, num_warps=4, num_stages=2,
+            _sigmoid_scale_residual_direct[(n_tiles, )](
+                x,
+                y,
+                n_elements,
+                self.scaling_factor,
+                BLOCK_SIZE=_BLOCK_SIZE,
+                num_warps=4,
+                num_stages=2,
             )
         return y
 

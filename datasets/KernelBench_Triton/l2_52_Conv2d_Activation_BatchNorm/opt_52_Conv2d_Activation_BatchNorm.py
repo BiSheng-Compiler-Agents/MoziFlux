@@ -3,14 +3,12 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 _MAX_PROGRAMS = 65535
 _BLOCK_SIZE = 8192
 
 
 @triton.jit
-def _mish_direct_kernel(x_ptr, y_ptr, n_elements,
-                        THRESHOLD: tl.constexpr,
+def _mish_direct_kernel(x_ptr, y_ptr, n_elements, THRESHOLD: tl.constexpr,
                         BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
@@ -29,8 +27,7 @@ def _mish_direct_kernel(x_ptr, y_ptr, n_elements,
 
 @triton.jit
 def _mish_persistent_kernel(x_ptr, y_ptr, n_elements, n_programs,
-                            THRESHOLD: tl.constexpr,
-                            BLOCK_SIZE: tl.constexpr):
+                            THRESHOLD: tl.constexpr, BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     n_tiles = tl.cdiv(n_elements, BLOCK_SIZE)
     for tile_id in range(pid, n_tiles, n_programs):
@@ -50,7 +47,8 @@ def _mish_persistent_kernel(x_ptr, y_ptr, n_elements, n_programs,
 
 def fused_softplus_tanh_mul(x: torch.Tensor) -> torch.Tensor:
     if not x.is_npu:
-        raise RuntimeError("fused_softplus_tanh_mul expects an Ascend NPU tensor")
+        raise RuntimeError(
+            "fused_softplus_tanh_mul expects an Ascend NPU tensor")
     xi = x.contiguous()
     n = xi.numel()
     if n == 0:
@@ -59,16 +57,21 @@ def fused_softplus_tanh_mul(x: torch.Tensor) -> torch.Tensor:
     n_tiles = triton.cdiv(n, _BLOCK_SIZE)
     if n_tiles > _MAX_PROGRAMS:
         n_programs = _MAX_PROGRAMS
-        _mish_persistent_kernel[(n_programs,)](
-            xi, y, n, n_programs,
+        _mish_persistent_kernel[(n_programs, )](
+            xi,
+            y,
+            n,
+            n_programs,
             THRESHOLD=20.0,
             BLOCK_SIZE=_BLOCK_SIZE,
             num_warps=4,
             num_stages=2,
         )
     else:
-        _mish_direct_kernel[(n_tiles,)](
-            xi, y, n,
+        _mish_direct_kernel[(n_tiles, )](
+            xi,
+            y,
+            n,
             THRESHOLD=20.0,
             BLOCK_SIZE=_BLOCK_SIZE,
             num_warps=4,

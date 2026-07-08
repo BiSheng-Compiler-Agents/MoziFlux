@@ -1,7 +1,6 @@
 import torch
 import torch_npu  # noqa: F401
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class ModelNew(nn.Module):
@@ -14,7 +13,8 @@ class ModelNew(nn.Module):
     the custom scalar-heavy NCHW pooling kernel and the second channel-sum launch.
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, pool_kernel_size):
+    def __init__(self, in_channels, out_channels, kernel_size,
+                 pool_kernel_size):
         super(ModelNew, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
         self.avg_pool = nn.AvgPool2d(pool_kernel_size)

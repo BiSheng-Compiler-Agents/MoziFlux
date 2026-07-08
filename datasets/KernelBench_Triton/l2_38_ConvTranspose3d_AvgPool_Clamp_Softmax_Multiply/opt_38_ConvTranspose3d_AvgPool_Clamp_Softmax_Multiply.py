@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 DEFAULT_BATCH_SIZE = 32
 DEFAULT_IN_CHANNELS = 32
 DEFAULT_OUT_CHANNELS = 64
@@ -81,7 +80,8 @@ def _clamp_softmax_mul2_direct_ncdhw(
     denom = tl.sum(exp_vals, axis=0)
     out = exp_vals * (scale / denom)[None, :]
     tl.store(y_ptr + base_n + offs_c[:, None] * stride_c + offs_p[None, :],
-             out.to(OUT_DTYPE), mask=mask)
+             out.to(OUT_DTYPE),
+             mask=mask)
 
 
 @triton.jit
@@ -124,7 +124,8 @@ def _clamp_softmax_mul2_persistent_ncdhw(
         denom = tl.sum(exp_vals, axis=0)
         out = exp_vals * (scale / denom)[None, :]
         tl.store(y_ptr + base_n + offs_c[:, None] * stride_c + offs_p[None, :],
-                 out.to(OUT_DTYPE), mask=mask)
+                 out.to(OUT_DTYPE),
+                 mask=mask)
 
 
 def _fused_clamp_softmax_mul2_tiled(x: torch.Tensor,
@@ -132,9 +133,11 @@ def _fused_clamp_softmax_mul2_tiled(x: torch.Tensor,
                                     clamp_max: float,
                                     scale: float = 2.0) -> torch.Tensor:
     if not _is_npu_tensor(x):
-        raise RuntimeError("ModelNew expects Ascend NPU tensors for the Triton fused path.")
+        raise RuntimeError(
+            "ModelNew expects Ascend NPU tensors for the Triton fused path.")
     if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-        raise RuntimeError(f"Unsupported dtype for Triton fused path: {x.dtype}")
+        raise RuntimeError(
+            f"Unsupported dtype for Triton fused path: {x.dtype}")
 
     x = x.contiguous()
     y = torch.empty_like(x)
@@ -157,11 +160,22 @@ def _fused_clamp_softmax_mul2_tiled(x: torch.Tensor,
     if total_tiles > _MAX_PROGRAMS:
         # The default shape has 65,536 C=64 spatial tiles at BLOCK_POS=64/32-class
         # settings; avoid Ascend's grid cap by using CANN's native clamp/softmax path.
-        return torch.softmax(torch.clamp(x, min=float(clamp_min), max=float(clamp_max)), dim=1) * float(scale)
+        return torch.softmax(torch.clamp(
+            x, min=float(clamp_min), max=float(clamp_max)),
+                             dim=1) * float(scale)
     else:
-        _clamp_softmax_mul2_direct_ncdhw[(total_tiles,)](
-            x, y, C, DHW, sN, sC, float(clamp_min), float(clamp_max), float(scale),
-            OUT_DTYPE=OUT_DTYPE, BLOCK_C=BLOCK_C, BLOCK_POS=BLOCK_POS)
+        _clamp_softmax_mul2_direct_ncdhw[(total_tiles, )](x,
+                                                          y,
+                                                          C,
+                                                          DHW,
+                                                          sN,
+                                                          sC,
+                                                          float(clamp_min),
+                                                          float(clamp_max),
+                                                          float(scale),
+                                                          OUT_DTYPE=OUT_DTYPE,
+                                                          BLOCK_C=BLOCK_C,
+                                                          BLOCK_POS=BLOCK_POS)
     return y
 
 
@@ -185,9 +199,12 @@ class ModelNew(nn.Module):
         clamp_max=DEFAULT_CLAMP_MAX,
     ):
         super(ModelNew, self).__init__()
-        self.conv_transpose = nn.ConvTranspose3d(
-            in_channels, out_channels, kernel_size, stride=stride,
-            padding=padding, output_padding=output_padding)
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding,
+                                                 output_padding=output_padding)
         self.avg_pool = nn.AvgPool3d(pool_kernel_size)
         self.clamp_min = float(clamp_min)
         self.clamp_max = float(clamp_max)
@@ -195,7 +212,8 @@ class ModelNew(nn.Module):
     def forward(self, x):
         x = self.conv_transpose(x)
         x = self.avg_pool(x)
-        return _fused_clamp_softmax_mul2_tiled(x, self.clamp_min, self.clamp_max, 2.0)
+        return _fused_clamp_softmax_mul2_tiled(x, self.clamp_min,
+                                               self.clamp_max, 2.0)
 
 
 batch_size = 32

@@ -19,7 +19,8 @@ def _gelu_softmax_row_kernel(
     row = tl.program_id(0)
     offs = tl.arange(0, BLOCK_N)
     mask = (row < B) & (offs < N)
-    z = tl.load(z_ptr + row * stride_z + offs, mask=mask, other=-float("inf")).to(tl.float32)
+    z = tl.load(z_ptr + row * stride_z + offs, mask=mask,
+                other=-float("inf")).to(tl.float32)
 
     inv_sqrt2 = 0.7071067811865476
     gelu = 0.5 * z * (1.0 + tl.erf(z * inv_sqrt2))
@@ -43,19 +44,24 @@ def _require_supported_runtime(tensor: torch.Tensor) -> None:
         return
     if os.environ.get("TRITON_INTERPRET") == "1":
         return
-    raise RuntimeError("This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1.")
+    raise RuntimeError(
+        "This operator requires CUDA or NPU tensors, or TRITON_INTERPRET=1.")
 
 
-def _validate_inputs(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None):
+def _validate_inputs(x: torch.Tensor, weight: torch.Tensor,
+                     bias: torch.Tensor | None):
     if x.ndim != 2 or weight.ndim != 2:
         raise ValueError("Expected x and weight to be 2D tensors.")
     if x.shape[1] != weight.shape[1]:
-        raise ValueError(f"Incompatible shapes for fused linear: x={tuple(x.shape)}, weight={tuple(weight.shape)}.")
+        raise ValueError(
+            f"Incompatible shapes for fused linear: x={tuple(x.shape)}, weight={tuple(weight.shape)}."
+        )
     if x.device != weight.device:
         raise ValueError("x and weight must be on the same device.")
     if bias is not None:
         if bias.ndim != 1 or bias.shape[0] != weight.shape[0]:
-            raise ValueError("bias must be a 1D tensor with shape [out_features].")
+            raise ValueError(
+                "bias must be a 1D tensor with shape [out_features].")
         if bias.device != x.device:
             raise ValueError("bias must be on the same device as x.")
     if x.dtype != weight.dtype or (bias is not None and bias.dtype != x.dtype):
@@ -65,11 +71,15 @@ def _validate_inputs(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor |
     _require_supported_runtime(x)
     x = x.contiguous()
     weight = weight.contiguous()
-    bias = torch.zeros(weight.shape[0], device=weight.device, dtype=weight.dtype) if bias is None else bias.contiguous()
+    bias = torch.zeros(
+        weight.shape[0], device=weight.device,
+        dtype=weight.dtype) if bias is None else bias.contiguous()
     return x, weight, bias
 
 
-def matmul_gelu_softmax(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None = None) -> torch.Tensor:
+def matmul_gelu_softmax(x: torch.Tensor,
+                        weight: torch.Tensor,
+                        bias: torch.Tensor | None = None) -> torch.Tensor:
     x, weight, bias = _validate_inputs(x, weight, bias)
     z = F.linear(x, weight, bias)
     B, N = z.shape
@@ -79,7 +89,7 @@ def matmul_gelu_softmax(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tenso
     if N <= 512 and z.device.type == "npu":
         y = torch.empty_like(z)
         block_n = _next_power_of_two(N)
-        _gelu_softmax_row_kernel[(B,)](
+        _gelu_softmax_row_kernel[(B, )](
             z,
             y,
             z.stride(0),
@@ -120,7 +130,8 @@ out_features = 8192
 
 
 def get_inputs():
-    device = "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    device = "npu" if hasattr(torch,
+                              "npu") and torch.npu.is_available() else "cpu"
     return [torch.rand(batch_size, in_features, device=device)]
 
 

@@ -54,9 +54,20 @@ def _module(key):
 
 
 class TorchRef(nn.Module):
-    def __init__(self, in_channels=3, out_channels=16, kernel_size=3, stride=2, padding=1, bias_shape=(16, 1, 1, 1)):
+
+    def __init__(self,
+                 in_channels=3,
+                 out_channels=16,
+                 kernel_size=3,
+                 stride=2,
+                 padding=1,
+                 bias_shape=(16, 1, 1, 1)):
         super().__init__()
-        self.conv_transpose = nn.ConvTranspose3d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding)
         self.batch_norm = nn.BatchNorm3d(out_channels)
         self.bias_shape = bias_shape
 
@@ -127,24 +138,33 @@ def unit_test():
         label = shape[0]
         x = _make_input(*shape)
         ref = _run_provider("PyTorch / ACL", x, shape)
-        for provider in ["Baseline Triton1", "Baseline Triton2", "Optimized Triton"]:
+        for provider in [
+                "Baseline Triton1", "Baseline Triton2", "Optimized Triton"
+        ]:
             try:
                 y = _run_provider(provider, x, shape)
                 diff = _max_abs(y, ref)
                 passed = math.isfinite(diff) and diff <= 1e-3
-                print(f"TEST {provider} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}")
+                print(
+                    f"TEST {provider} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}"
+                )
                 if provider == "Optimized Triton" and not passed:
                     ok = False
             except Exception as exc:
                 tag = type(exc).__name__
                 if provider == "Optimized Triton":
-                    print(f"TEST {provider} {label}: EXCEPTION {tag} max_abs=inf")
+                    print(
+                        f"TEST {provider} {label}: EXCEPTION {tag} max_abs=inf"
+                    )
                     ok = False
                 else:
-                    print(f"TEST {provider} {label}: SKIP_UNAVAILABLE {tag} max_abs=inf")
+                    print(
+                        f"TEST {provider} {label}: SKIP_UNAVAILABLE {tag} max_abs=inf"
+                    )
 
     # Forced Triton fallback coverage without huge allocation: disable production ACL dispatch.
-    for forced_name, forced_grid in [("forced_direct_triton", _MAX_GRID), ("forced_persistent_triton", 1)]:
+    for forced_name, forced_grid in [("forced_direct_triton", _MAX_GRID),
+                                     ("forced_persistent_triton", 1)]:
         try:
             opt_mod = _module("optimized")
             old_grid = getattr(opt_mod, "_MAX_GRID", None)
@@ -158,7 +178,9 @@ def unit_test():
             y = _run_provider("Optimized Triton", x, shape)
             diff = _max_abs(y, ref)
             passed = math.isfinite(diff) and diff <= 1e-3
-            print(f"TEST Optimized Triton {forced_name}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}")
+            print(
+                f"TEST Optimized Triton {forced_name}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}"
+            )
             ok = ok and passed
             if old_grid is not None:
                 opt_mod._MAX_GRID = old_grid
@@ -166,7 +188,9 @@ def unit_test():
                 opt_mod._USE_ACL_DISPATCH = old_acl
             _model_cache.pop("optimized", None)
         except Exception as exc:
-            print(f"TEST Optimized Triton {forced_name}: EXCEPTION {type(exc).__name__} max_abs=inf")
+            print(
+                f"TEST Optimized Triton {forced_name}: EXCEPTION {type(exc).__name__} max_abs=inf"
+            )
             ok = False
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
@@ -174,10 +198,14 @@ def unit_test():
 
 def _time_ms(fn):
     try:
-        return triton.testing.do_bench(fn, warmup=10, rep=50, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=10,
+                                       rep=50,
+                                       return_mode="mean")
     except Exception:
         for _ in range(2):
-            fn(); torch.npu.synchronize()
+            fn()
+            torch.npu.synchronize()
         t0 = time.perf_counter()
         reps = 10
         for _ in range(reps):
@@ -191,23 +219,33 @@ def _time_ms(fn):
         x_names=["label"],
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
-        line_vals=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_vals=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("black", "-"), ("blue", "-"), ("green", "--"), ("red", "-")],
         ylabel="ms",
         plot_name="l2_72_convtranspose3d_bn_avgpool_avgpool",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     x = _make_input(*shape)
     try:
-        if provider == "Baseline Triton1" and _baseline1_grid_overflows(shape[1], shape[3], shape[4], shape[5]):
-            print(f"INFO {provider} {label}: inf comparison_provider_preskipped_grid_overflow")
+        if provider == "Baseline Triton1" and _baseline1_grid_overflows(
+                shape[1], shape[3], shape[4], shape[5]):
+            print(
+                f"INFO {provider} {label}: inf comparison_provider_preskipped_grid_overflow"
+            )
             return float("inf")
         if provider == "Baseline Triton2":
-            print(f"INFO {provider} {label}: inf sandboxed_reference_base_file_not_read")
+            print(
+                f"INFO {provider} {label}: inf sandboxed_reference_base_file_not_read"
+            )
             return float("inf")
         _run_provider(provider, x, shape)
         torch.npu.synchronize()

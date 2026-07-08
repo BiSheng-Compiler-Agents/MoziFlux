@@ -43,11 +43,18 @@ def _mods():
 
 
 class TorchReference(nn.Module):
-    def __init__(self, in_channels=3, out_channels=16, kernel_size=3, scaling_factor=2, bias_shape=(16, 1, 1, 1)):
+
+    def __init__(self,
+                 in_channels=3,
+                 out_channels=16,
+                 kernel_size=3,
+                 scaling_factor=2,
+                 bias_shape=(16, 1, 1, 1)):
         super().__init__()
         self.conv = nn.Conv3d(in_channels, out_channels, kernel_size)
         self.scaling_factor_value = scaling_factor
-        self.scaling_factor = nn.Parameter(torch.full(bias_shape, float(scaling_factor)))
+        self.scaling_factor = nn.Parameter(
+            torch.full(bias_shape, float(scaling_factor)))
         self.bias = nn.Parameter(torch.randn(bias_shape))
 
     def forward(self, x):
@@ -82,7 +89,7 @@ def _model(key):
 def _make_inputs(label):
     shape = next(s[1:] for s in _BENCH_SHAPES if s[0] == label)
     torch.manual_seed(123)
-    return (torch.rand(*shape, device="npu", dtype=torch.float32),)
+    return (torch.rand(*shape, device="npu", dtype=torch.float32), )
 
 
 def _run_torch_ref(x):
@@ -126,7 +133,8 @@ def _dispatch_path_tests():
             opt._MAX_GRID = 1
         try:
             torch.manual_seed(77)
-            ref = TorchReference(3, out_channels, 3, 2, bias_shape).npu().eval()
+            ref = TorchReference(3, out_channels, 3, 2,
+                                 bias_shape).npu().eval()
             torch.manual_seed(77)
             mod = opt.ModelNew(3, out_channels, 3, 2, bias_shape).npu().eval()
             with torch.no_grad():
@@ -135,7 +143,9 @@ def _dispatch_path_tests():
             _sync()
             diff = _max_abs(y, y_ref)
             passed = math.isfinite(diff) and diff <= 1e-3
-            print(f"TEST dispatch {name}: max_abs={diff:.6g} {'PASS' if passed else 'MISMATCH'}")
+            print(
+                f"TEST dispatch {name}: max_abs={diff:.6g} {'PASS' if passed else 'MISMATCH'}"
+            )
             ok = ok and passed
         except Exception as e:
             print(f"TEST dispatch {name}: EXCEPTION {type(e).__name__}")
@@ -156,13 +166,16 @@ def unit_test():
         x, = _make_inputs(label)
         ref = _run_torch_ref(x)
         _sync()
-        for key, name in [("baseline", "Baseline Triton"), ("opt", "Optimized Triton")]:
+        for key, name in [("baseline", "Baseline Triton"),
+                          ("opt", "Optimized Triton")]:
             try:
                 got = _run_provider(key, x)
                 _sync()
                 diff = _max_abs(got, ref)
                 passed = math.isfinite(diff) and diff <= 1e-3
-                print(f"TEST {label} {name}: max_abs={diff:.6g} {'PASS' if passed else 'MISMATCH'}")
+                print(
+                    f"TEST {label} {name}: max_abs={diff:.6g} {'PASS' if passed else 'MISMATCH'}"
+                )
                 ok = ok and passed
             except Exception as e:
                 print(f"TEST {label} {name}: EXCEPTION {type(e).__name__}")
@@ -175,11 +188,19 @@ def unit_test():
 def _bench_one(provider, label):
     x, = _make_inputs(label)
     try:
-        fn = lambda: _run_provider(provider, x)
+
+        def fn():
+            return _run_provider(provider, x)
+
         # do_bench returns milliseconds; perf_report labels the axis.
-        return triton.testing.do_bench(fn, warmup=5, rep=20, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=5,
+                                       rep=20,
+                                       return_mode="mean")
     except Exception as e:
-        print(f"INFO bench_unavailable provider={provider} label={label} reason={type(e).__name__}")
+        print(
+            f"INFO bench_unavailable provider={provider} label={label} reason={type(e).__name__}"
+        )
         return float("inf")
 
 
@@ -194,8 +215,7 @@ def _bench_one(provider, label):
         ylabel="ms",
         plot_name="conv3d_scaling_tanh_multiply_sigmoid",
         args={},
-    )
-)
+    ))
 def bench(label, provider):
     return _bench_one(provider, label)
 

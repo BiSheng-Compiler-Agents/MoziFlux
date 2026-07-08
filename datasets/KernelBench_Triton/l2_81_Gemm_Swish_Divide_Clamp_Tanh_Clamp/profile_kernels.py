@@ -11,7 +11,8 @@ import triton
 HERE = Path(__file__).resolve().parent
 INPUT_FILE = HERE / "81_Gemm_Swish_Divide_Clamp_Tanh_Clamp.py"
 OPT_FILE = HERE / "opt_81_Gemm_Swish_Divide_Clamp_Tanh_Clamp.py"
-BASE2_EXISTS = (HERE / "base_81_Gemm_Swish_Divide_Clamp_Tanh_Clamp.py").exists()
+BASE2_EXISTS = (HERE /
+                "base_81_Gemm_Swish_Divide_Clamp_Tanh_Clamp.py").exists()
 
 _BENCH_SHAPES = [
     ("small_b1", 1, 8192),
@@ -77,7 +78,9 @@ def _run_provider(provider, x):
     if provider == "baseline1":
         return _model("baseline1")(x)
     if provider == "baseline2":
-        raise RuntimeError("Baseline Triton2 intentionally not loaded: sandbox forbids reading base_*.py")
+        raise RuntimeError(
+            "Baseline Triton2 intentionally not loaded: sandbox forbids reading base_*.py"
+        )
     if provider == "opt":
         return _model("opt")(x)
     raise KeyError(provider)
@@ -91,7 +94,10 @@ def _sync():
 def _time_ms(fn, warmup=10, rep=50):
     try:
         import triton.testing
-        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=warmup,
+                                       rep=rep,
+                                       return_mode="mean")
     except Exception:
         for _ in range(max(1, min(warmup, 3))):
             fn()
@@ -111,9 +117,15 @@ def unit_test():
         x = _make_inputs(batch, features)
         ref = _run_provider("torch", x)
         for provider in providers:
-            display = {"baseline1":"Baseline Triton1", "baseline2":"Baseline Triton2", "opt":"Optimized Triton"}[provider]
+            display = {
+                "baseline1": "Baseline Triton1",
+                "baseline2": "Baseline Triton2",
+                "opt": "Optimized Triton"
+            }[provider]
             if provider == "baseline2":
-                print(f"TEST {display} {label}: SKIP_UNAVAILABLE sandbox_no_base_read max_abs=inf")
+                print(
+                    f"TEST {display} {label}: SKIP_UNAVAILABLE sandbox_no_base_read max_abs=inf"
+                )
                 continue
             try:
                 y = _run_provider(provider, x)
@@ -121,10 +133,14 @@ def unit_test():
                 max_abs = (y - ref).abs().max().item()
                 passed = math.isfinite(max_abs) and max_abs <= 1e-3
                 ok = ok and (passed or provider != "opt")
-                print(f"TEST {display} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={max_abs:.6g}")
+                print(
+                    f"TEST {display} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={max_abs:.6g}"
+                )
             except Exception as exc:
                 ok = ok and (provider != "opt")
-                print(f"TEST {display} {label}: SKIP_UNAVAILABLE {type(exc).__name__} max_abs=inf")
+                print(
+                    f"TEST {display} {label}: SKIP_UNAVAILABLE {type(exc).__name__} max_abs=inf"
+                )
 
     # Force-test optimized persistent path without allocating >65535 tiles.
     opt_mod = _mod("opt")
@@ -138,7 +154,9 @@ def unit_test():
         max_abs = (y - ref).abs().max().item()
         passed = math.isfinite(max_abs) and max_abs <= 1e-3
         ok = ok and passed
-        print(f"TEST Optimized Triton forced_persistent: {'PASS' if passed else 'MISMATCH'} max_abs={max_abs:.6g}")
+        print(
+            f"TEST Optimized Triton forced_persistent: {'PASS' if passed else 'MISMATCH'} max_abs={max_abs:.6g}"
+        )
     finally:
         opt_mod._MAX_PROGRAMS = old
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
@@ -151,13 +169,15 @@ def unit_test():
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=["torch", "baseline1", "baseline2", "opt"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("black", "-"), ("blue", "-"), ("red", "--"), ("green", "-")],
         ylabel="Latency (ms)",
         plot_name="gemm_swish_divide_clamp_tanh_clamp",
         args={},
-    )
-)
+    ))
 def bench(label, provider):
     shape = {s[0]: s for s in _BENCH_SHAPES}[label]
     _, batch, features = shape
@@ -171,10 +191,15 @@ def bench(label, provider):
             block = 1024 if provider == "baseline1" else 4096
             if triton.cdiv(n_elems, block) > 65535:
                 return float("inf")
-        fn = lambda: _run_provider(provider, x)
+
+        def fn():
+            return _run_provider(provider, x)
+
         return _time_ms(fn)
     except Exception as exc:
-        print(f"INFO bench_unavailable provider={provider} label={label} reason={type(exc).__name__}")
+        print(
+            f"INFO bench_unavailable provider={provider} label={label} reason={type(exc).__name__}"
+        )
         return float("inf")
 
 

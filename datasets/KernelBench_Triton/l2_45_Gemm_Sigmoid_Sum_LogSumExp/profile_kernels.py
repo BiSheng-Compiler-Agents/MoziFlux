@@ -36,12 +36,13 @@ def _load(filename, key):
     return mod
 
 
-def _make_inputs(B, K, H, O):
+def _make_inputs(B, K, H, OUT):
     torch.manual_seed(123)
-    return (torch.randn((B, K), device="npu", dtype=torch.float32),)
+    return (torch.randn((B, K), device="npu", dtype=torch.float32), )
 
 
 class TorchRef(nn.Module):
+
     def __init__(self, input_size, hidden_size, output_size):
         super().__init__()
         self.linear1 = nn.Linear(input_size, hidden_size)
@@ -52,31 +53,35 @@ class TorchRef(nn.Module):
         return torch.logsumexp(y.sum(dim=1), dim=0)
 
 
-def _model(provider, K, H, O):
-    cache_key = (provider, K, H, O)
+def _model(provider, K, H, OUT):
+    cache_key = (provider, K, H, OUT)
     if cache_key in _MODEL_CACHE:
         return _MODEL_CACHE[cache_key]
     torch.manual_seed(0)
     if provider == "PyTorch / ACL":
-        model = TorchRef(K, H, O).npu().eval()
+        model = TorchRef(K, H, OUT).npu().eval()
     else:
-        fname = {"Baseline Triton1": INPUT_FILE, "Baseline Triton2": BASE_FILE, "Optimized Triton": OPT_FILE}[provider]
+        fname = {
+            "Baseline Triton1": INPUT_FILE,
+            "Baseline Triton2": BASE_FILE,
+            "Optimized Triton": OPT_FILE
+        }[provider]
         mod = _load(fname, provider.replace(" ", "_").replace("/", "_"))
-        model = mod.ModelNew(K, H, O).npu().eval()
+        model = mod.ModelNew(K, H, OUT).npu().eval()
     _MODEL_CACHE[cache_key] = model
     return model
 
 
-def _run_provider(provider, x, B, K, H, O):
+def _run_provider(provider, x, B, K, H, OUT):
     if provider == "Baseline Triton2" and not (HERE / BASE_FILE).exists():
         raise RuntimeError("base file missing")
-    model = _model(provider, K, H, O)
+    model = _model(provider, K, H, OUT)
     with torch.no_grad():
         return model(x)
 
 
-def _run_torch_ref(x, B, K, H, O):
-    return _run_provider("PyTorch / ACL", x, B, K, H, O)
+def _run_torch_ref(x, B, K, H, OUT):
+    return _run_provider("PyTorch / ACL", x, B, K, H, OUT)
 
 
 def _max_abs(a, b):
@@ -86,19 +91,23 @@ def _max_abs(a, b):
 def unit_test():
     ok_opt = True
     providers = ["Baseline Triton1", "Baseline Triton2", "Optimized Triton"]
-    for label, B, K, H, O in _BENCH_SHAPES:
-        x, = _make_inputs(B, K, H, O)
-        ref = _run_torch_ref(x, B, K, H, O)
+    for label, B, K, H, OUT in _BENCH_SHAPES:
+        x, = _make_inputs(B, K, H, OUT)
+        ref = _run_torch_ref(x, B, K, H, OUT)
         for provider in providers:
             try:
-                out = _run_provider(provider, x, B, K, H, O)
+                out = _run_provider(provider, x, B, K, H, OUT)
                 diff = _max_abs(out, ref)
                 passed = math.isfinite(diff) and diff <= 1e-3
-                print(f"CHECK {provider} {label}: max_abs={diff:.6g} status={'PASS' if passed else 'MISMATCH'}")
+                print(
+                    f"CHECK {provider} {label}: max_abs={diff:.6g} status={'PASS' if passed else 'MISMATCH'}"
+                )
                 if provider == "Optimized Triton" and not passed:
                     ok_opt = False
             except Exception as exc:
-                print(f"INFO provider_unavailable {provider} {label}: {type(exc).__name__}")
+                print(
+                    f"INFO provider_unavailable {provider} {label}: {type(exc).__name__}"
+                )
                 if provider == "Optimized Triton":
                     ok_opt = False
     print("UNIT_TEST PASS" if ok_opt else "UNIT_TEST_FAILED")
@@ -107,19 +116,25 @@ def unit_test():
 
 def _bench_one(provider, label):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
-    _, B, K, H, O = shape
-    x, = _make_inputs(B, K, H, O)
+    _, B, K, H, OUT = shape
+    x, = _make_inputs(B, K, H, OUT)
     try:
         # Correctness gate for this cell before timing.
-        ref = _run_torch_ref(x, B, K, H, O)
-        out = _run_provider(provider, x, B, K, H, O)
+        ref = _run_torch_ref(x, B, K, H, OUT)
+        out = _run_provider(provider, x, B, K, H, OUT)
         if _max_abs(out, ref) > 1e-3:
             print(f"INFO benchmark_preskip_mismatch {provider} {label}")
             return float("inf")
         torch.npu.synchronize()
-        fn = lambda: _run_provider(provider, x, B, K, H, O)
+
+        def fn():
+            return _run_provider(provider, x, B, K, H, OUT)
+
         try:
-            return triton.testing.do_bench(fn, warmup=25, rep=200, return_mode="mean")
+            return triton.testing.do_bench(fn,
+                                           warmup=25,
+                                           rep=200,
+                                           return_mode="mean")
         except Exception:
             for _ in range(10):
                 fn()
@@ -130,7 +145,9 @@ def _bench_one(provider, label):
             torch.npu.synchronize()
             return (time.perf_counter() - t0) * 1000.0 / 100.0
     except Exception as exc:
-        print(f"INFO benchmark_unavailable {provider} {label}: {type(exc).__name__}")
+        print(
+            f"INFO benchmark_unavailable {provider} {label}: {type(exc).__name__}"
+        )
         return float("inf")
 
 
@@ -139,14 +156,19 @@ def _bench_one(provider, label):
         x_names=["label"],
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
-        line_vals=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_vals=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("black", "-"), ("blue", "-"), ("red", "--"), ("green", "-")],
         ylabel="Latency (ms)",
         plot_name="l2_45_gemm_sigmoid_sum_logsumexp",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     return _bench_one(provider, label)
 

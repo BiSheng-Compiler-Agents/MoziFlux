@@ -22,7 +22,9 @@ _BENCH_SHAPES = [
     ("target", 1024, 8192, 8192),
 ]
 _SHAPE_BY_LABEL = {s[0]: s for s in _BENCH_SHAPES}
-_LINE_NAMES = ["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"]
+_LINE_NAMES = [
+    "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"
+]
 _MODEL_CACHE = {}
 _MODULE_CACHE = {}
 
@@ -46,13 +48,15 @@ def _sync():
 
 
 def _device():
-    return torch.device("npu") if hasattr(torch, "npu") else torch.device("cuda")
+    return torch.device("npu") if hasattr(torch,
+                                          "npu") else torch.device("cuda")
 
 
 def _make_inputs(label):
-    _, B, I, O = _SHAPE_BY_LABEL[label]
+    _, B, IN_FEATURES, OUT_FEATURES = _SHAPE_BY_LABEL[label]
     torch.manual_seed(123)
-    return (torch.rand(B, I, device=_device()), I, O)
+    return (torch.rand(B, IN_FEATURES,
+                       device=_device()), IN_FEATURES, OUT_FEATURES)
 
 
 def _init_linear(in_features, out_features):
@@ -101,23 +105,31 @@ def _max_abs(a, b):
 
 def unit_test():
     ok = True
-    for label, B, I, O in _BENCH_SHAPES:
+    for label, B, IN_FEATURES, OUT_FEATURES in _BENCH_SHAPES:
         x, in_features, out_features = _make_inputs(label)
         ref = _torch_ref(x, in_features, out_features)
-        for display, provider in [("Baseline Triton1", "baseline1"), ("Baseline Triton2", "baseline2"), ("Optimized Triton", "opt")]:
+        for display, provider in [("Baseline Triton1", "baseline1"),
+                                  ("Baseline Triton2", "baseline2"),
+                                  ("Optimized Triton", "opt")]:
             if provider == "baseline2":
-                print(f"TEST {display} {label}: SKIP_UNAVAILABLE sandbox_do_not_read max_abs=inf")
+                print(
+                    f"TEST {display} {label}: SKIP_UNAVAILABLE sandbox_do_not_read max_abs=inf"
+                )
                 continue
             try:
                 out = _run_provider(provider, x, in_features, out_features)
                 _sync()
                 diff = _max_abs(out, ref)
                 passed = math.isfinite(diff) and diff <= 1e-3
-                print(f"TEST {display} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}")
+                print(
+                    f"TEST {display} {label}: {'PASS' if passed else 'MISMATCH'} max_abs={diff:.6g}"
+                )
                 if provider == "opt" and not passed:
                     ok = False
             except Exception as e:
-                print(f"TEST {display} {label}: SKIP_UNAVAILABLE {type(e).__name__} max_abs=inf")
+                print(
+                    f"TEST {display} {label}: SKIP_UNAVAILABLE {type(e).__name__} max_abs=inf"
+                )
                 if provider == "opt":
                     ok = False
         # Force-test optimized Triton fallback paths on a modest shape without changing production routing.
@@ -126,19 +138,28 @@ def unit_test():
                 opt = _load(OPT_FILE, "opt")
                 m = _model("opt", in_features, out_features)
                 z = m.linear(x).contiguous()
-                fallback_direct = opt._post_lse_triton(z, m.neg_slope, force_persistent=False)
-                fallback_persistent = opt._post_lse_triton(z, m.neg_slope, force_persistent=True)
+                fallback_direct = opt._post_lse_triton(z,
+                                                       m.neg_slope,
+                                                       force_persistent=False)
+                fallback_persistent = opt._post_lse_triton(
+                    z, m.neg_slope, force_persistent=True)
                 acl = opt._post_lse_acl(z, m.neg_slope)
                 _sync()
                 d1 = _max_abs(fallback_direct, acl)
                 d2 = _max_abs(fallback_persistent, acl)
                 p1 = d1 <= 1e-3
                 p2 = d2 <= 1e-3
-                print(f"TEST Optimized Triton fallback_direct {label}: {'PASS' if p1 else 'MISMATCH'} max_abs={d1:.6g}")
-                print(f"TEST Optimized Triton fallback_persistent {label}: {'PASS' if p2 else 'MISMATCH'} max_abs={d2:.6g}")
+                print(
+                    f"TEST Optimized Triton fallback_direct {label}: {'PASS' if p1 else 'MISMATCH'} max_abs={d1:.6g}"
+                )
+                print(
+                    f"TEST Optimized Triton fallback_persistent {label}: {'PASS' if p2 else 'MISMATCH'} max_abs={d2:.6g}"
+                )
                 ok = ok and p1 and p2
             except Exception as e:
-                print(f"TEST Optimized Triton fallback_paths {label}: SKIP_UNAVAILABLE {type(e).__name__} max_abs=inf")
+                print(
+                    f"TEST Optimized Triton fallback_paths {label}: SKIP_UNAVAILABLE {type(e).__name__} max_abs=inf"
+                )
                 ok = False
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
@@ -166,20 +187,28 @@ def _time_ms(fn, warmup=5, rep=20):
         ylabel="ms",
         plot_name="gemm_lse_leaky_gelu2",
         args={},
-    )
-)
+    ))
 def bench(label, provider):
     x, in_features, out_features = _make_inputs(label)
     if provider == "Baseline Triton2":
         print(f"INFO benchmark_preskip {provider} {label} sandbox_do_not_read")
         return float("inf")
-    key = {"PyTorch / ACL": "torch", "Baseline Triton1": "baseline1", "Optimized Triton": "opt"}[provider]
+    key = {
+        "PyTorch / ACL": "torch",
+        "Baseline Triton1": "baseline1",
+        "Optimized Triton": "opt"
+    }[provider]
     try:
         reps = 5 if label == "target" else 20
         warms = 2 if label == "target" else 5
-        return _time_ms(lambda: _run_provider(key, x, in_features, out_features), warmup=warms, rep=reps)
+        return _time_ms(
+            lambda: _run_provider(key, x, in_features, out_features),
+            warmup=warms,
+            rep=reps)
     except Exception as e:
-        print(f"INFO benchmark_unavailable {provider} {label} {type(e).__name__}")
+        print(
+            f"INFO benchmark_unavailable {provider} {label} {type(e).__name__}"
+        )
         return float("inf")
 
 

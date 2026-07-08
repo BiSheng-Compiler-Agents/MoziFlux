@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import math
 import sys
 from pathlib import Path
 
@@ -44,20 +43,37 @@ def _load(path: Path, key: str):
 
 
 class TorchRef(nn.Module):
-    def __init__(self, in_features=1024, out_features=512, scale_shape=None, eps=1e-5, momentum=0.1, device="npu", dtype=torch.float32):
+
+    def __init__(self,
+                 in_features=1024,
+                 out_features=512,
+                 scale_shape=None,
+                 eps=1e-5,
+                 momentum=0.1,
+                 device="npu",
+                 dtype=torch.float32):
         super().__init__()
         if scale_shape is None:
-            scale_shape = (out_features,)
-        self.gemm = nn.Linear(in_features, out_features, device=device, dtype=dtype)
-        self.scale = nn.Parameter(torch.randn(scale_shape, device=device, dtype=dtype))
-        self.bn = nn.BatchNorm1d(out_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
+            scale_shape = (out_features, )
+        self.gemm = nn.Linear(in_features,
+                              out_features,
+                              device=device,
+                              dtype=dtype)
+        self.scale = nn.Parameter(
+            torch.randn(scale_shape, device=device, dtype=dtype))
+        self.bn = nn.BatchNorm1d(out_features,
+                                 eps=eps,
+                                 momentum=momentum,
+                                 device=device,
+                                 dtype=dtype)
 
     def forward(self, x):
         return self.bn(self.gemm(x) * self.scale)
 
 
 def _device():
-    return "npu" if hasattr(torch, "npu") and torch.npu.is_available() else "cpu"
+    return "npu" if hasattr(torch,
+                            "npu") and torch.npu.is_available() else "cpu"
 
 
 def _sync():
@@ -66,7 +82,7 @@ def _sync():
 
 
 def _init_args(in_features, out_features):
-    return [in_features, out_features, (out_features,)]
+    return [in_features, out_features, (out_features, )]
 
 
 def _model(key, in_features, out_features):
@@ -76,7 +92,9 @@ def _model(key, in_features, out_features):
     dev = _device()
     torch.manual_seed(0)
     if key == "torch_ref":
-        model = TorchRef(*_init_args(in_features, out_features), device=dev, dtype=torch.float32)
+        model = TorchRef(*_init_args(in_features, out_features),
+                         device=dev,
+                         dtype=torch.float32)
     else:
         mod = _load(_PROVIDER_FILES[key], key)
         init = _init_args(in_features, out_features)
@@ -88,7 +106,9 @@ def _model(key, in_features, out_features):
 
 def _make_inputs(batch, in_features):
     torch.manual_seed(123)
-    return (torch.rand((batch, in_features), device=_device(), dtype=torch.float32),)
+    return (torch.rand((batch, in_features),
+                       device=_device(),
+                       dtype=torch.float32), )
 
 
 def _run_torch_ref(batch, in_features, out_features):
@@ -112,10 +132,13 @@ def unit_test():
             ref = _run_torch_ref(batch, in_features, out_features)
             _sync()
         except Exception as e:
-            print(f"UNIT_TEST_FAILED torch_ref {label}: {type(e).__name__}: {e}")
+            print(
+                f"UNIT_TEST_FAILED torch_ref {label}: {type(e).__name__}: {e}")
             ok = False
             continue
-        for key, name in [("baseline1", "Baseline Triton1"), ("baseline2", "Baseline Triton2"), ("optimized", "Optimized Triton")]:
+        for key, name in [("baseline1", "Baseline Triton1"),
+                          ("baseline2", "Baseline Triton2"),
+                          ("optimized", "Optimized Triton")]:
             try:
                 got = _run_provider(key, batch, in_features, out_features)
                 _sync()
@@ -123,17 +146,24 @@ def unit_test():
                 print(f"UNIT_TEST PASS {name} {label}")
             except Exception as e:
                 if key == "optimized":
-                    print(f"UNIT_TEST_FAILED {name} {label}: {type(e).__name__}: {e}")
+                    print(
+                        f"UNIT_TEST_FAILED {name} {label}: {type(e).__name__}: {e}"
+                    )
                     ok = False
                 else:
-                    print(f"INFO comparison_provider_unavailable {name} {label}: {type(e).__name__}")
+                    print(
+                        f"INFO comparison_provider_unavailable {name} {label}: {type(e).__name__}"
+                    )
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
 
 
 def _bench_one(fn, warmup=25, rep=100):
     try:
-        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=warmup,
+                                       rep=rep,
+                                       return_mode="mean")
     except Exception:
         # Fallback for Triton-Ascend builds where do_bench is unavailable/unreliable.
         for _ in range(10):
@@ -153,23 +183,31 @@ def _bench_one(fn, warmup=25, rep=100):
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=["torch_ref", "baseline1", "baseline2", "optimized"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("blue", "-"), ("red", "--"), ("black", "--"), ("green", "-")],
         ylabel="latency (ms)",
         plot_name="gemm_scale_batchnorm_perf",
         args={},
-    )
-)
+    ))
 def bench(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     _, batch, in_features, out_features = shape
     if provider == "torch_ref":
-        fn = lambda: _run_torch_ref(batch, in_features, out_features)
+
+        def fn():
+            return _run_torch_ref(batch, in_features, out_features)
     else:
-        fn = lambda: _run_provider(provider, batch, in_features, out_features)
+
+        def fn():
+            return _run_provider(provider, batch, in_features, out_features)
+
     try:
         # First run catches provider-wide MLIR/runtime issues before timing loops.
-        fn(); _sync()
+        fn()
+        _sync()
         return _bench_one(fn)
     except Exception as e:
         print(f"INFO {provider} {label} benchmark_inf: {type(e).__name__}")

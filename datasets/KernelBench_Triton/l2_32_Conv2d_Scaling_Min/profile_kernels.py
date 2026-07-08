@@ -87,7 +87,8 @@ def _model(provider, init_args=_DEFAULT_INIT, force_triton=False):
     elif provider == "baseline1":
         m = baseline1_mod.ModelNew(*init_args)
     elif provider == "baseline2":
-        cls = getattr(baseline2_mod, "ModelNew", None) or getattr(baseline2_mod, "Model")
+        cls = getattr(baseline2_mod, "ModelNew", None) or getattr(
+            baseline2_mod, "Model")
         m = cls(*init_args)
     elif provider == "optimized":
         try:
@@ -159,7 +160,9 @@ def unit_test():
 
 def _time_provider(provider, label):
     if provider in ("baseline1", "baseline2"):
-        print(f"INFO benchmark {provider} {label} inf comparison_provider_preskipped_to_avoid_npu_context_poisoning")
+        print(
+            f"INFO benchmark {provider} {label} inf comparison_provider_preskipped_to_avoid_npu_context_poisoning"
+        )
         return float("inf")
     B, C, H, W = _SHAPES[label]
     x = _make_input(B, C, H, W)

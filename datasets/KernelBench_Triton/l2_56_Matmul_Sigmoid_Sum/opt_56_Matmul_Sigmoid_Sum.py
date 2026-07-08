@@ -4,7 +4,6 @@ import triton
 import triton.language as tl
 from triton.runtime import driver
 
-
 _MAX_GRID = 65535
 _BLOCK_M = 16
 _BLOCK_H = 64
@@ -34,7 +33,7 @@ def _matmul_logits_kernel(
     w_ptr,
     logits_ptr,
     B: tl.constexpr,
-    I: tl.constexpr,
+    IN_FEATURES: tl.constexpr,
     H: tl.constexpr,
     stride_xb,
     stride_xi,
@@ -63,9 +62,9 @@ def _matmul_logits_kernel(
         h_mask = hs < H
 
         acc = tl.zeros((BLOCK_M, BLOCK_H), dtype=tl.float32)
-        for k0 in tl.range(0, I, BLOCK_K):
+        for k0 in tl.range(0, IN_FEATURES, BLOCK_K):
             ks = k0 + offs_k
-            k_mask = ks < I
+            k_mask = ks < IN_FEATURES
             x = tl.load(
                 x_ptr + rows[:, None] * stride_xb + ks[None, :] * stride_xi,
                 mask=row_mask[:, None] & k_mask[None, :],
@@ -99,20 +98,23 @@ def _sigmoid_sum_kernel(
 ):
     row = tl.program_id(0)
     offs = tl.arange(0, BLOCK_H)
-    total = tl.zeros((BLOCK_H,), dtype=tl.float32)
+    total = tl.zeros((BLOCK_H, ), dtype=tl.float32)
     start = 0
     while start < H:
         hs = start + offs
         mask = hs < H
-        z = tl.load(logits_ptr + row * H + hs, mask=mask, other=0.0).to(tl.float32)
-        b = tl.load(bias_ptr + hs * stride_bo, mask=mask, other=0.0).to(tl.float32)
+        z = tl.load(logits_ptr + row * H + hs, mask=mask,
+                    other=0.0).to(tl.float32)
+        b = tl.load(bias_ptr + hs * stride_bo, mask=mask,
+                    other=0.0).to(tl.float32)
         s = 1.0 / (1.0 + tl.exp(-(z + b)))
         total += tl.where(mask, s, 0.0)
         start += BLOCK_H
     tl.store(out_ptr + row, tl.sum(total, axis=0), mask=row < B)
 
 
-def matmul_sigmoid_sum(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
+def matmul_sigmoid_sum(x: torch.Tensor, weight: torch.Tensor,
+                       bias: torch.Tensor) -> torch.Tensor:
     _require_npu_tensor("x", x)
     _require_npu_tensor("weight", weight)
     _require_npu_tensor("bias", bias)
@@ -126,9 +128,13 @@ def matmul_sigmoid_sum(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
     B, In = x.shape
     H, weight_k = weight.shape
     if weight_k != In:
-        raise ValueError(f"weight second dimension must match x second dimension, got {weight_k} and {In}")
+        raise ValueError(
+            f"weight second dimension must match x second dimension, got {weight_k} and {In}"
+        )
     if bias.shape[0] != H:
-        raise ValueError(f"bias length must match weight first dimension, got {bias.shape[0]} and {H}")
+        raise ValueError(
+            f"bias length must match weight first dimension, got {bias.shape[0]} and {H}"
+        )
     if B == 0:
         return torch.empty((0, 1), device=x.device, dtype=torch.float32)
 
@@ -147,18 +153,33 @@ def matmul_sigmoid_sum(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
     stride_bo = bias_in.stride(0)
 
     num_aicore = _device_prop("num_aicore", 20)
-    grid_dot = (max(1, min(num_aicore, _MAX_GRID, total_tiles)),)
+    grid_dot = (max(1, min(num_aicore, _MAX_GRID, total_tiles)), )
     _matmul_logits_kernel[grid_dot](
-        x_in, weight_in, logits,
-        B, In, H,
-        stride_xb, stride_xi, stride_wh, stride_wi,
-        num_m_tiles, num_h_tiles,
-        BLOCK_M=_BLOCK_M, BLOCK_H=_BLOCK_H, BLOCK_K=_BLOCK_K,
+        x_in,
+        weight_in,
+        logits,
+        B,
+        In,
+        H,
+        stride_xb,
+        stride_xi,
+        stride_wh,
+        stride_wi,
+        num_m_tiles,
+        num_h_tiles,
+        BLOCK_M=_BLOCK_M,
+        BLOCK_H=_BLOCK_H,
+        BLOCK_K=_BLOCK_K,
         num_stages=2,
     )
 
-    _sigmoid_sum_kernel[(B,)](
-        logits, bias_in, out, B, H, stride_bo,
+    _sigmoid_sum_kernel[(B, )](
+        logits,
+        bias_in,
+        out,
+        B,
+        H,
+        stride_bo,
         BLOCK_H=_REDUCE_BLOCK_H,
         num_stages=2,
     )

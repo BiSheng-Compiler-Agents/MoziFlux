@@ -42,10 +42,13 @@ def _groupnorm_lrelu_epilogue(
     g = gt * GROUP_BLOCK + tl.arange(0, GROUP_BLOCK)
     c_in_g = tl.arange(0, BLOCK_C)
     ch = g[:, None] * Cg + c_in_g[None, :]
-    valid = (tile < total_tiles) & (row < N) & (g[:, None] < G) & (c_in_g[None, :] < Cg) & (ch < C)
+    valid = (tile < total_tiles) & (row < N) & (g[:, None] < G) & (
+        c_in_g[None, :] < Cg) & (ch < C)
     safe_ch = tl.where(valid, ch, 0)
 
-    z = tl.load(z_ptr + row * stride_zm + safe_ch * stride_zc, mask=valid, other=0.0).to(tl.float32)
+    z = tl.load(z_ptr + row * stride_zm + safe_ch * stride_zc,
+                mask=valid,
+                other=0.0).to(tl.float32)
     mean = tl.sum(z, axis=1) / Cg
     centered = z - mean[:, None]
     var = tl.sum(centered * centered, axis=1) / Cg
@@ -57,7 +60,8 @@ def _groupnorm_lrelu_epilogue(
     tl.store(y_ptr + row * stride_ym + safe_ch * stride_yc, out, mask=valid)
 
 
-def _triton_groupnorm_lrelu(z, gamma, beta, groups: int, eps: float, neg_slope: float):
+def _triton_groupnorm_lrelu(z, gamma, beta, groups: int, eps: float,
+                            neg_slope: float):
     N, C = z.shape
     assert C % groups == 0
     Cg = C // groups
@@ -68,10 +72,25 @@ def _triton_groupnorm_lrelu(z, gamma, beta, groups: int, eps: float, neg_slope: 
     y = torch.empty_like(z)
     for off in range(0, total_tiles, _MAX_GRID):
         chunk = min(_MAX_GRID, total_tiles - off)
-        _groupnorm_lrelu_epilogue[(chunk,)](
-            z, gamma, beta, y, total_tiles, off, N, C, groups, Cg, eps, neg_slope,
-            z.stride(0), z.stride(1), y.stride(0), y.stride(1),
-            GROUP_BLOCK=group_block, BLOCK_C=block_c,
+        _groupnorm_lrelu_epilogue[(chunk, )](
+            z,
+            gamma,
+            beta,
+            y,
+            total_tiles,
+            off,
+            N,
+            C,
+            groups,
+            Cg,
+            eps,
+            neg_slope,
+            z.stride(0),
+            z.stride(1),
+            y.stride(0),
+            y.stride(1),
+            GROUP_BLOCK=group_block,
+            BLOCK_C=block_c,
         )
     return y
 
@@ -79,26 +98,42 @@ def _triton_groupnorm_lrelu(z, gamma, beta, groups: int, eps: float, neg_slope: 
 class ModelNew(nn.Module):
     """Optimized Matmul -> GroupNorm -> LeakyReLU -> Sum model for Ascend NPU."""
 
-    def __init__(self, input_size=input_size, hidden_size=hidden_size, num_groups=num_groups, eps=1e-5, negative_slope=0.01):
+    def __init__(self,
+                 input_size=input_size,
+                 hidden_size=hidden_size,
+                 num_groups=num_groups,
+                 eps=1e-5,
+                 negative_slope=0.01):
         super(ModelNew, self).__init__()
         self.fc = nn.Linear(input_size, hidden_size)
-        self.gn = nn.GroupNorm(num_groups=num_groups, num_channels=hidden_size, eps=eps)
+        self.gn = nn.GroupNorm(num_groups=num_groups,
+                               num_channels=hidden_size,
+                               eps=eps)
         self.leaky_relu = nn.LeakyReLU(negative_slope=negative_slope)
 
     def forward(self, x):
-        if x.device.type != "npu" or x.dtype not in (torch.float16, torch.float32):
-            raise RuntimeError("ModelNew requires float16 or float32 inputs on Ascend NPU.")
+        if x.device.type != "npu" or x.dtype not in (torch.float16,
+                                                     torch.float32):
+            raise RuntimeError(
+                "ModelNew requires float16 or float32 inputs on Ascend NPU.")
         if x.ndim != 2:
-            raise RuntimeError("ModelNew expects a 2D [batch, input_size] tensor.")
+            raise RuntimeError(
+                "ModelNew expects a 2D [batch, input_size] tensor.")
         weight = self.fc.weight.to(device=x.device, dtype=x.dtype)
-        bias = self.fc.bias.to(device=x.device, dtype=x.dtype) if self.fc.bias is not None else None
+        bias = self.fc.bias.to(
+            device=x.device,
+            dtype=x.dtype) if self.fc.bias is not None else None
         gamma = self.gn.weight.to(device=x.device, dtype=x.dtype)
         beta = self.gn.bias.to(device=x.device, dtype=x.dtype)
         z = F.linear(x.contiguous(), weight, bias)
         if _USE_TRITON_EPILOGUE:
-            return _triton_groupnorm_lrelu(z.contiguous(), gamma.contiguous(), beta.contiguous(), self.gn.num_groups, self.gn.eps, self.leaky_relu.negative_slope)
+            return _triton_groupnorm_lrelu(z.contiguous(), gamma.contiguous(),
+                                           beta.contiguous(),
+                                           self.gn.num_groups, self.gn.eps,
+                                           self.leaky_relu.negative_slope)
         y = F.group_norm(z, self.gn.num_groups, gamma, beta, self.gn.eps)
-        return F.leaky_relu(y, negative_slope=self.leaky_relu.negative_slope) * 2.0
+        return F.leaky_relu(
+            y, negative_slope=self.leaky_relu.negative_slope) * 2.0
 
 
 def get_inputs():

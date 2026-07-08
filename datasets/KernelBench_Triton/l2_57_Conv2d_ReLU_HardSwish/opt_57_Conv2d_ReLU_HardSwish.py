@@ -3,7 +3,6 @@ import torch.nn as nn
 import triton
 import triton.language as tl
 
-
 _BLOCK_SIZE = 8192
 _MAX_PROGRAMS = 65535
 _MODEL_CACHE = {}
@@ -21,7 +20,8 @@ def _relu_hswish_direct_kernel(x_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
 
 
 @triton.jit
-def _relu_hswish_persistent_kernel(x_ptr, n_elements, n_programs, BLOCK_SIZE: tl.constexpr):
+def _relu_hswish_persistent_kernel(x_ptr, n_elements, n_programs,
+                                   BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
     n_tiles = tl.cdiv(n_elements, BLOCK_SIZE)
     for tile_id in range(pid, n_tiles, n_programs):
@@ -43,13 +43,19 @@ def fused_relu_hardswish(x: torch.Tensor) -> torch.Tensor:
         return x
     n_tiles = triton.cdiv(n_elements, _BLOCK_SIZE)
     if n_tiles > _MAX_PROGRAMS:
-        _relu_hswish_persistent_kernel[(_MAX_PROGRAMS,)](
-            x, n_elements, _MAX_PROGRAMS, BLOCK_SIZE=_BLOCK_SIZE, num_warps=8, num_stages=2
-        )
+        _relu_hswish_persistent_kernel[(_MAX_PROGRAMS, )](
+            x,
+            n_elements,
+            _MAX_PROGRAMS,
+            BLOCK_SIZE=_BLOCK_SIZE,
+            num_warps=8,
+            num_stages=2)
     else:
-        _relu_hswish_direct_kernel[(n_tiles,)](
-            x, n_elements, BLOCK_SIZE=_BLOCK_SIZE, num_warps=8, num_stages=2
-        )
+        _relu_hswish_direct_kernel[(n_tiles, )](x,
+                                                n_elements,
+                                                BLOCK_SIZE=_BLOCK_SIZE,
+                                                num_warps=8,
+                                                num_stages=2)
     return x
 
 
@@ -80,12 +86,14 @@ def _set_deterministic_seed(seed: int) -> None:
 
 def conv2d_relu_hardswish(x: torch.Tensor) -> torch.Tensor:
     if x.device.type != "npu":
-        raise RuntimeError("conv2d_relu_hardswish expects an Ascend NPU tensor")
+        raise RuntimeError(
+            "conv2d_relu_hardswish expects an Ascend NPU tensor")
     key = (str(x.device), x.dtype)
     model = _MODEL_CACHE.get(key)
     if model is None:
         _set_deterministic_seed(0)
-        model = ModelNew(*get_init_inputs()).eval().to(device=x.device, dtype=x.dtype)
+        model = ModelNew(*get_init_inputs()).eval().to(device=x.device,
+                                                       dtype=x.dtype)
         _MODEL_CACHE[key] = model
     with torch.no_grad():
         return model(x)

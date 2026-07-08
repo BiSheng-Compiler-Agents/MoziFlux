@@ -5,7 +5,6 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 
-
 _MAX_GRID = 65535
 _USE_TRITON_FUSED = True
 _ACL_TILE_THRESHOLD = 1024
@@ -59,10 +58,14 @@ def _softmax_pool2_clast_direct_kernel(
     for kd in tl.static_range(0, K):
         for kh in tl.static_range(0, K):
             for kw in tl.static_range(0, K):
-                base = ((((n * D + (d0 + kd)) * H + (h0 + kh)) * W + (w0 + kw)) * C)
+                base = ((((n * D + (d0 + kd)) * H + (h0 + kh)) * W +
+                         (w0 + kw)) * C)
                 ptrs = x_ptr + base[None, :] + offs_c[:, None]
                 m = mask_c[:, None] & mask_ow[None, :]
-                vals = tl.load(ptrs, mask=m, other=-float("inf"), care_padding=False).to(tl.float32)
+                vals = tl.load(ptrs,
+                               mask=m,
+                               other=-float("inf"),
+                               care_padding=False).to(tl.float32)
                 vmax = tl.max(vals, axis=0)
                 ex = tl.exp(vals - vmax[None, :])
                 denom = tl.sum(ex, axis=0)
@@ -115,10 +118,14 @@ def _softmax_pool2_clast_persistent_kernel(
         for kd in tl.static_range(0, K):
             for kh in tl.static_range(0, K):
                 for kw in tl.static_range(0, K):
-                    base = ((((n * D + (d0 + kd)) * H + (h0 + kh)) * W + (w0 + kw)) * C)
+                    base = ((((n * D + (d0 + kd)) * H + (h0 + kh)) * W +
+                             (w0 + kw)) * C)
                     ptrs = x_ptr + base[None, :] + offs_c[:, None]
                     m = mask_c[:, None] & mask_ow[None, :]
-                    vals = tl.load(ptrs, mask=m, other=-float("inf"), care_padding=False).to(tl.float32)
+                    vals = tl.load(ptrs,
+                                   mask=m,
+                                   other=-float("inf"),
+                                   care_padding=False).to(tl.float32)
                     vmax = tl.max(vals, axis=0)
                     ex = tl.exp(vals - vmax[None, :])
                     denom = tl.sum(ex, axis=0)
@@ -130,18 +137,21 @@ def _softmax_pool2_clast_persistent_kernel(
         tl.store(out_ptrs, acc, mask=mask_c[:, None] & mask_ow[None, :])
 
 
-def _acl_reference_post(x: torch.Tensor, pool_kernel_size: int) -> torch.Tensor:
+def _acl_reference_post(x: torch.Tensor,
+                        pool_kernel_size: int) -> torch.Tensor:
     y = F.softmax(x, dim=1)
     y = F.max_pool3d(y, kernel_size=pool_kernel_size, stride=pool_kernel_size)
     y = F.max_pool3d(y, kernel_size=pool_kernel_size, stride=pool_kernel_size)
     return y
 
 
-def _softmax_then_two_pools_fused_triton(x: torch.Tensor, pool_kernel_size: int) -> torch.Tensor:
+def _softmax_then_two_pools_fused_triton(
+        x: torch.Tensor, pool_kernel_size: int) -> torch.Tensor:
     if x.ndim != 5:
         raise RuntimeError("Expected a 5D NCDHW tensor.")
     if x.device.type not in {"cuda", "npu"}:
-        raise RuntimeError("Triton fused path requires CUDA or Ascend NPU tensors.")
+        raise RuntimeError(
+            "Triton fused path requires CUDA or Ascend NPU tensors.")
 
     x = x.contiguous()
     N, C, D, H, W = x.shape
@@ -170,18 +180,43 @@ def _softmax_then_two_pools_fused_triton(x: torch.Tensor, pool_kernel_size: int)
     if total_tiles <= _MAX_GRID:
         grid = (N * OD * OH, tiles_ow)
         _softmax_pool2_clast_direct_kernel[grid](
-            x_last, y_last,
-            N, C, D, H, W, OD, OH, OW,
-            K=K, BLOCK_C=BLOCK_C, BLOCK_OW=BLOCK_OW,
-            num_warps=4, num_stages=2,
+            x_last,
+            y_last,
+            N,
+            C,
+            D,
+            H,
+            W,
+            OD,
+            OH,
+            OW,
+            K=K,
+            BLOCK_C=BLOCK_C,
+            BLOCK_OW=BLOCK_OW,
+            num_warps=4,
+            num_stages=2,
         )
     else:
         n_programs = _MAX_GRID
-        _softmax_pool2_clast_persistent_kernel[(n_programs,)](
-            x_last, y_last, total_tiles, n_programs, tiles_ow,
-            N, C, D, H, W, OD, OH, OW,
-            K=K, BLOCK_C=BLOCK_C, BLOCK_OW=BLOCK_OW,
-            num_warps=4, num_stages=2,
+        _softmax_pool2_clast_persistent_kernel[(n_programs, )](
+            x_last,
+            y_last,
+            total_tiles,
+            n_programs,
+            tiles_ow,
+            N,
+            C,
+            D,
+            H,
+            W,
+            OD,
+            OH,
+            OW,
+            K=K,
+            BLOCK_C=BLOCK_C,
+            BLOCK_OW=BLOCK_OW,
+            num_warps=4,
+            num_stages=2,
         )
     return y_last.permute(0, 4, 1, 2, 3).contiguous()
 

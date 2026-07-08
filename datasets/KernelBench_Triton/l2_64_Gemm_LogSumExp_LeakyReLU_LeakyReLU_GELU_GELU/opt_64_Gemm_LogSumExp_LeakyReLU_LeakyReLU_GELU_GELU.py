@@ -14,25 +14,27 @@ _ACL_LSE_MIN_N = 8192
 
 @triton.jit
 def _rowwise_lse_leaky_gelu2_direct(
-        x_ptr,
-        y_ptr,
-        stride_xm,
-        stride_xn,
-        stride_ym,
-        NEG_SLOPE: tl.constexpr,
-        N: tl.constexpr,
-        BLOCK_N: tl.constexpr,
+    x_ptr,
+    y_ptr,
+    stride_xm,
+    stride_xn,
+    stride_ym,
+    NEG_SLOPE: tl.constexpr,
+    N: tl.constexpr,
+    BLOCK_N: tl.constexpr,
 ):
     row = tl.program_id(0)
     r = tl.arange(0, BLOCK_N)
     row_ptr = x_ptr + row * stride_xm
 
-    m = tl.full((1,), -float("inf"), dtype=tl.float32)
-    s = tl.zeros((1,), dtype=tl.float32)
+    m = tl.full((1, ), -float("inf"), dtype=tl.float32)
+    s = tl.zeros((1, ), dtype=tl.float32)
     for n0 in tl.range(0, N, BLOCK_N):
         offs = n0 + r
         mask = offs < N
-        vals = tl.load(row_ptr + offs * stride_xn, mask=mask, other=-float("inf")).to(tl.float32)
+        vals = tl.load(row_ptr + offs * stride_xn,
+                       mask=mask,
+                       other=-float("inf")).to(tl.float32)
         tile_max = tl.max(vals, axis=0)
         m_new = tl.maximum(m, tile_max)
         s = s * tl.exp(m - m_new) + tl.sum(tl.exp(vals - m_new), axis=0)
@@ -50,27 +52,29 @@ def _rowwise_lse_leaky_gelu2_direct(
 
 @triton.jit
 def _rowwise_lse_leaky_gelu2_persistent(
-        x_ptr,
-        y_ptr,
-        B,
-        stride_xm,
-        stride_xn,
-        stride_ym,
-        NEG_SLOPE: tl.constexpr,
-        N: tl.constexpr,
-        BLOCK_N: tl.constexpr,
+    x_ptr,
+    y_ptr,
+    B,
+    stride_xm,
+    stride_xn,
+    stride_ym,
+    NEG_SLOPE: tl.constexpr,
+    N: tl.constexpr,
+    BLOCK_N: tl.constexpr,
 ):
     pid = tl.program_id(0)
     n_programs = tl.num_programs(0)
     r = tl.arange(0, BLOCK_N)
     for row in range(pid, B, n_programs):
         row_ptr = x_ptr + row * stride_xm
-        m = tl.full((1,), -float("inf"), dtype=tl.float32)
-        s = tl.zeros((1,), dtype=tl.float32)
+        m = tl.full((1, ), -float("inf"), dtype=tl.float32)
+        s = tl.zeros((1, ), dtype=tl.float32)
         for n0 in tl.range(0, N, BLOCK_N):
             offs = n0 + r
             mask = offs < N
-            vals = tl.load(row_ptr + offs * stride_xn, mask=mask, other=-float("inf")).to(tl.float32)
+            vals = tl.load(row_ptr + offs * stride_xn,
+                           mask=mask,
+                           other=-float("inf")).to(tl.float32)
             tile_max = tl.max(vals, axis=0)
             m_new = tl.maximum(m, tile_max)
             s = s * tl.exp(m - m_new) + tl.sum(tl.exp(vals - m_new), axis=0)
@@ -102,13 +106,29 @@ def _post_lse_triton(x, neg_slope, force_persistent=False):
     block_n = min(_BLOCK_N, triton.next_power_of_2(N))
     if force_persistent or B > _MAX_PROGRAMS:
         n_programs = min(B, _MAX_PROGRAMS)
-        _rowwise_lse_leaky_gelu2_persistent[(n_programs,)](
-            x_c, y, B, x_c.stride(0), x_c.stride(1), y.stride(0),
-            NEG_SLOPE=neg_slope, N=N, BLOCK_N=block_n, num_warps=4, num_stages=2)
+        _rowwise_lse_leaky_gelu2_persistent[(n_programs, )](
+            x_c,
+            y,
+            B,
+            x_c.stride(0),
+            x_c.stride(1),
+            y.stride(0),
+            NEG_SLOPE=neg_slope,
+            N=N,
+            BLOCK_N=block_n,
+            num_warps=4,
+            num_stages=2)
     else:
-        _rowwise_lse_leaky_gelu2_direct[(B,)](
-            x_c, y, x_c.stride(0), x_c.stride(1), y.stride(0),
-            NEG_SLOPE=neg_slope, N=N, BLOCK_N=block_n, num_warps=4, num_stages=2)
+        _rowwise_lse_leaky_gelu2_direct[(B, )](x_c,
+                                               y,
+                                               x_c.stride(0),
+                                               x_c.stride(1),
+                                               y.stride(0),
+                                               NEG_SLOPE=neg_slope,
+                                               N=N,
+                                               BLOCK_N=block_n,
+                                               num_warps=4,
+                                               num_stages=2)
     return y
 
 

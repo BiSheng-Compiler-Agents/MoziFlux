@@ -3,7 +3,6 @@ import importlib.util
 import pathlib
 import sys
 import time
-import math
 import torch
 import torch.nn as nn
 import torch_npu  # noqa: F401
@@ -43,7 +42,8 @@ def _load(path: pathlib.Path, key: str):
     if key in _MODULES:
         return _MODULES[key]
     try:
-        spec = importlib.util.spec_from_file_location(f"k43_{key}_{path.stem}", path)
+        spec = importlib.util.spec_from_file_location(f"k43_{key}_{path.stem}",
+                                                      path)
         mod = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = mod
         spec.loader.exec_module(mod)
@@ -141,7 +141,9 @@ def unit_test():
                     continue
                 diff = _max_abs(out, ref)
                 passed = (out.shape == ref.shape) and diff <= 1e-3
-                print(f"TEST {name} {label}: shape={tuple(out.shape)} max_abs={diff:.6g} {'PASS' if passed else 'MISMATCH'}")
+                print(
+                    f"TEST {name} {label}: shape={tuple(out.shape)} max_abs={diff:.6g} {'PASS' if passed else 'MISMATCH'}"
+                )
                 if key == "optimized" and not passed:
                     ok = False
             except Exception as exc:
@@ -154,10 +156,14 @@ def unit_test():
 
 def _bench_one(fn, warmup=10, rep=30):
     try:
-        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=warmup,
+                                       rep=rep,
+                                       return_mode="mean")
     except Exception:
         for _ in range(5):
-            fn(); _sync()
+            fn()
+            _sync()
         t0 = time.perf_counter()
         for _ in range(rep):
             fn()
@@ -178,13 +184,15 @@ def _shape_by_label(label):
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
         line_vals=["torch", "baseline1", "baseline2", "optimized"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("blue", "-"), ("green", "-"), ("black", "--"), ("red", "-")],
         ylabel="ms",
         plot_name="conv3d_max_lse_relu",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     shape = _shape_by_label(label)
     if provider == "baseline2" and not BASE_FILE.exists():
@@ -197,12 +205,16 @@ def benchmark(label, provider):
         if out is None:
             return float("inf")
     except Exception as exc:
-        print(f"INFO benchmark_preskip {_PROVIDER_NAMES[provider]} {label}: {type(exc).__name__}")
+        print(
+            f"INFO benchmark_preskip {_PROVIDER_NAMES[provider]} {label}: {type(exc).__name__}"
+        )
         return float("inf")
     try:
         return _bench_one(lambda: _run_provider(provider, x, shape))
     except Exception as exc:
-        print(f"INFO benchmark_inf {_PROVIDER_NAMES[provider]} {label}: {type(exc).__name__}")
+        print(
+            f"INFO benchmark_inf {_PROVIDER_NAMES[provider]} {label}: {type(exc).__name__}"
+        )
         return float("inf")
 
 

@@ -1,8 +1,6 @@
 import argparse
 import gc
 import importlib.util
-import math
-import os
 import sys
 import time
 from pathlib import Path
@@ -44,7 +42,8 @@ def _load(filename, key):
         return _MODULES[cache_key]
     path = ROOT / filename
     try:
-        spec = importlib.util.spec_from_file_location(f"k_{key}_{path.stem}", path)
+        spec = importlib.util.spec_from_file_location(f"k_{key}_{path.stem}",
+                                                      path)
         mod = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = mod
         spec.loader.exec_module(mod)
@@ -57,13 +56,16 @@ def _load(filename, key):
 
 
 class TorchRef(nn.Module):
+
     def __init__(self, in_channels, out_channels, kernel_size, stride, padding,
                  output_padding, sum_weight, norm_shape, pool_kernel_size):
         super().__init__()
-        self.conv_transpose = nn.ConvTranspose3d(
-            in_channels, out_channels, kernel_size, stride=stride,
-            padding=padding, output_padding=output_padding
-        )
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding,
+                                                 output_padding=output_padding)
         self.sum_weight = nn.Parameter(torch.tensor(sum_weight))
         self.norm = nn.LayerNorm(norm_shape)
         self.avg_pool = nn.AvgPool3d(kernel_size=pool_kernel_size)
@@ -80,13 +82,17 @@ class TorchRef(nn.Module):
 
 
 def _out_w(W, kernel=3, stride=2, padding=1, output_padding=1, dilation=1):
-    return (W - 1) * stride - 2 * padding + dilation * (kernel - 1) + output_padding + 1
+    return (W - 1) * stride - 2 * padding + dilation * (kernel -
+                                                        1) + output_padding + 1
 
 
 def _init_args(shape):
     _, B, Cin, Cout, D, H, W = shape
-    norm_shape = (_out_w(W),)
-    return [Cin, Cout, (3, 3, 3), (2, 2, 2), (1, 1, 1), (1, 1, 1), 1.0, norm_shape, (2, 2, 2)]
+    norm_shape = (_out_w(W), )
+    return [
+        Cin, Cout, (3, 3, 3), (2, 2, 2), (1, 1, 1), (1, 1, 1), 1.0, norm_shape,
+        (2, 2, 2)
+    ]
 
 
 def _device():
@@ -134,7 +140,8 @@ def _should_preskip(provider, shape):
     label = shape[0]
     # The editable baseline computes ROWS_PER_CTA=64 for the default output,
     # yielding 65536 CTAs in both custom epilogues, above Ascend's safe grid cap.
-    if provider in ("Baseline Triton1", "Baseline Triton2") and label == "default_required":
+    if provider in ("Baseline Triton1",
+                    "Baseline Triton2") and label == "default_required":
         return "comparison_provider_preskipped_to_avoid_grid_cap_poisoning"
     return None
 
@@ -156,7 +163,9 @@ def unit_test():
         x = _make_input(shape)
         ref = _run("PyTorch / ACL", x, shape)
         _sync()
-        for provider in ["Baseline Triton1", "Baseline Triton2", "Optimized Triton"]:
+        for provider in [
+                "Baseline Triton1", "Baseline Triton2", "Optimized Triton"
+        ]:
             reason = _should_preskip(provider, shape)
             if reason:
                 print(f"INFO unit_preskip {provider} {shape[0]} {reason}")
@@ -169,7 +178,9 @@ def unit_test():
                 if provider == "Optimized Triton" and not (max_abs <= 1e-3):
                     ok = False
             except Exception as exc:
-                print(f"INFO unit_provider_issue {provider} {shape[0]} {type(exc).__name__}")
+                print(
+                    f"INFO unit_provider_issue {provider} {shape[0]} {type(exc).__name__}"
+                )
                 if provider == "Optimized Triton":
                     ok = False
         del x, ref
@@ -187,18 +198,23 @@ def _time_provider(provider, shape):
     try:
         # Compile/warmup.
         for _ in range(2):
-            y = _run(provider, x, shape)
+            _run(provider, x, shape)
         _sync()
         if hasattr(triton.testing, "do_bench"):
-            return triton.testing.do_bench(lambda: _run(provider, x, shape), warmup=3, rep=10, return_mode="mean")
+            return triton.testing.do_bench(lambda: _run(provider, x, shape),
+                                           warmup=3,
+                                           rep=10,
+                                           return_mode="mean")
         start = time.perf_counter()
         reps = 10
         for _ in range(reps):
-            y = _run(provider, x, shape)
+            _run(provider, x, shape)
         _sync()
         return (time.perf_counter() - start) * 1000.0 / reps
     except Exception as exc:
-        print(f"INFO bench_provider_issue {provider} {shape[0]} {type(exc).__name__}")
+        print(
+            f"INFO bench_provider_issue {provider} {shape[0]} {type(exc).__name__}"
+        )
         return float("inf")
     finally:
         gc.collect()
@@ -209,14 +225,19 @@ def _time_provider(provider, shape):
         x_names=["label"],
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
-        line_vals=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_vals=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("black", "-"), ("blue", "-"), ("red", "--"), ("green", "-")],
         ylabel="latency_ms",
         plot_name="convtranspose3d_sum_layernorm_avgpool_gelu",
         args={},
-    )
-)
+    ))
 def benchmark(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     return _time_provider(provider, shape)

@@ -39,7 +39,8 @@ def _post_ops_channel_direct(
     tl.multiple_of(hw, BLOCK_SIZE)
     tl.max_contiguous(hw, BLOCK_SIZE)
 
-    x = tl.load(x_ptr + base, mask=mask, other=0.0, care_padding=False).to(tl.float32)
+    x = tl.load(x_ptr + base, mask=mask, other=0.0,
+                care_padding=False).to(tl.float32)
     x = tl.maximum(x, 0.0)
     # LeakyReLU immediately after ReLU is an exact no-op for non-negative x.
     x = 0.5 * x * (1.0 + tl.math.erf(x * 0.7071067811865476))
@@ -74,7 +75,8 @@ def _post_ops_channel_persistent(
         tl.multiple_of(hw, BLOCK_SIZE)
         tl.max_contiguous(hw, BLOCK_SIZE)
 
-        x = tl.load(x_ptr + base, mask=mask, other=0.0, care_padding=False).to(tl.float32)
+        x = tl.load(x_ptr + base, mask=mask, other=0.0,
+                    care_padding=False).to(tl.float32)
         x = tl.maximum(x, 0.0)
         # LeakyReLU immediately after ReLU is an exact no-op for non-negative x.
         x = 0.5 * x * (1.0 + tl.math.erf(x * 0.7071067811865476))
@@ -121,14 +123,32 @@ class ModelNew(nn.Module):
         grid_n = min(total_tiles, _MAX_GRID)
 
         if total_tiles <= _MAX_GRID:
-            _post_ops_channel_direct[(total_tiles,)](
-                y, b, y, dhw, c, tiles_per_segment, total_tiles, b.stride(0), BLOCK_SIZE=_BLOCK_SIZE,
-                num_warps=4, num_stages=2,
+            _post_ops_channel_direct[(total_tiles, )](
+                y,
+                b,
+                y,
+                dhw,
+                c,
+                tiles_per_segment,
+                total_tiles,
+                b.stride(0),
+                BLOCK_SIZE=_BLOCK_SIZE,
+                num_warps=4,
+                num_stages=2,
             )
         else:
-            _post_ops_channel_persistent[(grid_n,)](
-                y, b, y, dhw, c, tiles_per_segment, total_tiles, b.stride(0), BLOCK_SIZE=_BLOCK_SIZE,
-                num_warps=4, num_stages=2,
+            _post_ops_channel_persistent[(grid_n, )](
+                y,
+                b,
+                y,
+                dhw,
+                c,
+                tiles_per_segment,
+                total_tiles,
+                b.stride(0),
+                BLOCK_SIZE=_BLOCK_SIZE,
+                num_warps=4,
+                num_stages=2,
             )
         return y
 
@@ -139,15 +159,19 @@ def _set_deterministic_seed(seed: int) -> None:
         torch.npu.manual_seed_all(seed)
 
 
-def conv3d_relu_leakyrelu_gelu_sigmoid_biasadd(x: torch.Tensor) -> torch.Tensor:
+def conv3d_relu_leakyrelu_gelu_sigmoid_biasadd(
+        x: torch.Tensor) -> torch.Tensor:
     if x.device.type != "npu":
-        raise RuntimeError("conv3d_relu_leakyrelu_gelu_sigmoid_biasadd expects an Ascend NPU tensor")
+        raise RuntimeError(
+            "conv3d_relu_leakyrelu_gelu_sigmoid_biasadd expects an Ascend NPU tensor"
+        )
 
     key = (str(x.device), x.dtype)
     model = _MODEL_CACHE.get(key)
     if model is None:
         _set_deterministic_seed(0)
-        model = ModelNew(*get_init_inputs()).eval().to(device=x.device, dtype=x.dtype)
+        model = ModelNew(*get_init_inputs()).eval().to(device=x.device,
+                                                       dtype=x.dtype)
         _MODEL_CACHE[key] = model
 
     with torch.no_grad():

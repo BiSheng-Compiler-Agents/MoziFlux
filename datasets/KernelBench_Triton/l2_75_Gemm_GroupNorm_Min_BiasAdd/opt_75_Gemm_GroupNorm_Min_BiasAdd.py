@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 
-
 _MAX_GRID = 65535
 _MIN_BIAS_BLOCK_N = 16
 _MIN_BIAS_BLOCK_C = 16
@@ -13,9 +12,9 @@ _USE_ACL_DISPATCH = True
 
 @triton.jit
 def _min_bias_direct_kernel(
-    y_ptr,          # [N, C] contiguous normalized activations
-    bias_ptr,       # [C]
-    out_ptr,        # [1, C, N, 1] contiguous
+    y_ptr,  # [N, C] contiguous normalized activations
+    bias_ptr,  # [C]
+    out_ptr,  # [1, C, N, 1] contiguous
     N: tl.constexpr,
     C: tl.constexpr,
     STRIDE_YN: tl.constexpr,
@@ -35,7 +34,7 @@ def _min_bias_direct_kernel(
     # benchmark contract), so this is a single program per row-block and channel tile.
     # Only pid_c==0 computes row minima; other channel tiles load the finished values
     # through the same expression when _USE_ACL_DISPATCH is disabled for testing.
-    min_vals = tl.full((BLOCK_N,), float("inf"), tl.float32)
+    min_vals = tl.full((BLOCK_N, ), float("inf"), tl.float32)
     for c0 in tl.range(0, C, BLOCK_C):
         ch = c0 + offs_c
         vals = tl.load(
@@ -69,7 +68,8 @@ def _triton_min_bias(y: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
     grid_c = triton.cdiv(C, _MIN_BIAS_BLOCK_C)
     # Keep each dimension under the Ascend FFTS limit.  Contract C=8192 => 512.
     if grid_n > _MAX_GRID or grid_c > _MAX_GRID:
-        raise RuntimeError("Triton min-bias fallback grid exceeds Ascend limit")
+        raise RuntimeError(
+            "Triton min-bias fallback grid exceeds Ascend limit")
     _min_bias_direct_kernel[(grid_n, grid_c)](
         y_ctg,
         bvec,

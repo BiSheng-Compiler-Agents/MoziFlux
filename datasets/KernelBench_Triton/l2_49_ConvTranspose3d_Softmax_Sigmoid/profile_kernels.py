@@ -3,7 +3,6 @@ import importlib.util
 import pathlib
 import sys
 import time
-import traceback
 
 import torch
 import torch.nn as nn
@@ -47,12 +46,18 @@ def _make_inputs(batch, in_ch, out_ch, d, h, w, dtype=torch.float32):
 
 
 class TorchRef(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, output_padding):
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding,
+                 output_padding):
         super().__init__()
-        self.conv_transpose = nn.ConvTranspose3d(
-            in_channels, out_channels, kernel_size, stride=stride,
-            padding=padding, output_padding=output_padding, bias=True
-        )
+        self.conv_transpose = nn.ConvTranspose3d(in_channels,
+                                                 out_channels,
+                                                 kernel_size,
+                                                 stride=stride,
+                                                 padding=padding,
+                                                 output_padding=output_padding,
+                                                 bias=True)
+
     def forward(self, x):
         x = self.conv_transpose(x)
         return torch.sigmoid(torch.softmax(x, dim=1))
@@ -67,7 +72,11 @@ def _model(key, batch, in_ch, out_ch, d, h, w):
     if key == "torch":
         m = TorchRef(*args).npu().eval()
     else:
-        path = {"baseline1": INPUT_FILE, "baseline2": BASE_FILE, "opt": OPT_FILE}[key]
+        path = {
+            "baseline1": INPUT_FILE,
+            "baseline2": BASE_FILE,
+            "opt": OPT_FILE
+        }[key]
         if key == "baseline2" and not path.exists():
             _MODEL_CACHE[cache_key] = None
             return None
@@ -90,7 +99,15 @@ def _provider_key(provider):
     }[provider]
 
 
-def _safe_provider_call(provider, x, batch, in_ch, out_ch, d, h, w, for_bench=False):
+def _safe_provider_call(provider,
+                        x,
+                        batch,
+                        in_ch,
+                        out_ch,
+                        d,
+                        h,
+                        w,
+                        for_bench=False):
     key = _provider_key(provider)
     if key == "torch":
         return _run_torch_ref(x, batch, in_ch, out_ch, d, h, w)
@@ -116,7 +133,10 @@ def _sync():
 
 def _bench_ms(fn):
     if hasattr(triton.testing, "do_bench"):
-        return triton.testing.do_bench(fn, warmup=25, rep=100, return_mode="mean")
+        return triton.testing.do_bench(fn,
+                                       warmup=25,
+                                       rep=100,
+                                       return_mode="mean")
     for _ in range(10):
         fn()
     _sync()
@@ -133,25 +153,35 @@ def unit_test():
         inputs = _make_inputs(batch, in_ch, out_ch, d, h, w)
         with torch.no_grad():
             ref = _run_torch_ref(inputs[0], batch, in_ch, out_ch, d, h, w)
-            for provider in ["Baseline Triton1", "Baseline Triton2", "Optimized Triton"]:
+            for provider in [
+                    "Baseline Triton1", "Baseline Triton2", "Optimized Triton"
+            ]:
                 try:
-                    out = _safe_provider_call(provider, inputs[0], batch, in_ch, out_ch, d, h, w)
+                    out = _safe_provider_call(provider, inputs[0], batch,
+                                              in_ch, out_ch, d, h, w)
                     _sync()
                     max_diff = (out - ref).abs().max().item()
-                    tol = 1e-3 if out.dtype in (torch.float16, torch.bfloat16) else 1e-4
+                    tol = 1e-3 if out.dtype in (torch.float16,
+                                                torch.bfloat16) else 1e-4
                     if max_diff > tol:
-                        print(f"UNIT_CHECK {label} {provider}: mismatch max_diff={max_diff:.6g} tol={tol}")
+                        print(
+                            f"UNIT_CHECK {label} {provider}: mismatch max_diff={max_diff:.6g} tol={tol}"
+                        )
                         if provider == "Optimized Triton":
                             ok = False
                     else:
-                        print(f"UNIT_CHECK {label} {provider}: PASS max_diff={max_diff:.6g}")
+                        print(
+                            f"UNIT_CHECK {label} {provider}: PASS max_diff={max_diff:.6g}"
+                        )
                 except Exception as exc:
                     name = type(exc).__name__
                     if provider == "Optimized Triton":
                         print(f"UNIT_CHECK {label} {provider}: FAIL {name}")
                         ok = False
                     else:
-                        print(f"UNIT_CHECK {label} {provider}: INFO unavailable_or_preskipped {name}")
+                        print(
+                            f"UNIT_CHECK {label} {provider}: INFO unavailable_or_preskipped {name}"
+                        )
     print("UNIT_TEST PASS" if ok else "UNIT_TEST_FAILED")
     return ok
 
@@ -161,30 +191,56 @@ def unit_test():
         x_names=["label"],
         x_vals=[s[0] for s in _BENCH_SHAPES],
         line_arg="provider",
-        line_vals=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
-        line_names=["PyTorch / ACL", "Baseline Triton1", "Baseline Triton2", "Optimized Triton"],
+        line_vals=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
+        line_names=[
+            "PyTorch / ACL", "Baseline Triton1", "Baseline Triton2",
+            "Optimized Triton"
+        ],
         styles=[("black", "-"), ("blue", "-"), ("red", "--"), ("green", "-")],
         ylabel="ms",
         plot_name="convtranspose3d_softmax_sigmoid",
         args={},
-    )
-)
+    ))
 def bench(label, provider):
     shape = next(s for s in _BENCH_SHAPES if s[0] == label)
     _, batch, in_ch, out_ch, d, h, w, _path = shape
     x = _make_inputs(batch, in_ch, out_ch, d, h, w)[0]
     try:
-        _safe_provider_call(provider, x, batch, in_ch, out_ch, d, h, w, for_bench=True)
+        _safe_provider_call(provider,
+                            x,
+                            batch,
+                            in_ch,
+                            out_ch,
+                            d,
+                            h,
+                            w,
+                            for_bench=True)
         _sync()
     except Exception as exc:
-        print(f"INFO {provider} {label} preskipped_or_unavailable {type(exc).__name__}")
+        print(
+            f"INFO {provider} {label} preskipped_or_unavailable {type(exc).__name__}"
+        )
         return float("inf")
+
     def fn():
-        _safe_provider_call(provider, x, batch, in_ch, out_ch, d, h, w, for_bench=True)
+        _safe_provider_call(provider,
+                            x,
+                            batch,
+                            in_ch,
+                            out_ch,
+                            d,
+                            h,
+                            w,
+                            for_bench=True)
+
     try:
         return _bench_ms(fn)
     except Exception as exc:
-        print(f"INFO {provider} {label} timing_unavailable {type(exc).__name__}")
+        print(
+            f"INFO {provider} {label} timing_unavailable {type(exc).__name__}")
         return float("inf")
 
 
@@ -198,7 +254,9 @@ def main():
     if args.test:
         unit_test()
     if args.bench:
-        bench.run(print_data=True, show_plots=False, save_path=str(ROOT / "perf_plots"))
+        bench.run(print_data=True,
+                  show_plots=False,
+                  save_path=str(ROOT / "perf_plots"))
 
 
 if __name__ == "__main__":
