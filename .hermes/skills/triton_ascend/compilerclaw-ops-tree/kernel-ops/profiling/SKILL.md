@@ -79,7 +79,7 @@ Key structural requirements (all enforced in the template):
 5. **All baselines** — include every existing provider: PyTorch / ACL, `<N>_*.py` as `Baseline Triton1`, `base_<N>_*.py` as `Baseline Triton2` when present, and `opt_<N>_*.py` as `Optimized Triton`. Do not silently drop `base_*.py`.
 6. **Correctness coverage is gating** — run correctness for EVERY provider on EVERY shape in `_BENCH_SHAPES`; benchmark-only shapes are forbidden unless explicitly skipped with a printed reason. Benchmark numbers are meaningful only for providers that produce the same outputs as `PyTorch / ACL`. If an editable provider fails correctness, investigate and fix the root cause before trusting or comparing its benchmark numbers. Only if a comparison provider cannot be fixed or is intentionally read-only should it remain in the table with `inf`/skip timing. Gate `UNIT_TEST PASS/FAIL` on optimized correctness and reference construction, but do not hide broken comparison baselines behind `INFO`: fix them. After any fix, run `remote_verify` yourself and require real `test_passed=true` + `bench_passed=true` before saying the profiler is correct.
    - For very large Ascend NPU tensors, `torch.testing.assert_close` can emit misleading mismatch counts (especially with internal-format tensors) even when `max_abs_diff` is within tolerance. In `profile_kernels.py`, compute a scalar max absolute diff and gate on the dtype tolerance when `assert_close` behaves pathologically; still print the max diff for every provider/shape.
-7. **Benchmark** — use `@triton.testing.perf_report` with `x_names=["label"]`. Fall back to manual `time.perf_counter` + `torch.npu.synchronize()` if `do_bench` is unavailable.
+7. **Benchmark** — use `@triton.testing.perf_report` with `x_names=["label"]` for parser-friendly tables. Inside each benchmark cell, prefer `torch_npu.profiler` device timing when comparing NPU kernels or ACL fused ops; parse `op_statistic.csv` `Avg Time(us)` first and fall back to `kernel_details.csv` `Duration(us)`. Use manual `time.perf_counter` + `torch.npu.synchronize()` only when profiler output is unavailable or too costly. See `references/torch-npu-profiler.md`. For ops where `do_bench` timing is unreliable or you need device-level kernel durations, use `torch_npu.profiler` instead — see `references/torch-npu-profiler.md` for API details and the sync pattern.
 8. **Resilience / NPU context poisoning** — use the standard single-process profiling template; do **not** wrap providers in subprocesses. Wrap provider calls in try/except and return `float("inf")` on benchmark failure. Guard launches known to poison the current process before executing them: Ascend runtime errors such as `coreDim > 65535` can make later providers fail or report bogus timings. If a comparison provider passes unit correctness but poisons the NPU context during benchmark warmup/timing, keep its correctness test and visible benchmark column, but pre-skip only its timing cells with `INFO ... inf comparison_provider_preskipped_to_avoid_npu_context_poisoning`; do not let it run before optimized timing. If a provider is known to MLIR-abort for all shapes, keep the column and return `inf` for that provider with `INFO` wording, not `ERROR`/`FAIL`, so parser-driven verification can still pass when optimized correctness passes. Do not use subprocess isolation to make aborts catchable unless the user explicitly asks. If the user says a provider is editable and should be comparable, find and fix the provider root cause instead of masking it as `INFO`/`inf`.
 9. **Input construction must match the source kernel** — derive tensors from the original `<N>_*.py` `get_inputs()` contract: shape, dtype, layout/contiguity, and distribution (`torch.rand` vs `torch.randn`). Do not use fp32 test tensors when the source kernel only accepts fp16/bf16; do not change random distribution when comparing correctness.
 10. **Fix editable provider correctness before trusting timing** — if `Baseline Triton1` (`<N>_*.py`) or another editable comparison provider produces NaNs/large errors, find and fix the root cause before accepting benchmark numbers. Common Ascend matmul cause: fp16/bf16 operands were upcast with `.to(tl.float32)` before `tl.dot`; keep operands native and use an fp32 accumulator (`acc += tl.dot(a, b)` or `tl.dot(a, b, acc)`).
@@ -113,10 +113,34 @@ can still produce **0 parsed records** if the format is wrong. See
 
 Quick self-check: run captured output through `generate_report.py` and confirm `recs > 0`.
 
+## Benchmark via torch_npu.profiler
+
+The canonical template (`templates/profile_kernels.py`) benchmarks with `torch_npu.profiler`,
+not `do_bench`. Rules learned on hardware:
+
+- Wrap each provider call inside a `with profile(...)` context in `benchmark(label, mode)`;
+  synchronize (`torch.npu.synchronize()`) **before the loop and after every iteration**, then
+  `prof.step()`. Missing per-iteration sync inflated measured durations ~10x (140 ms → 1401 ms).
+- Use `schedule(wait=1, warmup=2, active=5, repeat=1)` and parse
+  `ASCEND_PROFILER_OUTPUT/op_statistic.csv` (`Avg Time(us)`) first; fall back to
+  `kernel_details.csv` (`Duration(us)`). See `references/torch-npu-profiler.md` for
+  `_ExperimentalConfig`, levels, metrics, and output files.
+- One profiler context per (provider, shape) cell, each with a fresh tempdir; delete it after
+  parsing unless `KEEP_FA_PROF=1` (or equivalent) is set.
+- No subprocess isolation by default — profile in-process in `benchmark()`. Do not wrap cells in
+  subprocesses unless the user explicitly asks.
+- Template TEST lines use canonical lowercase keys `baseline1`, `baseline2`, `optimized`
+  (required by kernel-sandbox `_validate_results_txt`), `UNIT_TEST PASS` gates on optimized
+  correctness, and the script always exits 0 so results download.
+- `do_bench` remains only a fallback when profiler is unavailable.
+
 ## Pitfalls
 
+- **Instruction-only requests** — when the user asks how to patch/debug a package or asks for the command/snippet, provide instructions only unless they explicitly ask to edit the environment. Do not modify site-packages or project files while answering explanatory Q&A; if you accidentally do, revert only that change.
+- **Profiler timing with `torch_npu.profiler`** — put only the op being measured inside the profiler scope, run it in a loop for `wait + warmup + active` steps, call `torch.npu.synchronize()` before the loop and after every op before `prof.step()`, and use `tensorboard_trace_handler(..., analyse_flag=True)` so CSV files are generated. `Level0` gives low-overhead timing; `Level1/2` add AIC metrics and can change overhead.
+- **Remote verify disk-full masquerading as FileNotFoundError** — if `remote_verify` suddenly returns `[Errno 2] No such file` before remote stdout, diagnose remote directory creation/upload. A full remote filesystem can make `mkdir` fail and SFTP then reports `FileNotFoundError`; check `df -h` and clean old profiler/job outputs before retrying.
 - **Activation reference fallback** — when a native PyTorch/ACL activation fails during reference construction on a CANN/torch_npu build, replace only the reference expression with an exact algebraic equivalent and keep optimized correctness gated against it. Example: for `ReLU(HardSwish(x))`, use `torch.where(x > 0, x * torch.clamp(x + 3, max=6) / 6, 0)` instead of `F.relu(F.hardswish(x))` if native `hardswish` fails. See `references/activation-reference-fallback.md`.
-- **Wrong kernel args** — always read the `@triton.jit` signature directly from the source file
+- **Wrong kernel args** — always read the `@triton.jit` signature directly from the source file; also read the host-side entry function's signature. When swapping which file `_load()`s as a provider, adapt the `_run_provider()` call to that file's entry convention (e.g. one FA variant's `attention` takes `(q, k, v, atten_mask, causal, sm_scale, BM, BN)`, not the template's `(q, k, v, sm_scale, causal)`) — a stale provider call fails with TypeError before the kernel ever compiles.
 - **Grid overflow / `coreDim > 65535`** — guard before launching the invalid variant in both unit tests and benchmarks; a failed Ascend launch can poison the NPU context and make later providers return bogus errors/timings. For fixable kernels, loop over the overflowing dimension with sub-grids.
 - **MLIR abort / invalid-provider handling** — Python try/except cannot catch an abort from MLIR. If investigation shows a provider aborts for every shape, do not use subprocess isolation in `profile_kernels.py`; keep the provider column and return `inf` for that provider with a clear printed reason. For expected/handled provider-wide `inf`, avoid printing `ERROR`/`FAIL` in unit-test output if the verifier treats those tokens as failure; use `INFO`/`SKIP`/`INF` wording and keep exit code zero. **Do not interpolate raw exception strings for comparison providers**: MLIR/Triton exceptions often contain `[ERROR]`/`[FAIL]` tokens internally, which can make parser-driven verification fail even when optimized correctness passes. Print only the exception type or a sanitized one-line reason, e.g. `INFO comparison_provider_unavailable Baseline Triton2 shape: MLIRCompilationError`. Never hide correctness failures for an editable provider: if baseline/input code is part of the deliverable and is wrong, find and fix the root cause before trusting benchmark numbers.
 - **Autotune grid mismatch** — if the kernel uses `@triton.autotune`, the host `grid` must be derived from the selected `META` when possible. A conservative min-block grid is correctness-safe but may overlaunch many extra program instances and make the optimized path slower than a grouped baseline; inspect `optimization/references/grid-autotune-mismatch.md` before accepting those timings.
@@ -144,6 +168,8 @@ Quick self-check: run captured output through `generate_report.py` and confirm `
 - **`inf`/`NaN` in speedup ratios** — filter with `np.isfinite() & (vals > 0)` before geomean. Use median-based ymax for bar charts. See `references/generate_report_robustness.md`
 - **Weight-init matching** — torch_ref must replicate the EXACT same construction order with the SAME `torch.manual_seed(0)` as the baseline's `ModelNew.__init__`
 - **Broadcasting mismatch** — for matmul kernels, use `torch.matmul()` directly instead of manual `unsqueeze`/`expand`
+- **torch_npu.profiler sync requirement** — when using `torch_npu.profiler` as the benchmarking method (e.g. for FA or other ops where `do_bench` timing is unreliable), you MUST call `torch.npu.synchronize()` before entering the `with profile(...)` block, once before the for loop inside the block, and after EACH op call inside the for loop. Without per-iteration sync, device durations inflate ~10x (e.g. 159ms → 1401ms) because queued launches get attributed across step boundaries. See `references/torch-npu-profiler.md` for full API details.
+- **Benchmark phase is gated on the unit test** — in the FA profiling template, if ANY provider/shape fails correctness, the run ends with `PROFILE_RESULT correctness_failed` and the benchmark phase NEVER runs (no timing lines at all). To obtain timings, comment the failing shapes out of `_BENCH_SHAPES` (or fix the root cause) and rerun; timings only flow after `UNIT_TEST PASS` / `PROFILE_RESULT ok`.
 
 ## Reference files
 
@@ -151,12 +177,21 @@ Quick self-check: run captured output through `generate_report.py` and confirm `
 - `references/generate_report_parser_contract.md` — Strict format rules for `results.txt`
 - `references/remote_execution_lessons.md` — Per-variant resilience, upload exclusion, entry-point requirement
 - `references/profile-template-pitfalls.md` — Canonical single-process profiler shape, input-contract matching, correctness-gated benchmarking, `coreDim` poison handling, provider-wide `inf`, and Ascend `tl.dot` dtype pitfalls
+- `references/torch-npu-profiler.md` — `torch_npu.profiler` API reference: `_ExperimentalConfig`, `ProfilerLevel`, `AiCMetrics`, `ExportType`, `schedule`, output file structure (`kernel_details.csv`, `operator_details.csv`, `op_statistic.csv`, `api_statistic.csv`, `step_trace_time.csv`), per-kernel pipeline breakdown, recommended configurations, and pitfalls. When adapting profile templates, prefer Level0 + `op_statistic.csv` Avg Time for low-overhead timing, call `torch.npu.synchronize()` before the profiler loop and after every profiled op before `prof.step()`, and keep canonical provider keys (`baseline1`, `baseline2`, `optimized`) in TEST lines for kernel-sandbox validation.
+- `references/flash-attention-forward-profile.md` — FlashAttention forward profiling against `torch_npu.npu_fusion_attention`, bounded shape choices, tutorial-kernel Triton-Ascend compatibility fixes (`trans_b` → `tl.trans`, BLOCK=64, `num_stages=2`), and torch_npu dispatcher-op introspection.
+## Measurement Methods (priority order)
+
+1. **`torch_npu.profiler`** — preferred for device-level kernel durations. Use when you need
+   per-kernel AICore pipeline breakdown (MAC ratio, MTE2 ratio, etc.) or when `do_bench` timing
+   is unreliable. Requires sync between iterations. See `references/torch-npu-profiler.md`.
+2. **`triton.testing.do_bench`** — preferred for quick wall-clock comparison. Returns ms directly.
+3. **`time.perf_counter` + `torch.npu.synchronize()`** — fallback when neither of the above works.
 
 ## Constraints
 
 - Generate this script AFTER optimized kernel is validated via cannsim
 - This script runs on real NPU hardware, not cannsim
-- Prefer `@triton.testing.perf_report` over manual benchmark loops. If `do_bench` is unavailable or unreliable, use the `time.perf_counter` + `torch.*.synchronize()` fallback
+- Prefer `torch_npu.profiler` for device-level kernel durations; use `do_bench` for quick wall-clock comparison
 - Return `triton.testing.do_bench(fn, warmup=25, rep=200, return_mode="mean")` directly (no scaling)
 - **Concise output** — diagnosis and fix in 2-3 sentences
 - **Do NOT modify `base_*.py` files** — they are the golden reference. Surface bugs via per-variant ERROR cells
