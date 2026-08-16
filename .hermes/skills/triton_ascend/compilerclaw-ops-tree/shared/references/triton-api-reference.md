@@ -410,8 +410,19 @@ with al.scope(core_mode="cube"):
 | API | Description | Parameters | Returns | Errors |
 |---|---|---|---|---|
 | `parallel(arg1, arg2?, step?, num_stages?, loop_unroll_factor?, bind_sub_block?)` | Loop iterator with parallel execution semantics across Vector Cores | `arg1`: start (or end if arg2 absent); `arg2`: end; `step`: stride; `bind_sub_block=True`: distribute iterations across vector cores (max 2 on 910B) | Iterator | — |
-| `compile_hint(ptr, hint_name, hint_val?)` | Attach compiler optimization hint to a tensor. No-op in SIMT mode. | `ptr: tensor`, `hint_name: str`, `hint_val: bool\|int\|str\|list[int]\|None` (default None) | `None` | `AssertionError` non-string name; `ValueError` unsupported type |
-| `multibuffer(src, size)` | Mark tensor for double-buffering (pipeline optimization) | `src: tensor`, `size: int` — **only `2` supported** | `None` | `AssertionError` size != 2 |
+| `compile_hint(ptr, hint_name, hint_val?)` | Attach a named compiler hint to a tensor **value** by emitting an `annotation.mark` op on its SSA handle. No-op in SIMT mode. | `ptr: tensor`, `hint_name: str`, `hint_val: bool\|int\|str\|list[int]\|None` (default None) | `None` | `AssertionError` non-string name; `ValueError` unsupported type |
+| `multibuffer(src, size)` | Mark tensor for double-buffering (pipeline optimization). Pure sugar for `compile_hint(src, "hivm.multi_buffer", 2)` — byte-identical IR | `src: tensor`, `size: int` — **only `2` supported** | `None` | `AssertionError` size != 2 |
+
+**`compile_hint` mechanics** (aux_ops.py; IR form verified by dump):
+
+```mlir
+annotation.mark %3 {hivm.multi_buffer = 2 : i32} : tensor<64xf32>   // compile_hint(x, "hivm.multi_buffer", 2)
+annotation.mark %3 {trans_k} : tensor<64xf32>                       // compile_hint(k, "trans_k") — no value
+```
+
+- Value conversion by type (`bool` checked FIRST, so explicit `False` stays a bool attr): `bool` → bool attr; `None`/falsy → **unit attr** (presence-only flag — the key's existence on the mark is the signal); `int` → int32 attr; `constexpr` → str attr of its value; `list` → i64 array attr.
+- The mark survives ttir → ttadapter and is consumed by the Annotation-dialect passes (`AnnotationMark`/`AnnotationLowering`) before the npuir stage.
+- Hint names are **not validated** — arbitrary keys compile fine. A key only has an effect if a downstream pass pattern-matches it; `hivm.multi_buffer` (marks the tensor's buffer for multi-buffering) is the proven-consumed key. Misspelled/unrecognized keys are silently dead attributes.
 
 ---
 
@@ -674,12 +685,12 @@ kernel[(grid,)](arg0, arg1, ..., multibuffer=True, sync_solver=True, num_stages=
 
 | Option | Type | Default | Description | bishengir-compile flag |
 |---|---|---|---|---|
-| `multibuffer` | `bool` | `True` (non-910_95), `False` (910_95) | Enable auto multi-buffering (double-buffering of DMA transfers) | `--enable-auto-multi-buffer=<bool>` |
-| `enable_ubuf_saving` | `bool` | `None` | Enable unified buffer saving optimizations (A2/A3 only) | `--enable-ubuf-saving=<bool>` |
-| `enable_preload` | `bool` | `None` | Enable preload optimization (A2/A3 only) | `--enable-preload=<bool>` |
-| `limit_auto_multi_buffer_only_for_local_buffer` | `bool` | `None` | Restrict auto multi-buffering to local buffers only | `--limit-auto-multi-buffer-only-for-local-buffer=<bool>` |
-| `limit_auto_multi_buffer_of_local_buffer` | `str` | `None` | Fine-grained limit on auto multi-buffer count for local buffers | `--limit-auto-multi-buffer-of-local-buffer=<str>` |
-| `set_workspace_multibuffer` | `int` | `None` | Set workspace multi-buffer count | `--set-workspace-multibuffer=<int>` |
+| `multibuffer` | `bool` | `True` (non-910_95), `False` (910_95) | Enable auto multi-buffering (double-buffering of local buffers). Default is `not is_compile_on_910_95`, i.e. off on 910_95 unless requested. | `--enable-auto-multi-buffer=<bool>` |
+| `enable_ubuf_saving` | `bool` | `None` | Enable unified buffer saving optimizations (A2/A3 path only; parsed but silently ignored on 910_95) | `--enable-ubuf-saving=<bool>` |
+| `enable_preload` | `bool` | `None` | Enable preload optimization (A2/A3 path only; parsed but silently ignored on 910_95) | `--enable-preload=<bool>` |
+| `limit_auto_multi_buffer_only_for_local_buffer` | `bool` | `None` | Binary help: "When enable-auto-multi-buffer = true, limit it only work for local buffer" | `--limit-auto-multi-buffer-only-for-local-buffer=<bool>` |
+| `limit_auto_multi_buffer_of_local_buffer` | `str` | `None` | Binary help: "When enable-auto-multi-buffer = true, limit local buffer mode". String enum; `"no-limit"` disables the limit. | `--limit-auto-multi-buffer-of-local-buffer=<str>` |
+| `set_workspace_multibuffer` | `int` | `None` | Binary help: "Override number of multibuffers for workspace, defaults to 1 (off)" | `--set-workspace-multibuffer=<int>` |
 | `disable_tightly_coupled_buffer_reuse` | `bool` | `False` | Disable tightly coupled buffer reuse (910_95 only) | `--disable-tightly-coupled-buffer-reuse` |
 | `shared_mem_dynamic_size` | `int` | `221184` (simd), `122880` (simt_only) | Dynamic shared memory size in bytes. Set automatically by `compile_mode`. | `--shared-mem-dynamic-size=<int>` (simt_only only) |
 
@@ -687,24 +698,26 @@ kernel[(grid,)](arg0, arg1, ..., multibuffer=True, sync_solver=True, num_stages=
 
 | Option | Type | Default | Description | bishengir-compile flag |
 |---|---|---|---|---|
-| `sync_solver` | `bool` | `None` | Enable hivm graph sync solver (auto-inserts sync between Cube/Vector). On A2/A3, also enables cross-core GSS. | `--enable-hivm-graph-sync-solver=<bool>` (+ `--enable-hivm-cross-core-gss=<bool>` on A2/A3) |
+| `sync_solver` | `bool` | `None` | Binary help: "Enable HIVM Graph-Sync-Solver Auto-Sync Pass" — auto-inserts block syncs between Cube/Vector stages. On A2/A3, also enables cross-core GSS. Device-verified: its auto injection deadlocks or silently corrupts manual `sync_block` edges inside loops; keep it off and use `disable_auto_inject_block_sync=True` with hand-written syncs. | `--enable-hivm-graph-sync-solver=<bool>` (+ `--enable-hivm-cross-core-gss=<bool>` on A2/A3) |
 | `unit_flag` | `bool` | `None` | Enable hivm unit-flag sync mode | `--enable-hivm-unit-flag-sync=<bool>` |
 | `inject_barrier_all` | `bool` | `None` | Inject barrier-all sync between all pipeline stages | `--enable-hivm-inject-barrier-all-sync=<bool>` |
 | `inject_block_all` | `bool` | `None` | Inject block-all sync | `--enable-hivm-inject-block-all-sync=<bool>` |
 | `enable_sync_block_lock` | `bool` | `False` | Enable sync block lock mechanism (used with `al.sync_block_set/wait`) | internal pass flag |
-| `disable_auto_inject_block_sync` | `bool` | `None` | Disable automatic block sync injection | `--disable-auto-inject-block-sync=<bool>` |
+| `disable_auto_inject_block_sync` | `bool` | `None` | Disable the graph-sync-solver's automatic block-sync injection. Mandatory when manual `sync_block_set/wait` edges repeat inside loops (device-verified deadlock / silent corruption otherwise). | `--disable-auto-inject-block-sync=<bool>` |
 | `enable_auto_bind_sub_block` | `bool` | `None` | Override auto bind-sub-block behavior. `None` = use value from IR module attribute. | `--enable-auto-bind-sub-block=<bool>` |
+| `enable_cce_vf_auto_sync` | `bool` | `None` | CCE/LLVM-level VF auto sync; forwarded to bisheng as an `-mllvm` option | `--append-bisheng-options=-mllvm --cce-vf-auto-sync=<bool>` |
+| `enable_cce_vf_remove_membar` | `bool` | `None` | CCE/LLVM-level VF membar removal; forwarded to bisheng as an `-mllvm` option | `--append-bisheng-options=-mllvm --cce-vf-remove-membar=<bool>` |
 
 ### Vectorization & Fusion
 
 | Option | Type | Default | Description | bishengir-compile flag |
 |---|---|---|---|---|
-| `enable_hivm_auto_cv_balance` | `bool` | `None` | Enable hivm auto Cube-Vector balance scheduling | `--enable-hivm-auto-cv-balance=<bool>` |
+| `enable_hivm_auto_cv_balance` | `bool` | `None` | Binary help: "Enable balancing during cv-pipelining" — auto Cube/Vector balance scheduling | `--enable-hivm-auto-cv-balance=<bool>` |
 | `enable_mixed_cv` | `bool` | `None` | Enable mixed Cube-Vector execution (910_95 only) | `--enable-mixed-cv=<bool>` |
-| `enable_vf_fusion` | `bool` | `False` | Enable Vector-Fixpipe fusion | `--enable-vf-fusion` |
-| `vf_merge_level` | `int` | `1` | Vector-Fixpipe merge aggressiveness level | `--enable-vf-merge-level=<int>` |
-| `enable_auto_vectorize_v2` | `bool` | `None` | Enable auto-vectorize v2 pass | `--enable-auto-vectorize-v2=<bool>` |
-| `auto_vectorize_v2_max_fused_ops_num` | `int` | `None` | Max fused ops in auto-vectorize v2 | `--hfusion-max-fused-ops-in-auto-vectorize-v2=<int>` |
+| `enable_vf_fusion` | `bool` | `False` | Binary help: "Enable vf fusion" — turns on the VFFusion pipeline (`hfusion-merge-vf` + VFFusionAnalyzer/Outliner) that outlines and merges vector-function (VF) regions (`hivm.vector_function`) | `--enable-vf-fusion` |
+| `vf_merge_level` | `int` | `1` | VF-merge aggressiveness, verbatim from binary: "Merging level. 0: no merge; 1: merge VFs only without dependency; 2: merge all VFs." VFs = outlined vector-function regions, NOT Vector-Fixpipe. Quirk: declared twice in the dataclass (`0` at line 734, then `1` at line 737) — the second wins, so the effective default is 1. | `--enable-vf-merge-level=<int>` |
+| `enable_auto_vectorize_v2` | `bool` | `None` (pass default) | Gates the HFusion AutoVectorizeV2 pass (`hfusion-auto-vectorize-v2`): fuses elementwise op chains into fused vector ops and fuses independent sibling loops (`LoopFuseSiblingOp`) so they vectorize as one. 910_95 path only. Device-verified caveat: sibling-loop fusion has SIGSEGV'd/miscompiled on paired masked chunk blocks (FA ping-pong kernels) — set `False` to bypass. | `--enable-auto-vectorize-v2=<bool>` |
+| `auto_vectorize_v2_max_fused_ops_num` | `int` | `None` | Binary help: "Maximum number of ops to fuse in AutoVectorizeV2 (Default: pass default)" | `--hfusion-max-fused-ops-in-auto-vectorize-v2=<int>` |
 | `prevec_max_fused_ops_num` | `int` | `None` | Max fused elementwise ops in pre-vectorize hfusion | `--hfusion-max-fused-elementwise-ops=<int>` |
 | `hfusion_enable_multiple_consumer_fusion` | `bool` | `False` | Allow hfusion to fuse ops with multiple consumers | `--hfusion-enable-multiple-consumer-fusion=<bool>` |
 | `add_auto_scheduling` | `bool` | `False` | Insert DAG sync/scope/ssbuffer passes for auto-scheduling of Cube/Vector pipelines | DAG passes in ttir_to_linalg |
@@ -716,8 +729,8 @@ kernel[(grid,)](arg0, arg1, ..., multibuffer=True, sync_solver=True, num_stages=
 | `enable_nd2nz_on_vector` | `bool` | `False` | Enable ND→NZ layout conversion on Vector core | internal linalg pass flag |
 | `enable_drop_unit_dims` | `bool` | `None` | Drop unit (size-1) dimensions before codegen | `--enable-drop-unit-dims=<bool>` |
 | `enable_flatten` | `bool` | `None` | Flatten multi-dim accesses to 1D | `--enable-flatten=<bool>` |
-| `tile_mix_vector_loop` | `int` | `None` | Tile size for vector loop in mixed Cube-Vector kernels (A2/A3 only) | `--tile-mix-vector-loop=<int>` |
-| `tile_mix_cube_loop` | `int` | `None` | Tile size for cube loop in mixed Cube-Vector kernels (A2/A3 only) | `--tile-mix-cube-loop=<int>` |
+| `tile_mix_vector_loop` | `int` | `None` | Tile size for vector loop in mixed Cube-Vector kernels (A2/A3 path only; parsed but silently ignored on 910_95) | `--tile-mix-vector-loop=<int>` |
+| `tile_mix_cube_loop` | `int` | `None` | Tile size for cube loop in mixed Cube-Vector kernels (A2/A3 path only; parsed but silently ignored on 910_95) | `--tile-mix-cube-loop=<int>` |
 | `optimize_dynamic_offset` | `bool` | `False` | Optimize dynamic offset computation during lowering | internal pass flag |
 | `enable_mask_fallback_conversion` | `bool` | `False` | Convert masked ops to fallback representation when hardware lacks native support | internal pass flag |
 | `enable_select_analysis` | `bool` | `True` | Enable select-analysis pass in linalg lowering | internal linalg pass flag |
