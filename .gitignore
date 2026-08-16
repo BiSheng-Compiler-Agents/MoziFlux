@@ -10,6 +10,8 @@ episodes.db
 
 # Ignore everything under datasets except the deliverable files we track
 datasets/**
+!datasets/flash_attention/
+!datasets/flash_attention/*
 !datasets/KernelBench_Triton/
 !datasets/KernelBench_Triton/*/
 !datasets/KernelBench_Triton/*/[0-9]*_*.py
