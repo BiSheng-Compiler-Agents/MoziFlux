@@ -7,6 +7,7 @@ You have reached the kernel-ops sub-tree (Triton-Ascend kernel-level operations)
 | cannsim simulation, host C++ launcher, npubin, rt* API, retrieving trace_core0.json, cannsim_remote_run | Read `./simulation/SKILL.md` |
 | Writing profile_kernels.py, perf_report, do_bench, NPU hardware latency measurement, three-way comparison | Read `./profiling/SKILL.md` |
 | New kernel code generation, tiling design, UB budget, template selection, kernel implementation | Read `./codegen/SKILL.md` |
+| Triton-Ascend extension prefetching/preloading, Cube/Vector `al.scope`, ping-pong `bl.alloc` buffers, staged CV pipelines | Read `./prefetching/SKILL.md` |
 | Post-trace optimization, bottleneck fixes, optimization patterns, block size tuning | Read `./optimization/SKILL.md` |
 | Episode recording/retrieval, optimization knowledge base queries | Read `./episode-memory/SKILL.md` |
 | Other / not specified | Read `./codegen/SKILL.md` |
