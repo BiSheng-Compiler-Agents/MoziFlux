@@ -1,4 +1,3 @@
-import pytest
 import torch
 import triton
 import triton.language as tl
@@ -12,31 +11,40 @@ def vec_prefree_s_ub():
     al.sync_block_set("vector", "cube", 2, al.PIPE.PIPE_V, al.PIPE.PIPE_FIX)
     al.sync_block_set("vector", "cube", 2, al.PIPE.PIPE_V, al.PIPE.PIPE_FIX)
 
+
 @triton.jit
 def vec_prefree_pv_ub():
     al.sync_block_set("vector", "cube", 10, al.PIPE.PIPE_V, al.PIPE.PIPE_FIX)
     al.sync_block_set("vector", "cube", 10, al.PIPE.PIPE_V, al.PIPE.PIPE_FIX)
 
+
 @triton.jit
 def vec_postwait_p_l1():
-    al.sync_block_wait("cube", "vector", 6, al.PIPE.PIPE_MTE1, al.PIPE.PIPE_MTE3)
-    al.sync_block_wait("cube", "vector", 6, al.PIPE.PIPE_MTE1, al.PIPE.PIPE_MTE3)
+    al.sync_block_wait("cube", "vector", 6, al.PIPE.PIPE_MTE1,
+                       al.PIPE.PIPE_MTE3)
+    al.sync_block_wait("cube", "vector", 6, al.PIPE.PIPE_MTE1,
+                       al.PIPE.PIPE_MTE3)
 
 
 @triton.jit
 def cube_prefree_p_l1():
-    al.sync_block_set("cube", "vector", 6, al.PIPE.PIPE_MTE1, al.PIPE.PIPE_MTE3)
-    al.sync_block_set("cube", "vector", 6, al.PIPE.PIPE_MTE1, al.PIPE.PIPE_MTE3)
+    al.sync_block_set("cube", "vector", 6, al.PIPE.PIPE_MTE1,
+                      al.PIPE.PIPE_MTE3)
+    al.sync_block_set("cube", "vector", 6, al.PIPE.PIPE_MTE1,
+                      al.PIPE.PIPE_MTE3)
+
 
 @triton.jit
 def cube_postwait_s_ub():
     al.sync_block_wait("vector", "cube", 2, al.PIPE.PIPE_V, al.PIPE.PIPE_FIX)
     al.sync_block_wait("vector", "cube", 2, al.PIPE.PIPE_V, al.PIPE.PIPE_FIX)
 
+
 @triton.jit
 def cube_postwait_pv_ub():
     al.sync_block_wait("vector", "cube", 10, al.PIPE.PIPE_V, al.PIPE.PIPE_FIX)
     al.sync_block_wait("vector", "cube", 10, al.PIPE.PIPE_V, al.PIPE.PIPE_FIX)
+
 
 @triton.jit
 def _qk_matmul(q, k_ptr, start_n, qk_ub0, qk_ub1, qk_l0c, sid):
@@ -52,7 +60,9 @@ def _qk_matmul(q, k_ptr, start_n, qk_ub0, qk_ub1, qk_l0c, sid):
     else:
         qk_ub = bl.to_tensor(qk_ub1)
 
-    al.fixpipe(qk_c, bl.to_buffer(qk_ub, space=al.ascend_address_space.UB), dma_mode=al.FixpipeDMAMode.NZ2ND,
+    al.fixpipe(qk_c,
+               bl.to_buffer(qk_ub, space=al.ascend_address_space.UB),
+               dma_mode=al.FixpipeDMAMode.NZ2ND,
                dual_dst_mode=al.FixpipeDualDstMode.ROW_SPLIT)
     al.sync_block_set("cube", "vector", 0, al.PIPE.PIPE_FIX, al.PIPE.PIPE_V)
 
@@ -66,7 +76,8 @@ def _pv_matmul(v_ptr, p_l1_0, p_l1_1, pv_ub0, pv_ub1, pv_l0c, pvid,
     # bishengir; stride_vk = N(row) stride, stride_vn = D(col) stride) ->
     # PV dot -> release the p_l1 slot (event 6) -> wait for the pv slot
     # (event 10) -> fixpipe to UB -> signal vector (event 8).
-    al.sync_block_wait("vector", "cube", 4, al.PIPE.PIPE_MTE3, al.PIPE.PIPE_MTE1)
+    al.sync_block_wait("vector", "cube", 4, al.PIPE.PIPE_MTE3,
+                       al.PIPE.PIPE_MTE1)
 
     if (pvid % 2) == 0:
         p_l1 = bl.to_tensor(p_l1_0, target_shape=[BLOCK_M, BLOCK_N])
@@ -78,10 +89,13 @@ def _pv_matmul(v_ptr, p_l1_0, p_l1_1, pv_ub0, pv_ub1, pv_l0c, pvid,
     vc = tl.load(v_ptr)
     pv_c = tl.dot(p_l1, vc)
     bl.to_buffer(pv_c, bind_buffer=pv_l0c)
-    al.sync_block_set("cube", "vector", 6, al.PIPE.PIPE_MTE1, al.PIPE.PIPE_MTE3)
+    al.sync_block_set("cube", "vector", 6, al.PIPE.PIPE_MTE1,
+                      al.PIPE.PIPE_MTE3)
 
     al.sync_block_wait("vector", "cube", 10, al.PIPE.PIPE_V, al.PIPE.PIPE_FIX)
-    al.fixpipe(pv_c, bl.to_buffer(pv_ub, space=al.ascend_address_space.UB), dma_mode=al.FixpipeDMAMode.NZ2ND,
+    al.fixpipe(pv_c,
+               bl.to_buffer(pv_ub, space=al.ascend_address_space.UB),
+               dma_mode=al.FixpipeDMAMode.NZ2ND,
                dual_dst_mode=al.FixpipeDualDstMode.ROW_SPLIT)
     al.sync_block_set("cube", "vector", 8, al.PIPE.PIPE_FIX, al.PIPE.PIPE_V)
 
@@ -93,7 +107,8 @@ def _softmax_rows_bn64(qk, p_buf, m_i, sm_scale, m_base, start_n,
     if NEED_UPDATE:
         tmp_max = bl.alloc(tl.float32, [SUB_M], al.ascend_address_space.UB)
         tmp_max = bl.to_tensor(tmp_max)
-    qk_scale = bl.alloc(tl.float32, [SUB_M, BLOCK_N], al.ascend_address_space.UB)
+    qk_scale = bl.alloc(tl.float32, [SUB_M, BLOCK_N],
+                        al.ascend_address_space.UB)
     qk_scale = bl.to_tensor(qk_scale)
     p = bl.to_tensor(p_buf)
     with al.scope(vector_mode="simd", outline=True):
@@ -106,27 +121,27 @@ def _softmax_rows_bn64(qk, p_buf, m_i, sm_scale, m_base, start_n,
             row = row * sm_scale
             if IS_CAUSAL:
                 cols = start_n + tl.arange(0, BLOCK_N)
-                row += tl.where((m_base + i) >= cols[None, :], 0.0, float("-inf"))
-            qk_scale = al.insert_slice(qk_scale, row, (i, 0), (1, BLOCK_N), (1, 1))
+                row += tl.where((m_base + i) >= cols[None, :], 0.0,
+                                float("-inf"))
+            qk_scale = al.insert_slice(qk_scale, row, (i, 0), (1, BLOCK_N),
+                                       (1, 1))
             m_row = tl.max(row, 1)
             if NEED_UPDATE:
-                tmp_max = al.insert_slice(tmp_max, m_row, (i,), (1,), (1,))
+                tmp_max = al.insert_slice(tmp_max, m_row, (i, ), (1, ), (1, ))
             else:
-                m_ij = al.insert_slice(m_ij, m_row, (i,), (1,), (1,))
+                m_ij = al.insert_slice(m_ij, m_row, (i, ), (1, ), (1, ))
         if NEED_UPDATE:
             m_ij = tl.maximum(m_i, tmp_max)
         for i in range(SUB_M):
             row = al.extract_slice(qk_scale, (i, 0), (1, BLOCK_N), (1, 1))
-            m_r = al.extract_slice(m_ij, (i,), (1,), (1,))
+            m_r = al.extract_slice(m_ij, (i, ), (1, ), (1, ))
             p_row = tl.exp(row - m_r)
             l_row = tl.sum(p_row, 1)
-            l_ij = al.insert_slice(l_ij, l_row, (i,), (1,), (1,))
+            l_ij = al.insert_slice(l_ij, l_row, (i, ), (1, ), (1, ))
             p = al.insert_slice(
                 p,
-                p_row.reshape(BLOCK_N // 16, 1, 16).to(tl.float16),
-                (0, i, 0),
-                (BLOCK_N // 16, 1, 16),
-                (1, 1, 1))
+                p_row.reshape(BLOCK_N // 16, 1, 16).to(tl.float16), (0, i, 0),
+                (BLOCK_N // 16, 1, 16), (1, 1, 1))
     al.copy(bl.to_buffer(p, space=al.ascend_address_space.UB), p_buf)
     return m_ij, l_ij
 
@@ -141,7 +156,8 @@ def _softmax_rows_bn128(qk, p_buf, m_i, sm_scale, m_base, start_n,
     if NEED_UPDATE:
         tmp_max = bl.alloc(tl.float32, [SUB_M], al.ascend_address_space.UB)
         tmp_max = bl.to_tensor(tmp_max)
-    qk_scale = bl.alloc(tl.float32, [SUB_M, BLOCK_N], al.ascend_address_space.UB)
+    qk_scale = bl.alloc(tl.float32, [SUB_M, BLOCK_N],
+                        al.ascend_address_space.UB)
     qk_scale = bl.to_tensor(qk_scale)
     p = bl.to_tensor(p_buf)
     with al.scope(vector_mode="simd", outline=True):
@@ -151,36 +167,45 @@ def _softmax_rows_bn128(qk, p_buf, m_i, sm_scale, m_base, start_n,
         for i in range(SUB_M):
             off_hi = (i * 0) + HALF
             row_lo = al.extract_slice(qk, (i, 0), (1, HALF), (1, 1)) * sm_scale
-            row_hi = al.extract_slice(qk, (i, off_hi), (1, HALF), (1, 1)) * sm_scale
+            row_hi = al.extract_slice(qk, (i, off_hi), (1, HALF),
+                                      (1, 1)) * sm_scale
             if IS_CAUSAL:
                 cols = start_n + tl.arange(0, HALF)
-                row_lo += tl.where((m_base + i) >= cols[None, :], 0.0, float("-inf"))
-                row_hi += tl.where((m_base + i) >= (cols + HALF)[None, :], 0.0, float("-inf"))
-            qk_scale = al.insert_slice(qk_scale, row_lo, (i, 0), (1, HALF), (1, 1))
-            qk_scale = al.insert_slice(qk_scale, row_hi, (i, off_hi), (1, HALF), (1, 1))
+                row_lo += tl.where((m_base + i) >= cols[None, :], 0.0,
+                                   float("-inf"))
+                row_hi += tl.where((m_base + i) >= (cols + HALF)[None, :], 0.0,
+                                   float("-inf"))
+            qk_scale = al.insert_slice(qk_scale, row_lo, (i, 0), (1, HALF),
+                                       (1, 1))
+            qk_scale = al.insert_slice(qk_scale, row_hi, (i, off_hi),
+                                       (1, HALF), (1, 1))
             row_max = tl.maximum(row_lo, row_hi)
             row_max_agg = tl.max(row_max, 1)
             if NEED_UPDATE:
-                tmp_max = al.insert_slice(tmp_max, row_max_agg, (i,), (1,), (1,))
+                tmp_max = al.insert_slice(tmp_max, row_max_agg, (i, ), (1, ),
+                                          (1, ))
             else:
-                m_ij = al.insert_slice(m_ij, row_max_agg, (i,), (1,), (1,))
+                m_ij = al.insert_slice(m_ij, row_max_agg, (i, ), (1, ), (1, ))
         if NEED_UPDATE:
             m_ij = tl.maximum(m_i, tmp_max)
     with al.scope(vector_mode="simd", outline=True):
         l_ij = tl.zeros([SUB_M], dtype=tl.float32)
         for i in range(SUB_M):
             off_hi = (i * 0) + HALF
-            m_r = al.extract_slice(m_ij, (i,), (1,), (1,))
+            m_r = al.extract_slice(m_ij, (i, ), (1, ), (1, ))
             row_lo = al.extract_slice(qk_scale, (i, 0), (1, HALF), (1, 1))
             row_hi = al.extract_slice(qk_scale, (i, off_hi), (1, HALF), (1, 1))
             p_lo = tl.exp(row_lo - m_r)
             p_hi = tl.exp(row_hi - m_r)
             l_row = tl.sum(p_lo, 1) + tl.sum(p_hi, 1)
-            l_ij = al.insert_slice(l_ij, l_row, (i,), (1,), (1,))
-            p = al.insert_slice(p, p_lo.reshape(HALF // 16, 1, 16).to(tl.float16),
+            l_ij = al.insert_slice(l_ij, l_row, (i, ), (1, ), (1, ))
+            p = al.insert_slice(p,
+                                p_lo.reshape(HALF // 16, 1, 16).to(tl.float16),
                                 (0, i, 0), (HALF // 16, 1, 16), (1, 1, 1))
-            p = al.insert_slice(p, p_hi.reshape(HALF // 16, 1, 16).to(tl.float16),
-                                (HALF // 16, i, 0), (HALF // 16, 1, 16), (1, 1, 1))
+            p = al.insert_slice(p,
+                                p_hi.reshape(HALF // 16, 1, 16).to(tl.float16),
+                                (HALF // 16, i, 0), (HALF // 16, 1, 16),
+                                (1, 1, 1))
     al.copy(bl.to_buffer(p, space=al.ascend_address_space.UB), p_buf)
     return m_ij, l_ij
 
@@ -195,107 +220,106 @@ def _online_update(m_i, l_i, m_new, l_ij, SUB_M: tl.constexpr):
 
 
 @triton.jit
-def _softmax_with_mask_with_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf, sm_scale, m_base, start_n,
+def _softmax_with_mask_with_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf,
+                                   sm_scale, m_base, start_n,
                                    SUB_M: tl.constexpr, BLOCK_N: tl.constexpr):
     m_i = bl.to_tensor(m_i_buf)
     l_i = bl.to_tensor(l_i_buf)
     if BLOCK_N == 64:
-        m_new, l_ij = _softmax_rows_bn64(
-            qk, p_buf, m_i, sm_scale, m_base, start_n,
-            SUB_M, BLOCK_N, True, True)
+        m_new, l_ij = _softmax_rows_bn64(qk, p_buf, m_i, sm_scale, m_base,
+                                         start_n, SUB_M, BLOCK_N, True, True)
     else:
-        m_new, l_ij = _softmax_rows_bn128(
-            qk, p_buf, m_i, sm_scale, m_base, start_n,
-            SUB_M, BLOCK_N, True, True)
-    m_new, l_new, acc_scale = _online_update(
-        m_i, l_i, m_new, l_ij, SUB_M)
+        m_new, l_ij = _softmax_rows_bn128(qk, p_buf, m_i, sm_scale, m_base,
+                                          start_n, SUB_M, BLOCK_N, True, True)
+    m_new, l_new, acc_scale = _online_update(m_i, l_i, m_new, l_ij, SUB_M)
     al.copy(bl.to_buffer(m_new, space=al.ascend_address_space.UB), m_i_buf)
     al.copy(bl.to_buffer(l_new, space=al.ascend_address_space.UB), l_i_buf)
-    al.copy(bl.to_buffer(acc_scale, space=al.ascend_address_space.UB), acc_scale_buf)
+    al.copy(bl.to_buffer(acc_scale, space=al.ascend_address_space.UB),
+            acc_scale_buf)
 
 
 @triton.jit
-def _softmax_no_mask_with_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf, sm_scale,
-                                 SUB_M: tl.constexpr, BLOCK_N: tl.constexpr):
+def _softmax_no_mask_with_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf,
+                                 sm_scale, SUB_M: tl.constexpr,
+                                 BLOCK_N: tl.constexpr):
     m_i = bl.to_tensor(m_i_buf)
     l_i = bl.to_tensor(l_i_buf)
     if BLOCK_N == 64:
-        m_new, l_ij = _softmax_rows_bn64(
-            qk, p_buf, m_i, sm_scale, 0, 0,
-            SUB_M, BLOCK_N, False, True)
+        m_new, l_ij = _softmax_rows_bn64(qk, p_buf, m_i, sm_scale, 0, 0, SUB_M,
+                                         BLOCK_N, False, True)
     else:
-        m_new, l_ij = _softmax_rows_bn128(
-            qk, p_buf, m_i, sm_scale, 0, 0,
-            SUB_M, BLOCK_N, False, True)
-    m_new, l_new, acc_scale = _online_update(
-        m_i, l_i, m_new, l_ij, SUB_M)
+        m_new, l_ij = _softmax_rows_bn128(qk, p_buf, m_i, sm_scale, 0, 0,
+                                          SUB_M, BLOCK_N, False, True)
+    m_new, l_new, acc_scale = _online_update(m_i, l_i, m_new, l_ij, SUB_M)
     al.copy(bl.to_buffer(m_new, space=al.ascend_address_space.UB), m_i_buf)
     al.copy(bl.to_buffer(l_new, space=al.ascend_address_space.UB), l_i_buf)
-    al.copy(bl.to_buffer(acc_scale, space=al.ascend_address_space.UB), acc_scale_buf)
+    al.copy(bl.to_buffer(acc_scale, space=al.ascend_address_space.UB),
+            acc_scale_buf)
 
 
 @triton.jit
-def _softmax_with_mask_no_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf, sm_scale, m_base, start_n,
+def _softmax_with_mask_no_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf,
+                                 sm_scale, m_base, start_n,
                                  SUB_M: tl.constexpr, BLOCK_N: tl.constexpr):
     m_init = tl.zeros([SUB_M], dtype=tl.float32) - float("inf")
     if BLOCK_N == 64:
-        m_new, l_new = _softmax_rows_bn64(
-            qk, p_buf, m_init, sm_scale, m_base, start_n,
-            SUB_M, BLOCK_N, True, False)
+        m_new, l_new = _softmax_rows_bn64(qk, p_buf, m_init, sm_scale, m_base,
+                                          start_n, SUB_M, BLOCK_N, True, False)
     else:
-        m_new, l_new = _softmax_rows_bn128(
-            qk, p_buf, m_init, sm_scale, m_base, start_n,
-            SUB_M, BLOCK_N, True, False)
+        m_new, l_new = _softmax_rows_bn128(qk, p_buf, m_init, sm_scale, m_base,
+                                           start_n, SUB_M, BLOCK_N, True,
+                                           False)
     al.copy(bl.to_buffer(m_new, space=al.ascend_address_space.UB), m_i_buf)
     al.copy(bl.to_buffer(l_new, space=al.ascend_address_space.UB), l_i_buf)
     acc_scale = tl.zeros([SUB_M], dtype=tl.float32)
-    al.copy(bl.to_buffer(acc_scale, space=al.ascend_address_space.UB), acc_scale_buf)
+    al.copy(bl.to_buffer(acc_scale, space=al.ascend_address_space.UB),
+            acc_scale_buf)
 
 
 @triton.jit
-def _softmax_no_mask_no_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf, sm_scale,
-                               SUB_M: tl.constexpr, BLOCK_N: tl.constexpr):
+def _softmax_no_mask_no_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf,
+                               sm_scale, SUB_M: tl.constexpr,
+                               BLOCK_N: tl.constexpr):
     m_init = tl.zeros([SUB_M], dtype=tl.float32) - float("inf")
     if BLOCK_N == 64:
-        m_new, l_new = _softmax_rows_bn64(
-            qk, p_buf, m_init, sm_scale, 0, 0,
-            SUB_M, BLOCK_N, False, False)
+        m_new, l_new = _softmax_rows_bn64(qk, p_buf, m_init, sm_scale, 0, 0,
+                                          SUB_M, BLOCK_N, False, False)
     else:
-        m_new, l_new = _softmax_rows_bn128(
-            qk, p_buf, m_init, sm_scale, 0, 0,
-            SUB_M, BLOCK_N, False, False)
+        m_new, l_new = _softmax_rows_bn128(qk, p_buf, m_init, sm_scale, 0, 0,
+                                           SUB_M, BLOCK_N, False, False)
     al.copy(bl.to_buffer(m_new, space=al.ascend_address_space.UB), m_i_buf)
     al.copy(bl.to_buffer(l_new, space=al.ascend_address_space.UB), l_i_buf)
     acc_scale = tl.zeros([SUB_M], dtype=tl.float32)
-    al.copy(bl.to_buffer(acc_scale, space=al.ascend_address_space.UB), acc_scale_buf)
+    al.copy(bl.to_buffer(acc_scale, space=al.ascend_address_space.UB),
+            acc_scale_buf)
 
 
 @triton.jit
-def softmax_vf_select(need_mask, need_update, qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf, sm_scale,
-                      m_base, start_n,
+def softmax_vf_select(need_mask, need_update, qk, p_buf, m_i_buf, l_i_buf,
+                      acc_scale_buf, sm_scale, m_base, start_n,
                       SUB_M: tl.constexpr, BLOCK_N: tl.constexpr):
     if need_mask & need_update:
-        _softmax_with_mask_with_update(
-            qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf, sm_scale, m_base, start_n, SUB_M, BLOCK_N)
+        _softmax_with_mask_with_update(qk, p_buf, m_i_buf, l_i_buf,
+                                       acc_scale_buf, sm_scale, m_base,
+                                       start_n, SUB_M, BLOCK_N)
     elif need_mask & ~need_update:
-        _softmax_with_mask_no_update(
-            qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf, sm_scale, m_base, start_n, SUB_M, BLOCK_N)
+        _softmax_with_mask_no_update(qk, p_buf, m_i_buf, l_i_buf,
+                                     acc_scale_buf, sm_scale, m_base, start_n,
+                                     SUB_M, BLOCK_N)
     elif ~need_mask & need_update:
-        _softmax_no_mask_with_update(
-            qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf, sm_scale, SUB_M, BLOCK_N)
+        _softmax_no_mask_with_update(qk, p_buf, m_i_buf, l_i_buf,
+                                     acc_scale_buf, sm_scale, SUB_M, BLOCK_N)
     else:
-        _softmax_no_mask_no_update(
-            qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf, sm_scale, SUB_M, BLOCK_N)
+        _softmax_no_mask_no_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf,
+                                   sm_scale, SUB_M, BLOCK_N)
+
 
 @triton.jit
-def _softmax_v1(qk_ub0, qk_ub1, p_l1_0, p_l1_1, p,
-                m_i_tb0, m_i_tb1, m_i_tb2,
-                l_i_tb0, l_i_tb1, l_i_tb2,
-                acc_scale0, acc_scale1, acc_scale2,
-                sm_scale, vtaskId, v_s1_task_mod3,
-                m_base, start_n, cast_dtype,
-                need_mask, need_update,
-                SUB_M: tl.constexpr, BLOCK_N: tl.constexpr):
+def _softmax_v1(qk_ub0, qk_ub1, p_l1_0, p_l1_1, p, m_i_tb0, m_i_tb1, m_i_tb2,
+                l_i_tb0, l_i_tb1, l_i_tb2, acc_scale0, acc_scale1, acc_scale2,
+                sm_scale, vtaskId, v_s1_task_mod3, m_base, start_n, cast_dtype,
+                need_mask, need_update, SUB_M: tl.constexpr,
+                BLOCK_N: tl.constexpr):
     al.sync_block_wait("cube", "vector", 0, al.PIPE.PIPE_FIX, al.PIPE.PIPE_V)
     sub_vec_id = al.sub_vec_id()
     if (vtaskId % 2) == 1:
@@ -305,46 +329,47 @@ def _softmax_v1(qk_ub0, qk_ub1, p_l1_0, p_l1_1, p,
 
     scale_slot = (vtaskId - 1) % 3
     if v_s1_task_mod3 == 0 and scale_slot == 0:
-        softmax_vf_select(
-            need_mask, need_update, qk, p, m_i_tb0, l_i_tb0, acc_scale0, sm_scale,
-            m_base, start_n, SUB_M, BLOCK_N)
+        softmax_vf_select(need_mask, need_update, qk, p, m_i_tb0, l_i_tb0,
+                          acc_scale0, sm_scale, m_base, start_n, SUB_M,
+                          BLOCK_N)
     elif v_s1_task_mod3 == 0 and scale_slot == 1:
-        softmax_vf_select(
-            need_mask, need_update, qk, p, m_i_tb0, l_i_tb0, acc_scale1, sm_scale,
-            m_base, start_n, SUB_M, BLOCK_N)
+        softmax_vf_select(need_mask, need_update, qk, p, m_i_tb0, l_i_tb0,
+                          acc_scale1, sm_scale, m_base, start_n, SUB_M,
+                          BLOCK_N)
     elif v_s1_task_mod3 == 0 and scale_slot == 2:
-        softmax_vf_select(
-            need_mask, need_update, qk, p, m_i_tb0, l_i_tb0, acc_scale2, sm_scale,
-            m_base, start_n, SUB_M, BLOCK_N)
+        softmax_vf_select(need_mask, need_update, qk, p, m_i_tb0, l_i_tb0,
+                          acc_scale2, sm_scale, m_base, start_n, SUB_M,
+                          BLOCK_N)
     elif v_s1_task_mod3 == 1 and scale_slot == 0:
-        softmax_vf_select(
-            need_mask, need_update, qk, p, m_i_tb1, l_i_tb1, acc_scale0, sm_scale,
-            m_base, start_n, SUB_M, BLOCK_N)
+        softmax_vf_select(need_mask, need_update, qk, p, m_i_tb1, l_i_tb1,
+                          acc_scale0, sm_scale, m_base, start_n, SUB_M,
+                          BLOCK_N)
     elif v_s1_task_mod3 == 1 and scale_slot == 1:
-        softmax_vf_select(
-            need_mask, need_update, qk, p, m_i_tb1, l_i_tb1, acc_scale1, sm_scale,
-            m_base, start_n, SUB_M, BLOCK_N)
+        softmax_vf_select(need_mask, need_update, qk, p, m_i_tb1, l_i_tb1,
+                          acc_scale1, sm_scale, m_base, start_n, SUB_M,
+                          BLOCK_N)
     elif v_s1_task_mod3 == 1 and scale_slot == 2:
-        softmax_vf_select(
-            need_mask, need_update, qk, p, m_i_tb1, l_i_tb1, acc_scale2, sm_scale,
-            m_base, start_n, SUB_M, BLOCK_N)
+        softmax_vf_select(need_mask, need_update, qk, p, m_i_tb1, l_i_tb1,
+                          acc_scale2, sm_scale, m_base, start_n, SUB_M,
+                          BLOCK_N)
     elif v_s1_task_mod3 == 2 and scale_slot == 0:
-        softmax_vf_select(
-            need_mask, need_update, qk, p, m_i_tb2, l_i_tb2, acc_scale0, sm_scale,
-            m_base, start_n, SUB_M, BLOCK_N)
+        softmax_vf_select(need_mask, need_update, qk, p, m_i_tb2, l_i_tb2,
+                          acc_scale0, sm_scale, m_base, start_n, SUB_M,
+                          BLOCK_N)
     elif v_s1_task_mod3 == 2 and scale_slot == 1:
-        softmax_vf_select(
-            need_mask, need_update, qk, p, m_i_tb2, l_i_tb2, acc_scale1, sm_scale,
-            m_base, start_n, SUB_M, BLOCK_N)
+        softmax_vf_select(need_mask, need_update, qk, p, m_i_tb2, l_i_tb2,
+                          acc_scale1, sm_scale, m_base, start_n, SUB_M,
+                          BLOCK_N)
     else:
-        softmax_vf_select(
-            need_mask, need_update, qk, p, m_i_tb2, l_i_tb2, acc_scale2, sm_scale,
-            m_base, start_n, SUB_M, BLOCK_N)
+        softmax_vf_select(need_mask, need_update, qk, p, m_i_tb2, l_i_tb2,
+                          acc_scale2, sm_scale, m_base, start_n, SUB_M,
+                          BLOCK_N)
 
     al.sync_block_set("vector", "cube", 2, al.PIPE.PIPE_V, al.PIPE.PIPE_FIX)
     p_nz = bl.to_tensor(p).reshape(BLOCK_N // 16, SUB_M // 16, 16, 16)
     p_nz_buf = bl.to_buffer(p_nz, space=al.ascend_address_space.UB)
-    al.sync_block_wait("cube", "vector", 6, al.PIPE.PIPE_MTE1, al.PIPE.PIPE_MTE3)
+    al.sync_block_wait("cube", "vector", 6, al.PIPE.PIPE_MTE1,
+                       al.PIPE.PIPE_MTE3)
     p_task_id = vtaskId - 1
     if (p_task_id % 2) == 0:
         al.copy_from_ub_to_l1(
@@ -356,13 +381,14 @@ def _softmax_v1(qk_ub0, qk_ub1, p_l1_0, p_l1_1, p,
             p_nz_buf,
             bl.subview(p_l1_1, (0, sub_vec_id * SUB_M // 16, 0, 0),
                        (BLOCK_N // 16, SUB_M // 16, 16, 16), (1, 1, 1, 1)))
-    al.sync_block_set("vector", "cube", 4, al.PIPE.PIPE_MTE3, al.PIPE.PIPE_MTE1)
+    al.sync_block_set("vector", "cube", 4, al.PIPE.PIPE_MTE3,
+                      al.PIPE.PIPE_MTE1)
+
 
 @triton.jit
-def _acc_update(pv_ub0, pv_ub1,
-                acc_scale0, acc_scale1, acc_scale2,
-                acc_buffer, vtaskId, update_acc,
-                SUB_M: tl.constexpr, BLOCK_DMODEL: tl.constexpr):
+def _acc_update(pv_ub0, pv_ub1, acc_scale0, acc_scale1, acc_scale2, acc_buffer,
+                vtaskId, update_acc, SUB_M: tl.constexpr,
+                BLOCK_DMODEL: tl.constexpr):
     # Vector side: wait for PV (event 8), rescale acc with this chunk's scale,
     # accumulate, then free the pv slot (event 10).
     al.sync_block_wait("cube", "vector", 8, al.PIPE.PIPE_FIX, al.PIPE.PIPE_V)
@@ -391,15 +417,17 @@ def _acc_update(pv_ub0, pv_ub1,
 
     al.sync_block_set("vector", "cube", 10, al.PIPE.PIPE_V, al.PIPE.PIPE_FIX)
 
+
 @triton.jit
-def update_s2_loop(taskId_mod3, cur_s2_idx, s2_idx_1, s2_idx_2, sd_idx_3, sd_idx_4):
+def update_s2_loop(taskId_mod3, cur_s2_idx, s2_idx_1, s2_idx_2, sd_idx_3,
+                   sd_idx_4):
     if taskId_mod3 == 0:
         s2_idx_1, s2_idx_2, sd_idx_3, sd_idx_4 = cur_s2_idx, s2_idx_2, sd_idx_3, sd_idx_4
     elif taskId_mod3 == 1:
         s2_idx_1, s2_idx_2, sd_idx_3, sd_idx_4 = s2_idx_1, cur_s2_idx, sd_idx_3, sd_idx_4
     elif taskId_mod3 == 2:
         s2_idx_1, s2_idx_2, sd_idx_3, sd_idx_4 = s2_idx_1, s2_idx_2, cur_s2_idx, sd_idx_4
-    else:    
+    else:
         s2_idx_1, s2_idx_2, sd_idx_3, sd_idx_4 = s2_idx_1, s2_idx_2, sd_idx_3, cur_s2_idx
     return s2_idx_1, s2_idx_2, sd_idx_3, sd_idx_4
 
@@ -418,7 +446,8 @@ def is_need_update(taskId_mod3, s2_idx_1, s2_idx_2, s2_idx_3, s2_idx_4):
 
 
 @triton.jit
-def is_last_skv(taskId_mod3, s2_idx_1, s2_size_1, s2_idx_2, s2_size_2, s2_idx_3, s2_size_3, s2_idx_4, s2_size_4):
+def is_last_skv(taskId_mod3, s2_idx_1, s2_size_1, s2_idx_2, s2_size_2,
+                s2_idx_3, s2_size_3, s2_idx_4, s2_size_4):
     if taskId_mod3 == 0:
         is_reach = s2_idx_1 == s2_size_1 - 1
     elif taskId_mod3 == 1:
@@ -447,20 +476,21 @@ def is_first_skv_loop(taskId_mod3, s2_idx_1, s2_idx_2, s2_idx_3, s2_idx_4):
 
 @triton.jit
 def get_cur_task(taskId_mod3, b_idx_1, n_idx_1, s1_idx_1, s2_idx_1, s2_size_1,
-                 b_idx_2, n_idx_2, s1_idx_2, s2_idx_2, s2_size_2,
-                 b_idx_3, n_idx_3, s1_idx_3, s2_idx_3, s2_size_3,
-                 b_idx_4, n_idx_4, s1_idx_4, s2_idx_4, s2_size_4):
+                 b_idx_2, n_idx_2, s1_idx_2, s2_idx_2, s2_size_2, b_idx_3,
+                 n_idx_3, s1_idx_3, s2_idx_3, s2_size_3, b_idx_4, n_idx_4,
+                 s1_idx_4, s2_idx_4, s2_size_4):
 
-    if taskId_mod3 == 0: 
+    if taskId_mod3 == 0:
         cur_b_idx, cur_n_idx, cur_s1_idx, cur_s2_idx, cur_s2_size = b_idx_1, n_idx_1, s1_idx_1, s2_idx_1, s2_size_1
-    elif taskId_mod3 == 1: 
+    elif taskId_mod3 == 1:
         cur_b_idx, cur_n_idx, cur_s1_idx, cur_s2_idx, cur_s2_size = b_idx_2, n_idx_2, s1_idx_2, s2_idx_2, s2_size_2
-    elif taskId_mod3 == 2: 
+    elif taskId_mod3 == 2:
         cur_b_idx, cur_n_idx, cur_s1_idx, cur_s2_idx, cur_s2_size = b_idx_3, n_idx_3, s1_idx_3, s2_idx_3, s2_size_3
     else:
         cur_b_idx, cur_n_idx, cur_s1_idx, cur_s2_idx, cur_s2_size = b_idx_4, n_idx_4, s1_idx_4, s2_idx_4, s2_size_4
 
     return cur_b_idx, cur_n_idx, cur_s1_idx, cur_s2_idx, cur_s2_size
+
 
 @triton.jit
 def update_pos(s1_cur_idx, s1_step, batch_size, head_num, NUM_BLOCKS_M,
@@ -476,21 +506,25 @@ def update_pos(s1_cur_idx, s1_step, batch_size, head_num, NUM_BLOCKS_M,
 
     return b_idx, n_idx, task_m_idx, loop_end // BLOCK_N
 
-@triton.jit
-def update_task(taskId, task_cnt, v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4):
-    s1_task_mod3 = task_cnt % 3
-    if (taskId & 3) == 0:
-        v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4 = s1_task_mod3, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4 
-    elif (taskId & 3) == 1:
-        v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4 = v_s1_task_mod3_1, s1_task_mod3, v_s1_task_mod3_3, v_s1_task_mod3_4 
-    elif (taskId & 3) == 2:
-        v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4 = v_s1_task_mod3_1, v_s1_task_mod3_2, s1_task_mod3, v_s1_task_mod3_4 
-    else:
-        v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4 = v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, s1_task_mod3 
-    return v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4
 
 @triton.jit
-def get_s_task(taskId, v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4):
+def update_task(taskId, task_cnt, v_s1_task_mod3_1, v_s1_task_mod3_2,
+                v_s1_task_mod3_3, v_s1_task_mod3_4):
+    s1_task_mod3 = task_cnt % 3
+    if (taskId & 3) == 0:
+        v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4 = s1_task_mod3, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4
+    elif (taskId & 3) == 1:
+        v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4 = v_s1_task_mod3_1, s1_task_mod3, v_s1_task_mod3_3, v_s1_task_mod3_4
+    elif (taskId & 3) == 2:
+        v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4 = v_s1_task_mod3_1, v_s1_task_mod3_2, s1_task_mod3, v_s1_task_mod3_4
+    else:
+        v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4 = v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, s1_task_mod3
+    return v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4
+
+
+@triton.jit
+def get_s_task(taskId, v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3,
+               v_s1_task_mod3_4):
     if (taskId & 3) == 0:
         cur_s1_task_mod3 = v_s1_task_mod3_1
     elif (taskId & 3) == 1:
@@ -502,40 +536,46 @@ def get_s_task(taskId, v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s
 
     return cur_s1_task_mod3
 
+
 @triton.jit
-def create_task(taskId, b_idx, n_idx, s1_idx, s2_idx, s2_size,
-                b_idx_1, n_idx_1, s1_idx_1, s2_idx_1, s2_size_1,
-                b_idx_2, n_idx_2, s1_idx_2, s2_idx_2, s2_size_2,
-                b_idx_3, n_idx_3, s1_idx_3, s2_idx_3, s2_size_3,
-                b_idx_4, n_idx_4, s1_idx_4, s2_idx_4, s2_size_4):
+def create_task(taskId, b_idx, n_idx, s1_idx, s2_idx, s2_size, b_idx_1,
+                n_idx_1, s1_idx_1, s2_idx_1, s2_size_1, b_idx_2, n_idx_2,
+                s1_idx_2, s2_idx_2, s2_size_2, b_idx_3, n_idx_3, s1_idx_3,
+                s2_idx_3, s2_size_3, b_idx_4, n_idx_4, s1_idx_4, s2_idx_4,
+                s2_size_4):
     if (taskId & 3) == 0:
         b_idx_1, n_idx_1, s1_idx_1, s2_idx_1, s2_size_1 = b_idx, n_idx, s1_idx, s2_idx, s2_size
     elif (taskId & 3) == 1:
-        b_idx_2, n_idx_2, s1_idx_2, s2_idx_2, s2_size_2 = b_idx, n_idx, s1_idx, s2_idx, s2_size       
+        b_idx_2, n_idx_2, s1_idx_2, s2_idx_2, s2_size_2 = b_idx, n_idx, s1_idx, s2_idx, s2_size
     elif (taskId & 3) == 2:
         b_idx_3, n_idx_3, s1_idx_3, s2_idx_3, s2_size_3 = b_idx, n_idx, s1_idx, s2_idx, s2_size
     else:
         b_idx_4, n_idx_4, s1_idx_4, s2_idx_4, s2_size_4 = b_idx, n_idx, s1_idx, s2_idx, s2_size
 
-    return (b_idx_1, n_idx_1, s1_idx_1, s2_idx_1, s2_size_1,
-            b_idx_2, n_idx_2, s1_idx_2, s2_idx_2, s2_size_2,
-            b_idx_3, n_idx_3, s1_idx_3, s2_idx_3, s2_size_3,
-            b_idx_4, n_idx_4, s1_idx_4, s2_idx_4, s2_size_4)
+    return (b_idx_1, n_idx_1, s1_idx_1, s2_idx_1, s2_size_1, b_idx_2, n_idx_2,
+            s1_idx_2, s2_idx_2, s2_size_2, b_idx_3, n_idx_3, s1_idx_3,
+            s2_idx_3, s2_size_3, b_idx_4, n_idx_4, s1_idx_4, s2_idx_4,
+            s2_size_4)
+
 
 @triton.jit
 def create_and_get_basic_pos(s1_cur_idx, s1_step, batch, head_num, s1_start,
                              NUM_BLOCKS_M, IS_CAUSAL, N_CTX, BLOCK_M, BLOCK_N):
-    b_idx, n_idx, s1_idx, s2_size = update_pos(
-        s1_cur_idx, s1_step, batch, head_num, NUM_BLOCKS_M,
-        IS_CAUSAL, N_CTX, BLOCK_M, BLOCK_N)
+    b_idx, n_idx, s1_idx, s2_size = update_pos(s1_cur_idx, s1_step, batch,
+                                               head_num, NUM_BLOCKS_M,
+                                               IS_CAUSAL, N_CTX, BLOCK_M,
+                                               BLOCK_N)
 
     return b_idx, n_idx, s1_idx, s2_size
 
+
 @triton.jit
 def get_s_offset(head_num, seqlen, stride, b_idx, n_idx, s_idx):
-    s_offset = (b_idx.to(tl.int64) * head_num + n_idx.to(tl.int64)) * seqlen + s_idx.to(tl.int64) * stride
+    s_offset = (b_idx.to(tl.int64) * head_num +
+                n_idx.to(tl.int64)) * seqlen + s_idx.to(tl.int64) * stride
 
     return s_offset.to(tl.int64)
+
 
 @triton.jit
 def _fwd_kernel(
@@ -587,26 +627,33 @@ def _fwd_kernel(
     # chunk B -> slot 1), so Cube runs one chunk ahead of Vector and vice versa.
     # UB buffers are per-vector-core halves (fixpipe ROW_SPLIT drains L0C rows
     # [0, M/2) -> AIV0 UB, [M/2, M) -> AIV1 UB). p_l1_*: P in NZ fractal for PV.
-    qk_ub0 = bl.alloc(tl.float32, [SUB_M, BLOCK_N], _address_space=al.ascend_address_space.UB)
-    qk_ub1 = bl.alloc(tl.float32, [SUB_M, BLOCK_N], _address_space=al.ascend_address_space.UB)
-    p_l1_0 = bl.alloc(tl.float16, [BLOCK_N // 16, BLOCK_M // 16, 16, 16], _address_space=al.ascend_address_space.L1)
-    p_l1_1 = bl.alloc(tl.float16, [BLOCK_N // 16, BLOCK_M // 16, 16, 16], _address_space=al.ascend_address_space.L1)
-    pv_ub0 = bl.alloc(tl.float32, [SUB_M, BLOCK_DMODEL], _address_space=al.ascend_address_space.UB)
-    pv_ub1 = bl.alloc(tl.float32, [SUB_M, BLOCK_DMODEL], _address_space=al.ascend_address_space.UB)
+    qk_ub0 = bl.alloc(tl.float32, [SUB_M, BLOCK_N],
+                      _address_space=al.ascend_address_space.UB)
+    qk_ub1 = bl.alloc(tl.float32, [SUB_M, BLOCK_N],
+                      _address_space=al.ascend_address_space.UB)
+    p_l1_0 = bl.alloc(tl.float16, [BLOCK_N // 16, BLOCK_M // 16, 16, 16],
+                      _address_space=al.ascend_address_space.L1)
+    p_l1_1 = bl.alloc(tl.float16, [BLOCK_N // 16, BLOCK_M // 16, 16, 16],
+                      _address_space=al.ascend_address_space.L1)
+    pv_ub0 = bl.alloc(tl.float32, [SUB_M, BLOCK_DMODEL],
+                      _address_space=al.ascend_address_space.UB)
+    pv_ub1 = bl.alloc(tl.float32, [SUB_M, BLOCK_DMODEL],
+                      _address_space=al.ascend_address_space.UB)
 
     last_third_loop = 0
     last_second_loop = 0
     last_loop = 0
     multi_core_limit = total_tiles
-    preload = 3
     if not IS_CAUSAL:
-        last_third_loop = (total_tiles - pid + CORE_NUM - 1) // CORE_NUM * CORE_NUM + pid
+        last_third_loop = (total_tiles - pid + CORE_NUM -
+                           1) // CORE_NUM * CORE_NUM + pid
         last_second_loop = last_third_loop + CORE_NUM
         last_loop = last_second_loop + CORE_NUM
         multi_core_limit += 3 * CORE_NUM
         start_block, end_block, step = pid, multi_core_limit, CORE_NUM
     else:
-        last_third_loop = (total_tiles - pid + CORE_NUM - 1) // CORE_NUM * CORE_NUM + pid
+        last_third_loop = (total_tiles - pid + CORE_NUM -
+                           1) // CORE_NUM * CORE_NUM + pid
         last_second_loop = last_third_loop + CORE_NUM
         last_loop = last_second_loop + CORE_NUM
         multi_core_limit += 3 * CORE_NUM
@@ -619,8 +666,8 @@ def _fwd_kernel(
         # c2 always use task_info[cur_idx - 2] as taks consumer
         # The deferred consumption masks synchronization issues
         # task_id marks the task_idx as (task_id - consumer_stage)
-        b_idx_1, n_idx_1, s1_idx_1, s2_idx_1, s2_size_1 = 0, 0, 0, 0, 0 # task_1 V1
-        b_idx_2, n_idx_2, s1_idx_2, s2_idx_2, s2_size_2 = 0, 0, 0, 0, 0 # task_2 C1
+        b_idx_1, n_idx_1, s1_idx_1, s2_idx_1, s2_size_1 = 0, 0, 0, 0, 0  # task_1 V1
+        b_idx_2, n_idx_2, s1_idx_2, s2_idx_2, s2_size_2 = 0, 0, 0, 0, 0  # task_2 C1
         b_idx_3, n_idx_3, s1_idx_3, s2_idx_3, s2_size_3 = 0, 0, 0, 0, 0
         b_idx_4, n_idx_4, s1_idx_4, s2_idx_4, s2_size_4 = 0, 0, 0, 0, 0
         cur_b_idx, cur_n_idx, cur_s1_idx, cur_s2_size = 0, 0, 0, 0
@@ -643,22 +690,26 @@ def _fwd_kernel(
 
             if not_last_three:
                 cur_b_idx, cur_n_idx, cur_s1_idx, cur_s2_size = create_and_get_basic_pos(
-                    sq_loop_idx, CORE_NUM, Z, H, pid, num_blocks_m,
-                    IS_CAUSAL, N_CTX, BLOCK_M, BLOCK_N)
+                    sq_loop_idx, CORE_NUM, Z, H, pid, num_blocks_m, IS_CAUSAL,
+                    N_CTX, BLOCK_M, BLOCK_N)
 
             if not not_last_three:
                 cur_s2_size = 1
 
-            s1_task_mod3 = ((sq_loop_idx - pid) // CORE_NUM) % 3
-            qk_l0c = bl.alloc(tl.float32, [BLOCK_M, BLOCK_N], al.ascend_address_space.L0C, is_mem_unique=True)
-            pv_l0c = bl.alloc(tl.float32, [BLOCK_M, BLOCK_DMODEL], al.ascend_address_space.L0C, is_mem_unique=True)
-            q_l1_keep = bl.alloc(tl.float16, [BLOCK_M, BLOCK_DMODEL], al.ascend_address_space.L1)
+            qk_l0c = bl.alloc(tl.float32, [BLOCK_M, BLOCK_N],
+                              al.ascend_address_space.L0C,
+                              is_mem_unique=True)
+            pv_l0c = bl.alloc(tl.float32, [BLOCK_M, BLOCK_DMODEL],
+                              al.ascend_address_space.L0C,
+                              is_mem_unique=True)
+            q_l1_keep = bl.alloc(tl.float16, [BLOCK_M, BLOCK_DMODEL],
+                                 al.ascend_address_space.L1)
             for skv_loop_idx in range(0, cur_s2_size):
                 # create and push to producer stack
                 if not_last_three:
                     (b_idx_1, n_idx_1, s1_idx_1, s2_idx_1, s2_size_1,
-                    b_idx_2, n_idx_2, s1_idx_2, s2_idx_2, s2_size_2, 
-                    b_idx_3, n_idx_3, s1_idx_3, s2_idx_3, s2_size_3, 
+                    b_idx_2, n_idx_2, s1_idx_2, s2_idx_2, s2_size_2,
+                    b_idx_3, n_idx_3, s1_idx_3, s2_idx_3, s2_size_3,
                     b_idx_4, n_idx_4, s1_idx_4, s2_idx_4, s2_size_4) = \
                         create_task(taskId, cur_b_idx, cur_n_idx, cur_s1_idx, skv_loop_idx, cur_s2_size,
                                     b_idx_1, n_idx_1, s1_idx_1, s2_idx_1, s2_size_1,
@@ -666,10 +717,14 @@ def _fwd_kernel(
                                     b_idx_3, n_idx_3, s1_idx_3, s2_idx_3, s2_size_3,
                                     b_idx_4, n_idx_4, s1_idx_4, s2_idx_4, s2_size_4)
 
-                q_rs = get_s_offset(H, N_CTX, BLOCK_M, cur_b_idx, cur_n_idx, cur_s1_idx) + tl.arange(0, BLOCK_M)[:, None]
+                q_rs = get_s_offset(H, N_CTX, BLOCK_M, cur_b_idx,
+                                    cur_n_idx, cur_s1_idx) + tl.arange(
+                                        0, BLOCK_M)[:, None]
                 q_cs = tl.arange(0, BLOCK_DMODEL)[None, :]
                 q_ptr = Q + q_rs * stride_qm + q_cs * stride_qk
-                k_rs = get_s_offset(H, N_CTX, BLOCK_N, cur_b_idx, cur_n_idx, skv_loop_idx) + tl.arange(0, BLOCK_N)[:, None]
+                k_rs = get_s_offset(H, N_CTX, BLOCK_N, cur_b_idx,
+                                    cur_n_idx, skv_loop_idx) + tl.arange(
+                                        0, BLOCK_N)[:, None]
                 k_cs = tl.arange(0, BLOCK_DMODEL)[None, :]
                 k_ptr = K + k_rs * stride_kn + k_cs * stride_kk
                 if not_last_three:
@@ -679,19 +734,39 @@ def _fwd_kernel(
                     q = bl.to_tensor(q_l1_keep)
                     _qk_matmul(q, k_ptr, 0, qk_ub0, qk_ub1, qk_l0c, taskId)
 
-                # get c2 task 
-                c2_use_b_idx, c2_use_n_idx, c2_use_s1_idx, c2_use_s2_idx, c2_use_s2_size = get_cur_task((taskId + 2) & 3, b_idx_1, n_idx_1, s1_idx_1, s2_idx_1, s2_size_1,
-                                                                                                        b_idx_2, n_idx_2, s1_idx_2, s2_idx_2, s2_size_2,
-                                                                                                        b_idx_3, n_idx_3, s1_idx_3, s2_idx_3, s2_size_3,
-                                                                                                        b_idx_4, n_idx_4, s1_idx_4, s2_idx_4, s2_size_4,
-                                                                                                            )
+                # get c2 task
+                c2_use_b_idx, c2_use_n_idx, c2_use_s1_idx, c2_use_s2_idx, c2_use_s2_size = get_cur_task(
+                    (taskId + 2) & 3,
+                    b_idx_1,
+                    n_idx_1,
+                    s1_idx_1,
+                    s2_idx_1,
+                    s2_size_1,
+                    b_idx_2,
+                    n_idx_2,
+                    s1_idx_2,
+                    s2_idx_2,
+                    s2_size_2,
+                    b_idx_3,
+                    n_idx_3,
+                    s1_idx_3,
+                    s2_idx_3,
+                    s2_size_3,
+                    b_idx_4,
+                    n_idx_4,
+                    s1_idx_4,
+                    s2_idx_4,
+                    s2_size_4,
+                )
 
-                v_rs = get_s_offset(H, N_CTX, BLOCK_N, c2_use_b_idx, c2_use_n_idx, c2_use_s2_idx) + tl.arange(0, BLOCK_N)[:, None]
+                v_rs = get_s_offset(H, N_CTX, BLOCK_N, c2_use_b_idx,
+                                    c2_use_n_idx, c2_use_s2_idx) + tl.arange(
+                                        0, BLOCK_N)[:, None]
                 v_cs = tl.arange(0, BLOCK_DMODEL)[None, :]
                 v_ptr = V + v_rs * stride_vk + v_cs * stride_vn
                 if taskId > 1 and not_last:
                     _pv_matmul(v_ptr, p_l1_0, p_l1_1, pv_ub0, pv_ub1, pv_l0c,
-                            taskId, BLOCK_M, BLOCK_N, BLOCK_DMODEL)
+                               taskId, BLOCK_M, BLOCK_N, BLOCK_DMODEL)
                 taskId += 1
 
         # drain the leftover slot-free tokens so the next tile starts at 0
@@ -705,11 +780,11 @@ def _fwd_kernel(
         # v2 always use task_info[cur_idx - 3] as taks consumer
         # The deferred consumption masks synchronization issues
         # task_id marks the task_idx as (task_id - consumer_stage)
-        v_b_idx_1, v_n_idx_1, v_s1_idx_1, v_s2_idx_1, v_s2_size_1 = 0, 0, 0, 0, 0 # task_1 V1
-        v_b_idx_2, v_n_idx_2, v_s1_idx_2, v_s2_idx_2, v_s2_size_2 = 0, 0, 0, 0, 0 # task_1 C1
-        v_b_idx_3, v_n_idx_3, v_s1_idx_3, v_s2_idx_3, v_s2_size_3 = 0, 0, 0, 0, 0 
-        v_b_idx_4, v_n_idx_4, v_s1_idx_4, v_s2_idx_4, v_s2_size_4 = 0, 0, 0, 0, 0 
-        v_cur_b_idx, v_cur_n_idx, v_cur_s1_idx, v_cur_s2_size = 0, 0, 0, 0 
+        v_b_idx_1, v_n_idx_1, v_s1_idx_1, v_s2_idx_1, v_s2_size_1 = 0, 0, 0, 0, 0  # task_1 V1
+        v_b_idx_2, v_n_idx_2, v_s1_idx_2, v_s2_idx_2, v_s2_size_2 = 0, 0, 0, 0, 0  # task_1 C1
+        v_b_idx_3, v_n_idx_3, v_s1_idx_3, v_s2_idx_3, v_s2_size_3 = 0, 0, 0, 0, 0
+        v_b_idx_4, v_n_idx_4, v_s1_idx_4, v_s2_idx_4, v_s2_size_4 = 0, 0, 0, 0, 0
+        v_cur_b_idx, v_cur_n_idx, v_cur_s1_idx, v_cur_s2_size = 0, 0, 0, 0
 
         v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4 = 0, 0, 0, 0
         s1_task_cnt = 0
@@ -724,17 +799,23 @@ def _fwd_kernel(
         l_i_tb1 = bl.alloc(tl.float32, [SUB_M], al.ascend_address_space.UB)
         l_i_tb2 = bl.alloc(tl.float32, [SUB_M], al.ascend_address_space.UB)
 
-        acc_scale0 = bl.alloc(tl.float32, [SUB_M], al.ascend_address_space.UB, is_mem_unique=True)
-        acc_scale1 = bl.alloc(tl.float32, [SUB_M], al.ascend_address_space.UB, is_mem_unique=True)
-        acc_scale2 = bl.alloc(tl.float32, [SUB_M], al.ascend_address_space.UB, is_mem_unique=True)
+        acc_scale0 = bl.alloc(tl.float32, [SUB_M],
+                              al.ascend_address_space.UB,
+                              is_mem_unique=True)
+        acc_scale1 = bl.alloc(tl.float32, [SUB_M],
+                              al.ascend_address_space.UB,
+                              is_mem_unique=True)
+        acc_scale2 = bl.alloc(tl.float32, [SUB_M],
+                              al.ascend_address_space.UB,
+                              is_mem_unique=True)
 
-        p = bl.alloc(
-            tl.float16,
-            [BLOCK_N // 16, SUB_M // 16 * 16, 16],
-            al.ascend_address_space.UB)
+        p = bl.alloc(tl.float16, [BLOCK_N // 16, SUB_M // 16 * 16, 16],
+                     al.ascend_address_space.UB)
         al.multibuffer(p, 2)
 
-        acc_buffer = bl.alloc(tl.float32, [SUB_M, BLOCK_DMODEL], al.ascend_address_space.UB, is_mem_unique=True)
+        acc_buffer = bl.alloc(tl.float32, [SUB_M, BLOCK_DMODEL],
+                              al.ascend_address_space.UB,
+                              is_mem_unique=True)
 
         # pre-arm the qk_ub / pv_ub slot-free tokens (both slots start empty)
         vec_prefree_s_ub()
@@ -743,14 +824,13 @@ def _fwd_kernel(
             v_is_last_loop = sq_loop_idx == last_loop
             v_is_last_second_loop = sq_loop_idx == last_second_loop
             v_is_last_third_loop = sq_loop_idx == last_third_loop
-            v_not_last = not v_is_last_loop
             v_not_last_two = not v_is_last_second_loop and not v_is_last_loop
             v_not_last_three = (not v_is_last_third_loop) and v_not_last_two
 
             if v_not_last_three:
                 v_cur_b_idx, v_cur_n_idx, v_cur_s1_idx, v_cur_s2_size = create_and_get_basic_pos(
-                    sq_loop_idx, CORE_NUM, Z, H, pid, num_blocks_m,
-                    IS_CAUSAL, N_CTX, BLOCK_M, BLOCK_N)
+                    sq_loop_idx, CORE_NUM, Z, H, pid, num_blocks_m, IS_CAUSAL,
+                    N_CTX, BLOCK_M, BLOCK_N)
             if not v_not_last_three:
                 v_cur_s2_size = 1
             s1_task_cnt += 1
@@ -769,48 +849,52 @@ def _fwd_kernel(
                     v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4 = \
                         update_task(vtaskId, s1_task_cnt, v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4)
 
-                # get v1 task 
-                v1_use_b_idx, v1_use_n_idx, v1_use_s1_idx, v1_use_s2_idx, v1_use_s2_size = get_cur_task((vtaskId - 1) & 3, 
-                                                                                                        v_b_idx_1, v_n_idx_1, v_s1_idx_1, v_s2_idx_1, v_s2_size_1,
-                                                                                                        v_b_idx_2, v_n_idx_2, v_s1_idx_2, v_s2_idx_2, v_s2_size_2,
-                                                                                                        v_b_idx_3, v_n_idx_3, v_s1_idx_3, v_s2_idx_3, v_s2_size_3,
-                                                                                                        v_b_idx_4, v_n_idx_4, v_s1_idx_4, v_s2_idx_4, v_s2_size_4)
+                # get v1 task
+                v1_use_b_idx, v1_use_n_idx, v1_use_s1_idx, v1_use_s2_idx, v1_use_s2_size = get_cur_task(
+                    (vtaskId - 1) & 3, v_b_idx_1, v_n_idx_1, v_s1_idx_1,
+                    v_s2_idx_1, v_s2_size_1, v_b_idx_2, v_n_idx_2, v_s1_idx_2,
+                    v_s2_idx_2, v_s2_size_2, v_b_idx_3, v_n_idx_3, v_s1_idx_3,
+                    v_s2_idx_3, v_s2_size_3, v_b_idx_4, v_n_idx_4, v_s1_idx_4,
+                    v_s2_idx_4, v_s2_size_4)
                 need_do_v1 = vtaskId > 0 and v_not_last_two
                 if need_do_v1:
-                    v1_last_skv = v1_use_s2_idx == v1_use_s2_size - 1
                     v1_need_update = v1_use_s2_idx != 0
-                    v1_s1_task_mod3 = get_s_task(vtaskId - 1, v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4)
+                    v1_s1_task_mod3 = get_s_task(vtaskId - 1, v_s1_task_mod3_1,
+                                                 v_s1_task_mod3_2,
+                                                 v_s1_task_mod3_3,
+                                                 v_s1_task_mod3_4)
                     sub_vec_id = al.sub_vec_id()
-                    m_base = (v1_use_s1_idx * BLOCK_M + sub_vec_id * SUB_M).to(tl.int32)
+                    m_base = (v1_use_s1_idx * BLOCK_M + sub_vec_id * SUB_M).to(
+                        tl.int32)
                     start_n = v1_use_s2_idx * BLOCK_N
                     need_mask = IS_CAUSAL & ((start_n + BLOCK_N) > m_base)
-                    _softmax_v1(
-                        qk_ub0, qk_ub1, p_l1_0, p_l1_1, p,
-                        m_i_tb0, m_i_tb1, m_i_tb2,
-                        l_i_tb0, l_i_tb1, l_i_tb2,
-                        acc_scale0, acc_scale1, acc_scale2,
-                        sm_scale, vtaskId, v1_s1_task_mod3,
-                        m_base, start_n, tl.float16,
-                        need_mask, v1_need_update, SUB_M, BLOCK_N)
+                    _softmax_v1(qk_ub0, qk_ub1, p_l1_0, p_l1_1, p, m_i_tb0,
+                                m_i_tb1, m_i_tb2, l_i_tb0, l_i_tb1, l_i_tb2,
+                                acc_scale0, acc_scale1, acc_scale2, sm_scale,
+                                vtaskId, v1_s1_task_mod3, m_base, start_n,
+                                tl.float16, need_mask, v1_need_update, SUB_M,
+                                BLOCK_N)
 
                 # get v2 task
-                v2_use_b_idx, v2_use_n_idx, v2_use_s1_idx, v2_use_s2_idx, v2_use_s2_size = get_cur_task((vtaskId + 1) & 3, 
-                                                                                        v_b_idx_1, v_n_idx_1, v_s1_idx_1, v_s2_idx_1, v_s2_size_1,
-                                                                                        v_b_idx_2, v_n_idx_2, v_s1_idx_2, v_s2_idx_2, v_s2_size_2,
-                                                                                        v_b_idx_3, v_n_idx_3, v_s1_idx_3, v_s2_idx_3, v_s2_size_3,
-                                                                                        v_b_idx_4, v_n_idx_4, v_s1_idx_4, v_s2_idx_4, v_s2_size_4)
-                
+                v2_use_b_idx, v2_use_n_idx, v2_use_s1_idx, v2_use_s2_idx, v2_use_s2_size = get_cur_task(
+                    (vtaskId + 1) & 3, v_b_idx_1, v_n_idx_1, v_s1_idx_1,
+                    v_s2_idx_1, v_s2_size_1, v_b_idx_2, v_n_idx_2, v_s1_idx_2,
+                    v_s2_idx_2, v_s2_size_2, v_b_idx_3, v_n_idx_3, v_s1_idx_3,
+                    v_s2_idx_3, v_s2_size_3, v_b_idx_4, v_n_idx_4, v_s1_idx_4,
+                    v_s2_idx_4, v_s2_size_4)
+
                 if vtaskId > 2:
                     update_acc = v2_use_s2_idx != 0
-                    _acc_update(pv_ub0, pv_ub1,
-                                acc_scale0, acc_scale1, acc_scale2,
-                                acc_buffer, vtaskId, update_acc,
+                    _acc_update(pv_ub0, pv_ub1, acc_scale0, acc_scale1,
+                                acc_scale2, acc_buffer, vtaskId, update_acc,
                                 SUB_M, BLOCK_DMODEL)
-       
 
                 v2_last_skv_v2 = v2_use_s2_idx == v2_use_s2_size - 1
                 if v2_last_skv_v2:
-                    v2_s1_task_mod3 = get_s_task(vtaskId - 3, v_s1_task_mod3_1, v_s1_task_mod3_2, v_s1_task_mod3_3, v_s1_task_mod3_4)
+                    v2_s1_task_mod3 = get_s_task(vtaskId - 3, v_s1_task_mod3_1,
+                                                 v_s1_task_mod3_2,
+                                                 v_s1_task_mod3_3,
+                                                 v_s1_task_mod3_4)
                     if v2_s1_task_mod3 == 0:
                         l_i = bl.to_tensor(l_i_tb0)
                         m_i = bl.to_tensor(m_i_tb0)
@@ -825,7 +909,9 @@ def _fwd_kernel(
                     acc = acc / l_i[:, None]
 
                     sub_vec_id = al.sub_vec_id()
-                    out_offset = get_s_offset(H, N_CTX, BLOCK_M, v2_use_b_idx, v2_use_n_idx, v2_use_s1_idx) + sub_vec_id * SUB_M
+                    out_offset = get_s_offset(
+                        H, N_CTX, BLOCK_M, v2_use_b_idx, v2_use_n_idx,
+                        v2_use_s1_idx) + sub_vec_id * SUB_M
                     o_rs = out_offset + tl.arange(0, SUB_M)[:, None]
                     o_cs = tl.arange(0, BLOCK_DMODEL)[None, :]
                     o_ptrs = Out + o_rs * stride_om + o_cs * stride_on
@@ -836,7 +922,9 @@ def _fwd_kernel(
 
         vec_postwait_p_l1()
 
+
 class _attention(torch.autograd.Function):
+
     @staticmethod
     def forward(ctx, q, k, v, sm_scale, causal=True, BLOCK_M=64, BLOCK_N=64):
         # shape constraints
@@ -852,16 +940,21 @@ class _attention(torch.autograd.Function):
         total_tiles = num_blocks_m * q.shape[0] * q.shape[1]
         try:
             device = torch.npu.current_device()
-            num_aicore = driver.active.utils.get_device_properties(device)["num_aicore"]
+            num_aicore = driver.active.utils.get_device_properties(
+                device)["num_aicore"]
         except Exception:
             # Conservative fallback keeps coreDim legal if properties are unavailable.
             num_aicore = 24
-        grid = (min(num_aicore, total_tiles),)
-        tmp = torch.empty(
-            (q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32
-        )
-        L = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
-        m = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
+        grid = (min(num_aicore, total_tiles), )
+        tmp = torch.empty((q.shape[0] * q.shape[1], q.shape[2]),
+                          device=q.device,
+                          dtype=torch.float32)
+        L = torch.empty((q.shape[0] * q.shape[1], q.shape[2]),
+                        device=q.device,
+                        dtype=torch.float32)
+        m = torch.empty((q.shape[0] * q.shape[1], q.shape[2]),
+                        device=q.device,
+                        dtype=torch.float32)
         num_warps = 4 if Lk <= 64 else 8
 
         _fwd_kernel[grid](
@@ -914,5 +1007,6 @@ class _attention(torch.autograd.Function):
         ctx.sm_scale = sm_scale
         ctx.BLOCK_DMODEL = Lk
         return o
+
 
 attention = _attention.apply

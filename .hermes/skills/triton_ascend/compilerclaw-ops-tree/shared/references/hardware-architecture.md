@@ -98,7 +98,7 @@ These are the key architectural enablers for the prefetching/preloading CV pipel
   L2 ──MTE2───────────► │          │ ──MTE3──► L2 (all platforms) ──► GM
                         │          │
   L1 ──MTE1───────────► │    UB    │ ──MTE3──► L1 (A5 only)
-   (A5 only)            │          │ 
+   (A5 only)            │          │
                         └──────────┘
                         AIV0 / AIV1
                         (+ scalar each)
@@ -115,9 +115,9 @@ via `UB → L2` (MTE3, all platforms) or `UB → L1` (MTE3, A5 only; on A2 route
 
   L2 ──MTE2──► L1 ──MTE1─────► L0A ──┐──► AIC / Cube ──► L0C (matmul out)
                L1 ──MTE1─────► L0B ──│                    ├─Fixpipe─► L2 / L1 (all platforms)
-               L1 ──MTE1─────► BT  ──│                    ├─Fixpipe─► UB (A5 only)  
-               L1 ──Fixpipe──► FP  ──┘                    └─Fixpipe─► L2 ─MTE2─► UB (910B/A2 alt)  
-                                             
+               L1 ──MTE1─────► BT  ──│                    ├─Fixpipe─► UB (A5 only)
+               L1 ──Fixpipe──► FP  ──┘                    └─Fixpipe─► L2 ─MTE2─► UB (910B/A2 alt)
+
 ```
 
 Key point: **L0A, L0B, BT, FP, and L0C are directly read/write for Cube-side computation**.

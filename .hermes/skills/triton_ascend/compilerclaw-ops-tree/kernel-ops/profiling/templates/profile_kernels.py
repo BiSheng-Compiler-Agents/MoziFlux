@@ -24,7 +24,6 @@ Usage:
 import argparse
 import csv
 import importlib.util
-import math
 import os
 import shutil
 import sys
@@ -48,7 +47,7 @@ _DIR = Path(__file__).parent
 
 # ---- Adapt these filenames per kernel workspace ---------------------------
 BASELINE1_FILE = "19_ReLU.py"
-BASELINE2_FILE = "base_19_ReLU.py"       # keep visible even when absent
+BASELINE2_FILE = "base_19_ReLU.py"  # keep visible even when absent
 OPTIMIZED_FILE = "opt_19_ReLU.py"
 
 # Optional filters for profiler CSV rows. Leave None to sum all op_statistic rows
@@ -104,7 +103,8 @@ def _model(key):
     if mod is None:
         raise RuntimeError(f"provider module missing: {key}")
     if isinstance(mod, Exception):
-        raise RuntimeError(f"provider module import failed: {key}: {type(mod).__name__}")
+        raise RuntimeError(
+            f"provider module import failed: {key}: {type(mod).__name__}")
     if key not in _models:
         torch.manual_seed(0)
         init = mod.get_init_inputs() if hasattr(mod, "get_init_inputs") else []
@@ -140,7 +140,7 @@ def _make_inputs(label):
     n = next(s[1] for s in _BENCH_SHAPES if s[0] == label)
     torch.manual_seed(42)
     x = torch.rand(n, device="npu", dtype=torch.float16) * 4 - 2
-    return (x,)
+    return (x, )
 
 
 def _sync():
@@ -161,9 +161,15 @@ def unit_test():
                 _sync()
         except Exception as exc:
             reference_fail = True
-            print(f"TEST baseline1 {label}: SKIP_REFERENCE_ERROR {type(exc).__name__} max_abs=inf")
-            print(f"TEST baseline2 {label}: SKIP_REFERENCE_ERROR {type(exc).__name__} max_abs=inf")
-            print(f"TEST optimized {label}: FAIL_REFERENCE_ERROR {type(exc).__name__} max_abs=inf")
+            print(
+                f"TEST baseline1 {label}: SKIP_REFERENCE_ERROR {type(exc).__name__} max_abs=inf"
+            )
+            print(
+                f"TEST baseline2 {label}: SKIP_REFERENCE_ERROR {type(exc).__name__} max_abs=inf"
+            )
+            print(
+                f"TEST optimized {label}: FAIL_REFERENCE_ERROR {type(exc).__name__} max_abs=inf"
+            )
             optimized_fail = True
             continue
 
@@ -174,18 +180,22 @@ def unit_test():
                     _sync()
                 max_abs = (ref.float() - out.float()).abs().max().item()
                 mean_abs = (ref.float() - out.float()).abs().mean().item()
-                ok = bool(torch.allclose(ref.float(), out.float(), atol=1e-2, rtol=1e-2))
+                ok = bool(
+                    torch.allclose(ref.float(),
+                                   out.float(),
+                                   atol=1e-2,
+                                   rtol=1e-2))
                 status = "PASS" if ok else "FAIL"
-                print(
-                    f"TEST {key} {label}: {status} "
-                    f"max_abs={max_abs:.6e} mean_abs={mean_abs:.6e}"
-                )
+                print(f"TEST {key} {label}: {status} "
+                      f"max_abs={max_abs:.6e} mean_abs={mean_abs:.6e}")
                 if key == "optimized" and not ok:
                     optimized_fail = True
             except Exception as exc:
                 # Keep comparison provider entries visible, but only optimized failure gates UNIT_TEST.
                 status = "FAIL" if key == "optimized" else "SKIP_UNAVAILABLE"
-                print(f"TEST {key} {label}: {status} {type(exc).__name__} max_abs=inf mean_abs=inf")
+                print(
+                    f"TEST {key} {label}: {status} {type(exc).__name__} max_abs=inf mean_abs=inf"
+                )
                 if key == "optimized":
                     optimized_fail = True
 
@@ -197,7 +207,13 @@ def unit_test():
 
 
 # ---- torch_npu.profiler benchmark -----------------------------------------
-def _profiler_op_ms(fn, label, mode, op_type_filter=None, wait=1, warmup=2, active=5):
+def _profiler_op_ms(fn,
+                    label,
+                    mode,
+                    op_type_filter=None,
+                    wait=1,
+                    warmup=2,
+                    active=5):
     """Return device average runtime in ms from op_statistic.csv.
 
     This profiles exactly `fn()` inside the profiler context, synchronizing before
@@ -206,15 +222,19 @@ def _profiler_op_ms(fn, label, mode, op_type_filter=None, wait=1, warmup=2, acti
     out_dir = tempfile.mkdtemp(prefix=f"prof_{mode}_{label}_")
     try:
         cfg = _ExperimentalConfig(
-            profiler_level=ProfilerLevel.Level0,   # minimal overhead, timing only
+            profiler_level=ProfilerLevel.
+            Level0,  # minimal overhead, timing only
             export_type=[ExportType.Text],
         )
         with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.NPU],
-            schedule=schedule(wait=wait, warmup=warmup, active=active, repeat=1),
-            on_trace_ready=tensorboard_trace_handler(out_dir),
-            record_shapes=True,
-            experimental_config=cfg,
+                activities=[ProfilerActivity.CPU, ProfilerActivity.NPU],
+                schedule=schedule(wait=wait,
+                                  warmup=warmup,
+                                  active=active,
+                                  repeat=1),
+                on_trace_ready=tensorboard_trace_handler(out_dir),
+                record_shapes=True,
+                experimental_config=cfg,
         ) as prof:
             _sync()
             for _ in range(wait + warmup + active):
@@ -227,7 +247,8 @@ def _profiler_op_ms(fn, label, mode, op_type_filter=None, wait=1, warmup=2, acti
         op_avgs_us = []
         for root, _, files in os.walk(out_dir):
             if "op_statistic.csv" in files:
-                with open(os.path.join(root, "op_statistic.csv"), newline="") as f:
+                with open(os.path.join(root, "op_statistic.csv"),
+                          newline="") as f:
                     for row in csv.DictReader(f):
                         op_type = row.get("OP Type", "")
                         if op_type_filter and op_type_filter not in op_type:
@@ -243,7 +264,8 @@ def _profiler_op_ms(fn, label, mode, op_type_filter=None, wait=1, warmup=2, acti
         durations_us = []
         for root, _, files in os.walk(out_dir):
             if "kernel_details.csv" in files:
-                with open(os.path.join(root, "kernel_details.csv"), newline="") as f:
+                with open(os.path.join(root, "kernel_details.csv"),
+                          newline="") as f:
                     for row in csv.DictReader(f):
                         name = row.get("Name", "")
                         ktype = row.get("Type", "")
@@ -274,8 +296,7 @@ def _profiler_op_ms(fn, label, mode, op_type_filter=None, wait=1, warmup=2, acti
         ylabel="Latency (ms)",
         plot_name="kernel_perf",
         args={},
-    )
-)
+    ))
 def benchmark(label, mode):
     inputs = _make_inputs(label)
     try:
@@ -293,8 +314,11 @@ def benchmark(label, mode):
 
 # ---- Entry point -----------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="Profile kernels on Ascend NPU")
-    parser.add_argument("--test", action="store_true", help="Correctness check only")
+    parser = argparse.ArgumentParser(
+        description="Profile kernels on Ascend NPU")
+    parser.add_argument("--test",
+                        action="store_true",
+                        help="Correctness check only")
     parser.add_argument("--bench", action="store_true", help="Benchmark only")
     args = parser.parse_args()
 

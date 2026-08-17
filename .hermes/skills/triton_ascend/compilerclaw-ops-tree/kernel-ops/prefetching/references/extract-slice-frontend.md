@@ -31,7 +31,7 @@ compares, e.g. `m_base = sub_vec_id() * SUB_M + ...` then `col_idx <= m_base + i
 
 Fix: cast the index scalar once — `m_base = (...).to(tl.int32)` — before the compare.
 
-## Where the 256B rule is enforced: outlined VFs only 
+## Where the 256B rule is enforced: outlined VFs only
 
 The auto-split behavior depends on where the row op lives:
 

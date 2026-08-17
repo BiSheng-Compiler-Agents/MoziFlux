@@ -50,7 +50,7 @@ RUN conda config --add channels https://repo.huaweicloud.com/ascend/repos/conda/
 # 4. Create the compilerclaw conda environment from environment.yml
 # -----------------------------------------------------------------------------
 RUN conda create -n compilerclaw python=3.11 && \
-    conda clean -afy 
+    conda clean -afy
 
 # -----------------------------------------------------------------------------
 # 5. Install Triton-Ascend, torch-npu, Hermes Agent, and plugin dependencies
@@ -90,7 +90,7 @@ ENV HERMES_ENABLE_PROJECT_PLUGINS=true
 # -----------------------------------------------------------------------------
 # 9. Enable write to /opt/moziflux
 # -----------------------------------------------------------------------------
-ENV HERMES_WRITE_SAFE_ROOT="/opt/data:/opt/moziflux" 
+ENV HERMES_WRITE_SAFE_ROOT="/opt/data:/opt/moziflux"
 
 # -----------------------------------------------------------------------------
 # 10. Set working directory — project is mounted here at runtime

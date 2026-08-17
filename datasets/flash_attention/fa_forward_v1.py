@@ -1,7 +1,6 @@
 # [2022-10-23] Downloaded from https://github.com/openai/triton/blob/master/python/tutorials/06-fused-attention.py
 # for benchmarking.
 # We fixed a few dtype cast to make it work for bf16
-
 """
 Fused Attention
 ===============
@@ -9,7 +8,6 @@ This is a Triton implementation of the Flash Attention algorithm
 (see: Dao et al., https://arxiv.org/pdf/2205.14135v2.pdf; Rabe and Staats https://arxiv.org/pdf/2112.05682v2.pdf)
 """
 
-import pytest
 import torch
 import triton
 import triton.language as tl
@@ -66,16 +64,20 @@ def _fwd_kernel(
 
     # UB buffers are per-vector-core halves (fixpipe ROW_SPLIT drains L0C rows
     # [0, M/2) -> AIV0 UB, [M/2, M) -> AIV1 UB). p_l1: P in NZ fractal for PV.
-    qk_ub = bl.alloc(tl.float32, [SUB_M, BLOCK_N], _address_space=al.ascend_address_space.UB)
-    p_l1 = bl.alloc(tl.float16, [BLOCK_N // 16, BLOCK_M // 16, 16, 16], _address_space=al.ascend_address_space.L1)
-    pv_ub = bl.alloc(tl.float32, [SUB_M, BLOCK_DMODEL], _address_space=al.ascend_address_space.UB)
+    qk_ub = bl.alloc(tl.float32, [SUB_M, BLOCK_N],
+                     _address_space=al.ascend_address_space.UB)
+    p_l1 = bl.alloc(tl.float16, [BLOCK_N // 16, BLOCK_M // 16, 16, 16],
+                    _address_space=al.ascend_address_space.L1)
+    pv_ub = bl.alloc(tl.float32, [SUB_M, BLOCK_DMODEL],
+                     _address_space=al.ascend_address_space.UB)
 
     for tile_id in tl.range(pid, total_tiles, num_pid):
         task_m_idx = tile_id % num_blocks_m
         task_hz_idx = tile_id // num_blocks_m
         off_z = task_hz_idx // H
         off_h = task_hz_idx % H
-        qkv_offset = off_z.to(tl.int64) * stride_qz + off_h.to(tl.int64) * stride_qh 
+        qkv_offset = off_z.to(tl.int64) * stride_qz + off_h.to(
+            tl.int64) * stride_qh
         if IS_CAUSAL:
             loop_end = (task_m_idx + 1) * BLOCK_M
         else:
@@ -98,14 +100,6 @@ def _fwd_kernel(
             block_shape=(BLOCK_N, BLOCK_DMODEL),
             order=(1, 0),
         )
-        o_block_ptr = tl.make_block_ptr(
-            base=Out + qkv_offset,
-            shape=(N_CTX, BLOCK_DMODEL),
-            strides=(stride_om, stride_on),
-            offsets=(task_m_idx * BLOCK_M, 0),
-            block_shape=(BLOCK_M, BLOCK_DMODEL),
-            order=(1, 0),
-        )
 
         # ---------------- Cube side (one scope per tile) ----------------
         with al.scope(core_mode="cube"):
@@ -118,21 +112,30 @@ def _fwd_kernel(
                 start_n = tl.multiple_of(start_n, BLOCK_N)
                 k = tl.load(tl.advance(k_block_ptr, (start_n, 0)))
                 qk_l0c = tl.dot(q, tl.trans(k))
-                al.fixpipe(qk_l0c, qk_ub, dma_mode=al.FixpipeDMAMode.NZ2ND,
+                al.fixpipe(qk_l0c,
+                           qk_ub,
+                           dma_mode=al.FixpipeDMAMode.NZ2ND,
                            dual_dst_mode=al.FixpipeDualDstMode.ROW_SPLIT)
-                al.sync_block_set("cube", "vector", 0, al.PIPE.PIPE_FIX, al.PIPE.PIPE_V)
+                al.sync_block_set("cube", "vector", 0, al.PIPE.PIPE_FIX,
+                                  al.PIPE.PIPE_V)
 
                 # Wait for P in L1 (NZ fractal), then PV matmul
-                al.sync_block_wait("vector", "cube", 1, al.PIPE.PIPE_MTE3, al.PIPE.PIPE_MTE1)
+                al.sync_block_wait("vector", "cube", 1, al.PIPE.PIPE_MTE3,
+                                   al.PIPE.PIPE_MTE1)
                 # Raw-pointer V load (in-loop block-ptr loads hit the PlanMemory
                 # empty-addrs bug on CANN 9.0-gen bishengir). Convention from
                 # fa_forward.py: stride_vk = N(row) stride, stride_vn = D(col) stride.
-                v = tl.load(V + qkv_offset + (start_n + offs_nc)[:, None] * stride_vk
-                            + offs_dc[None, :] * stride_vn)
-                pv_l0c = tl.dot(bl.to_tensor(p_l1, target_shape=[BLOCK_M, BLOCK_N]), v)
-                al.fixpipe(pv_l0c, pv_ub, dma_mode=al.FixpipeDMAMode.NZ2ND,
+                v = tl.load(V + qkv_offset +
+                            (start_n + offs_nc)[:, None] * stride_vk +
+                            offs_dc[None, :] * stride_vn)
+                pv_l0c = tl.dot(
+                    bl.to_tensor(p_l1, target_shape=[BLOCK_M, BLOCK_N]), v)
+                al.fixpipe(pv_l0c,
+                           pv_ub,
+                           dma_mode=al.FixpipeDMAMode.NZ2ND,
                            dual_dst_mode=al.FixpipeDualDstMode.ROW_SPLIT)
-                al.sync_block_set("cube", "vector", 2, al.PIPE.PIPE_FIX, al.PIPE.PIPE_V)
+                al.sync_block_set("cube", "vector", 2, al.PIPE.PIPE_FIX,
+                                  al.PIPE.PIPE_V)
 
                 # No "consumed" signal needed: in-order pipes + data deps imply
                 # safety — QK(i+1) follows wait(1)(i) which implies vector has
@@ -144,7 +147,8 @@ def _fwd_kernel(
             sub_id = al.sub_vec_id()
             row0 = sub_id * SUB_M
             offs_dv = tl.arange(0, BLOCK_DMODEL)
-            offs_dv = tl.max_contiguous(tl.multiple_of(offs_dv, 16), BLOCK_DMODEL)
+            offs_dv = tl.max_contiguous(tl.multiple_of(offs_dv, 16),
+                                        BLOCK_DMODEL)
 
             # per-core state: each vector core owns its SUB_M rows outright
             m_i = tl.zeros([SUB_M], dtype=tl.float32) - float("inf")
@@ -152,14 +156,18 @@ def _fwd_kernel(
             acc = tl.zeros([SUB_M, BLOCK_DMODEL], dtype=tl.float32)
 
             for start_n in tl.range(0, loop_end, BLOCK_N):
-                al.sync_block_wait("cube", "vector", 0, al.PIPE.PIPE_FIX, al.PIPE.PIPE_V)
+                al.sync_block_wait("cube", "vector", 0, al.PIPE.PIPE_FIX,
+                                   al.PIPE.PIPE_V)
 
-                qk_sub = bl.to_tensor(qk_ub)  # [SUB_M, BLOCK_N] this core's half
+                qk_sub = bl.to_tensor(
+                    qk_ub)  # [SUB_M, BLOCK_N] this core's half
                 offs_m_sub = task_m_idx * BLOCK_M + row0 + tl.arange(0, SUB_M)
                 qk_sub *= sm_scale
                 if IS_CAUSAL:
-                    qk_sub += tl.where(offs_m_sub[:, None] >= (start_n + tl.arange(0, BLOCK_N)[None, :]),
-                                       0, float("-inf"))
+                    qk_sub += tl.where(
+                        offs_m_sub[:, None]
+                        >= (start_n + tl.arange(0, BLOCK_N)[None, :]), 0,
+                        float("-inf"))
 
                 # online softmax update on this core's rows
                 m_ij = tl.max(qk_sub, 1)
@@ -174,16 +182,21 @@ def _fwd_kernel(
                 # -> permute (1,0,2) -> [BLOCK_N//16, SUB_M, 16]
                 # -> [BLOCK_N//16, SUB_M//16, 16, 16]
                 p16 = p.to(tl.float16)
-                p_perm = tl.permute(p16.reshape(SUB_M, BLOCK_N // 16, 16), (1, 0, 2))
+                p_perm = tl.permute(p16.reshape(SUB_M, BLOCK_N // 16, 16),
+                                    (1, 0, 2))
                 p_nz = p_perm.reshape(BLOCK_N // 16, SUB_M // 16, 16, 16)
                 p_nz_buf = bl.to_buffer(p_nz, space=al.ascend_address_space.UB)
                 p_l1_sub = bl.subview(p_l1, (0, row0 // 16, 0, 0),
-                                      (BLOCK_N // 16, SUB_M // 16, 16, 16), (1, 1, 1, 1))
+                                      (BLOCK_N // 16, SUB_M // 16, 16, 16),
+                                      (1, 1, 1, 1))
                 al.copy_from_ub_to_l1(p_nz_buf, p_l1_sub)
-                al.sync_block_set("vector", "cube", 1, al.PIPE.PIPE_MTE3, al.PIPE.PIPE_MTE1)
+                al.sync_block_set("vector", "cube", 1, al.PIPE.PIPE_MTE3,
+                                  al.PIPE.PIPE_MTE1)
 
-                al.sync_block_wait("cube", "vector", 2, al.PIPE.PIPE_FIX, al.PIPE.PIPE_V)
-                pv = bl.to_tensor(pv_ub)  # [SUB_M, BLOCK_DMODEL] this core's half
+                al.sync_block_wait("cube", "vector", 2, al.PIPE.PIPE_FIX,
+                                   al.PIPE.PIPE_V)
+                pv = bl.to_tensor(
+                    pv_ub)  # [SUB_M, BLOCK_DMODEL] this core's half
                 acc = acc * alpha[:, None] + pv
                 l_i = l_new
                 m_i = m_new
@@ -277,11 +290,16 @@ def _bwd_kernel(
         offs_m = tl.arange(0, BLOCK_N)
         offs_k = tl.arange(0, BLOCK_DMODEL)
         # initialize pointers to value-like data
-        q_ptrs = Q + (offs_qm[:, None] * stride_qm + offs_k[None, :] * stride_qk)
-        k_ptrs = K + (offs_n[:, None] * stride_kn + offs_k[None, :] * stride_kk)
-        v_ptrs = V + (offs_n[:, None] * stride_qm + offs_k[None, :] * stride_qk)
-        do_ptrs = DO + (offs_qm[:, None] * stride_qm + offs_k[None, :] * stride_qk)
-        dq_ptrs = DQ + (offs_qm[:, None] * stride_qm + offs_k[None, :] * stride_qk)
+        q_ptrs = Q + (offs_qm[:, None] * stride_qm +
+                      offs_k[None, :] * stride_qk)
+        k_ptrs = K + (offs_n[:, None] * stride_kn +
+                      offs_k[None, :] * stride_kk)
+        v_ptrs = V + (offs_n[:, None] * stride_qm +
+                      offs_k[None, :] * stride_qk)
+        do_ptrs = DO + (offs_qm[:, None] * stride_qm +
+                        offs_k[None, :] * stride_qk)
+        dq_ptrs = DQ + (offs_qm[:, None] * stride_qm +
+                        offs_k[None, :] * stride_qk)
         # pointer to row-wise quantities in value-like data
         D_ptrs = D + off_hz * N_CTX
         m_ptrs = M + off_hz * N_CTX
@@ -299,7 +317,8 @@ def _bwd_kernel(
             # recompute p = softmax(qk, dim=-1).T
             # NOTE: `do` is pre-divided by `l`; no normalization here
             qk = tl.dot(q, k, trans_b=True)
-            qk = tl.where(offs_m_curr[:, None] >= (offs_n[None, :]), qk, float("-inf"))
+            qk = tl.where(offs_m_curr[:, None] >= (offs_n[None, :]), qk,
+                          float("-inf"))
             m = tl.load(m_ptrs + offs_m_curr)
             p = tl.exp(qk * sm_scale - m[:, None])
             # compute dv
@@ -322,13 +341,16 @@ def _bwd_kernel(
             q_ptrs += BLOCK_M * stride_qm
             do_ptrs += BLOCK_M * stride_qm
         # write-back
-        dv_ptrs = DV + (offs_n[:, None] * stride_qm + offs_k[None, :] * stride_qk)
-        dk_ptrs = DK + (offs_n[:, None] * stride_kn + offs_k[None, :] * stride_kk)
+        dv_ptrs = DV + (offs_n[:, None] * stride_qm +
+                        offs_k[None, :] * stride_qk)
+        dk_ptrs = DK + (offs_n[:, None] * stride_kn +
+                        offs_k[None, :] * stride_kk)
         tl.store(dv_ptrs, dv)
         tl.store(dk_ptrs, dk)
 
 
 class _attention(torch.autograd.Function):
+
     @staticmethod
     def forward(ctx, q, k, v, sm_scale, causal=True, BLOCK_M=64, BLOCK_N=64):
         # shape constraints
@@ -340,16 +362,21 @@ class _attention(torch.autograd.Function):
         total_tiles = num_blocks_m * q.shape[0] * q.shape[1]
         try:
             device = torch.npu.current_device()
-            num_aicore = driver.active.utils.get_device_properties(device)["num_aicore"]
+            num_aicore = driver.active.utils.get_device_properties(
+                device)["num_aicore"]
         except Exception:
             # Conservative fallback keeps coreDim legal if properties are unavailable.
             num_aicore = 24
-        grid = (min(num_aicore, total_tiles),)
-        tmp = torch.empty(
-            (q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32
-        )
-        L = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
-        m = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
+        grid = (min(num_aicore, total_tiles), )
+        tmp = torch.empty((q.shape[0] * q.shape[1], q.shape[2]),
+                          device=q.device,
+                          dtype=torch.float32)
+        L = torch.empty((q.shape[0] * q.shape[1], q.shape[2]),
+                        device=q.device,
+                        dtype=torch.float32)
+        m = torch.empty((q.shape[0] * q.shape[1], q.shape[2]),
+                        device=q.device,
+                        dtype=torch.float32)
         num_warps = 4 if Lk <= 64 else 8
 
         _fwd_kernel[grid](
@@ -402,17 +429,17 @@ class _attention(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, do):
-        q, k, v, o, l, m = ctx.saved_tensors
+        q, k, v, o, denom, m = ctx.saved_tensors
         do = do.contiguous()
         dq = torch.zeros_like(q, dtype=torch.float32)
         dk = torch.empty_like(k)
         dv = torch.empty_like(v)
         do_scaled = torch.empty_like(do)
-        delta = torch.empty_like(l)
-        _bwd_preprocess[(ctx.grid[0] * ctx.grid[1],)](
+        delta = torch.empty_like(denom)
+        _bwd_preprocess[(ctx.grid[0] * ctx.grid[1], )](
             o,
             do,
-            l,
+            denom,
             do_scaled,
             delta,
             BLOCK_M=ctx.BLOCK,
@@ -421,7 +448,7 @@ class _attention(torch.autograd.Function):
 
         # NOTE: kernel currently buggy for other values of `num_warps`
         num_warps = 8
-        _bwd_kernel[(ctx.grid[1],)](
+        _bwd_kernel[(ctx.grid[1], )](
             q,
             k,
             v,
@@ -431,7 +458,7 @@ class _attention(torch.autograd.Function):
             dq,
             dk,
             dv,
-            l,
+            denom,
             m,
             delta,
             q.stride(0),

@@ -86,7 +86,7 @@ grep -c "sync_block"                         ~/.triton/dump/<hash>/kernel.ttadap
 This is the fast way to confirm a kernel's scopes/syncs/attributes survived lowering before
 spending a remote compile+bench cycle.
 
-### Running the FULL MLIR pipeline locally 
+### Running the FULL MLIR pipeline locally
 
 The linalg→bin stage can run locally far enough to surface real backend errors
 (`Exceeds vector capacity`, `ub overflow`, pass crashes). The blocker is that
@@ -111,7 +111,7 @@ With `TRITON_ASCEND_ARCH=Ascend910_9589` (no NPU needed):
   `bisheng` host-stub compiler: "Cannot find bisheng under $PATH" means the
   whole device-side MLIR pipeline PASSED.
 
-### Attributing a perf difference to codegen 
+### Attributing a perf difference to codegen
 
 When two kernel variants are bit-identical but differ in speed, diff what the
 compiler DID, not the source: locally re-run the a5 binary on each variant's
