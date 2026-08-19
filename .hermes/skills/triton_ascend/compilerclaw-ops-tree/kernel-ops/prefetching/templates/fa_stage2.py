@@ -5,6 +5,18 @@ import triton.language.extra.cann.extension as al
 import triton.extension.buffer.language as bl
 import triton.runtime.driver as driver
 
+_CAUSAL_MASK_CACHE = {}
+
+
+def _causal_mask(n_ctx, device):
+    key = (device, n_ctx)
+    mask = _CAUSAL_MASK_CACHE.get(key)
+    if mask is None:
+        mask = torch.ones((n_ctx, n_ctx), device=device,
+                          dtype=torch.bool).triu(diagonal=1)
+        _CAUSAL_MASK_CACHE[key] = mask
+    return mask
+
 
 @triton.jit
 def vec_prefree_s_ub():
@@ -67,14 +79,12 @@ def _qk_matmul(q, k_block_ptr, start_n, qk_ub0, qk_ub1, sid):
 
 
 @triton.jit
-def _pv_matmul(v_base, p_l1_0, p_l1_1, pv_ub0, pv_ub1, start_n, pvid,
-               stride_vk, stride_vn, BLOCK_M: tl.constexpr,
-               BLOCK_N: tl.constexpr, BLOCK_DMODEL: tl.constexpr):
-    # Cube side: wait for P in L1 (event 4) -> raw V chunk load (in-loop
-    # block-ptr V loads hit the PlanMemory empty-addrs bug on 9.0-gen
-    # bishengir; stride_vk = N(row) stride, stride_vn = D(col) stride) ->
-    # PV dot -> release the p_l1 slot (event 6) -> wait for the pv slot
-    # (event 10) -> fixpipe to UB -> signal vector (event 8).
+def _pv_matmul(v_block_ptr, p_l1_0, p_l1_1, pv_ub0, pv_ub1, start_n, pvid,
+               BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
+               BLOCK_DMODEL: tl.constexpr):
+    # Cube side: wait for P in L1 (event 4) -> V block load -> PV dot ->
+    # release the p_l1 slot (event 6) -> wait for the pv slot (event 10) ->
+    # fixpipe to UB -> signal vector (event 8).
     al.sync_block_wait("vector", "cube", 4, al.PIPE.PIPE_MTE3,
                        al.PIPE.PIPE_MTE1)
 
@@ -85,10 +95,7 @@ def _pv_matmul(v_base, p_l1_0, p_l1_1, pv_ub0, pv_ub1, start_n, pvid,
         p_l1 = bl.to_tensor(p_l1_1, target_shape=[BLOCK_M, BLOCK_N])
         pv_ub = bl.to_tensor(pv_ub1)
 
-    offs_nc = tl.arange(0, BLOCK_N)
-    offs_dc = tl.arange(0, BLOCK_DMODEL)
-    vc = tl.load(v_base + (start_n + offs_nc)[:, None] * stride_vk +
-                 offs_dc[None, :] * stride_vn)
+    vc = tl.load(tl.advance(v_block_ptr, (start_n, 0)))
     pv_c = tl.dot(p_l1, vc)
     al.sync_block_set("cube", "vector", 6, al.PIPE.PIPE_MTE1,
                       al.PIPE.PIPE_MTE3)
@@ -102,7 +109,7 @@ def _pv_matmul(v_base, p_l1_0, p_l1_1, pv_ub0, pv_ub1, start_n, pvid,
 
 
 @triton.jit
-def _softmax_rows_bn64(qk, m_i, sm_scale, m_base, start_n, SUB_M: tl.constexpr,
+def _softmax_rows_bn64(qk, causal_mask, m_i, sm_scale, SUB_M: tl.constexpr,
                        BLOCK_N: tl.constexpr, IS_CAUSAL: tl.constexpr):
     # Row-wise softmax stats over [SUB_M, BLOCK_N] with single-shot (256B f32)
     # row ops, as an outlined SIMD vector function: loop 1 -> per-row max m_ij;
@@ -120,14 +127,14 @@ def _softmax_rows_bn64(qk, m_i, sm_scale, m_base, start_n, SUB_M: tl.constexpr,
             row = al.extract_slice(qk, (i, 0), (1, BLOCK_N), (1, 1))
             row = row * sm_scale
             if IS_CAUSAL:
-                cols = start_n + tl.arange(0, BLOCK_N)
-                row += tl.where((m_base + i) >= cols[None, :], 0.0,
-                                float("-inf"))
+                mask = al.extract_slice(causal_mask, (i, 0), (1, BLOCK_N),
+                                        (1, 1))
+                row += tl.where(mask != 0, -1.0e4, 0.0)
             qk_scale = al.insert_slice(qk_scale, row, (i, 0), (1, BLOCK_N),
                                        (1, 1))
-            m_row = tl.max(row, 1)  # [1]
+            m_row = tl.max(row, 1, propagate_nan=True)  # [1]
             m_ij = al.insert_slice(m_ij, m_row, (i, ), (1, ), (1, ))
-        m_ij = tl.maximum(m_i, m_ij)
+        m_ij = tl.maximum(m_i, m_ij, propagate_nan=tl.PropagateNan.ALL)
         for i in range(SUB_M):
             row = al.extract_slice(qk_scale, (i, 0), (1, BLOCK_N), (1, 1))
             m_r = al.extract_slice(m_ij, (i, ), (1, ), (1, ))  # [1]
@@ -142,9 +149,8 @@ def _softmax_rows_bn64(qk, m_i, sm_scale, m_base, start_n, SUB_M: tl.constexpr,
 
 
 @triton.jit
-def _softmax_rows_bn128(qk, m_i, sm_scale, m_base, start_n,
-                        SUB_M: tl.constexpr, BLOCK_N: tl.constexpr,
-                        IS_CAUSAL: tl.constexpr):
+def _softmax_rows_bn128(qk, causal_mask, m_i, sm_scale, SUB_M: tl.constexpr,
+                        BLOCK_N: tl.constexpr, IS_CAUSAL: tl.constexpr):
     # BLOCK_N=128: split rows into legal 64-wide fp32 halves. Keep the max
     # loop and exp/sum/P loop as separate outlined SIMD functions.
     HALF: tl.constexpr = BLOCK_N // 2
@@ -167,20 +173,23 @@ def _softmax_rows_bn128(qk, m_i, sm_scale, m_base, start_n,
             row_hi = al.extract_slice(qk, (i, off_hi), (1, HALF),
                                       (1, 1)) * sm_scale
             if IS_CAUSAL:
-                cols = start_n + tl.arange(0, HALF)
-                row_lo += tl.where((m_base + i) >= cols[None, :], 0.0,
-                                   float("-inf"))
-                row_hi += tl.where((m_base + i) >= (cols + HALF)[None, :], 0.0,
-                                   float("-inf"))
+                mask_lo = al.extract_slice(causal_mask, (i, 0), (1, HALF),
+                                           (1, 1))
+                mask_hi = al.extract_slice(causal_mask, (i, HALF), (1, HALF),
+                                           (1, 1))
+                row_lo += tl.where(mask_lo != 0, -1.0e4, 0.0)
+                row_hi += tl.where(mask_hi != 0, -1.0e4, 0.0)
             qk_scale = al.insert_slice(qk_scale, row_lo, (i, 0), (1, HALF),
                                        (1, 1))
             qk_scale = al.insert_slice(qk_scale, row_hi, (i, off_hi),
                                        (1, HALF), (1, 1))
-            row_max = tl.maximum(row_lo, row_hi)
-            row_max_agg = tl.max(row_max, 1)
+            row_max = tl.maximum(row_lo,
+                                 row_hi,
+                                 propagate_nan=tl.PropagateNan.ALL)
+            row_max_agg = tl.max(row_max, 1, propagate_nan=True)
             tmp_max = al.insert_slice(tmp_max, row_max_agg, (i, ), (1, ),
                                       (1, ))
-        m_ij = tl.maximum(m_i, tmp_max)
+        m_ij = tl.maximum(m_i, tmp_max, propagate_nan=tl.PropagateNan.ALL)
     with al.scope(vector_mode="simd", outline=True):
         l_ij = tl.zeros([SUB_M], dtype=tl.float32)
         for i in range(SUB_M):
@@ -204,8 +213,8 @@ def _softmax_rows_bn128(qk, m_i, sm_scale, m_base, start_n,
 
 @triton.jit
 def _softmax(qk_ub0, qk_ub1, p_l1_0, p_l1_1, m_i, l_i, alpha_scale_a,
-             alpha_scale_b, sm_scale, row0, m_base, start_n, sid,
-             SUB_M: tl.constexpr, BLOCK_N: tl.constexpr,
+             alpha_scale_b, sm_scale, row0, m_base, start_n, sid, ATTEN_MASK,
+             N_CTX: tl.constexpr, SUB_M: tl.constexpr, BLOCK_N: tl.constexpr,
              IS_CAUSAL: tl.constexpr):
     # Vector side: everything except the acc update — wait for QK (event 0),
     # row-wise stats + P via the outlined SIMD sub-functions, online running
@@ -216,11 +225,16 @@ def _softmax(qk_ub0, qk_ub1, p_l1_0, p_l1_1, m_i, l_i, alpha_scale_a,
         qk = bl.to_tensor(qk_ub0)  # [SUB_M, BLOCK_N] this core's half
     else:
         qk = bl.to_tensor(qk_ub1)
+    causal_mask = tl.zeros([SUB_M, BLOCK_N], dtype=tl.int8)
+    if IS_CAUSAL:
+        mask_offsets = ((m_base + tl.arange(0, SUB_M))[:, None] * N_CTX +
+                        start_n + tl.arange(0, BLOCK_N)[None, :])
+        causal_mask = tl.load(ATTEN_MASK + mask_offsets)
     if BLOCK_N == 128:
-        m_ij, l_ij, p = _softmax_rows_bn128(qk, m_i, sm_scale, m_base, start_n,
+        m_ij, l_ij, p = _softmax_rows_bn128(qk, causal_mask, m_i, sm_scale,
                                             SUB_M, BLOCK_N, IS_CAUSAL)
     else:
-        m_ij, l_ij, p = _softmax_rows_bn64(qk, m_i, sm_scale, m_base, start_n,
+        m_ij, l_ij, p = _softmax_rows_bn64(qk, causal_mask, m_i, sm_scale,
                                            SUB_M, BLOCK_N, IS_CAUSAL)
     with al.scope(vector_mode="simd", outline=True, no_inline=True):
         alpha = tl.exp(m_i - m_ij)
@@ -273,6 +287,7 @@ def _fwd_kernel(
     Q,
     K,
     V,
+    ATTEN_MASK,
     sm_scale,
     TMP,
     L,
@@ -362,6 +377,14 @@ def _fwd_kernel(
                 block_shape=(BLOCK_N, BLOCK_DMODEL),
                 order=(1, 0),
             )
+            v_block_ptr = tl.make_block_ptr(
+                base=V + qkv_offset,
+                shape=(N_CTX, BLOCK_DMODEL),
+                strides=(stride_vk, stride_vn),
+                offsets=(0, 0),
+                block_shape=(BLOCK_N, BLOCK_DMODEL),
+                order=(1, 0),
+            )
 
             q = tl.load(q_block_ptr)
             cube_prefree_p_l1()
@@ -374,9 +397,9 @@ def _fwd_kernel(
                                qk_ub0, qk_ub1, sid)
                     sid += 1
                 for batch_idx in range(0, batch_size, 1):
-                    _pv_matmul(V + qkv_offset, p_l1_0, p_l1_1, pv_ub0, pv_ub1,
-                               start_n + batch_idx * BLOCK_N, pvid, stride_vk,
-                               stride_vn, BLOCK_M, BLOCK_N, BLOCK_DMODEL)
+                    _pv_matmul(v_block_ptr, p_l1_0, p_l1_1, pv_ub0, pv_ub1,
+                               start_n + batch_idx * BLOCK_N, pvid, BLOCK_M,
+                               BLOCK_N, BLOCK_DMODEL)
                     pvid += 1
             cube_postwait_s_ub()
             cube_postwait_pv_ub()
@@ -415,8 +438,8 @@ def _fwd_kernel(
                     (m_i, l_i, alpha_scale_a, alpha_scale_b) = _softmax(
                         qk_ub0, qk_ub1, p_l1_0, p_l1_1, m_i, l_i,
                         alpha_scale_a, alpha_scale_b, sm_scale, row0, m_base,
-                        start_n + batch_idx * BLOCK_N, sid, SUB_M, BLOCK_N,
-                        IS_CAUSAL)
+                        start_n + batch_idx * BLOCK_N, sid, ATTEN_MASK, N_CTX,
+                        SUB_M, BLOCK_N, IS_CAUSAL)
                     sid += 1
                 for batch_idx in range(0, batch_size, 1):
                     acc = _acc_update(acc, pv_ub0, pv_ub1, alpha_scale_a,
@@ -463,11 +486,16 @@ class _attention(torch.autograd.Function):
         m = torch.empty((q.shape[0] * q.shape[1], q.shape[2]),
                         device=q.device,
                         dtype=torch.float32)
+        if causal:
+            atten_mask = _causal_mask(q.shape[2], q.device)
+        else:
+            atten_mask = torch.empty((1, ), device=q.device, dtype=torch.bool)
 
         _fwd_kernel[grid](
             q,
             k,
             v,
+            atten_mask,
             sm_scale,
             tmp,
             L,

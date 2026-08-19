@@ -118,7 +118,7 @@ Docs: https://ascend.github.io/triton-ascend/sources/python-api/triton.language.
 | `tl.erf(x)` | Element-wise error function |
 | `tl.sigmoid(x)` | Element-wise sigmoid |
 | `tl.softmax(x)` | Element-wise softmax |
-| `tl.maximum(x, y)` | Element-wise maximum |
+| `tl.maximum(x, y, propagate_nan?)` | Element-wise maximum; `propagate_nan=tl.PropagateNan.ALL` explicitly propagates NaNs from either operand |
 | `tl.minimum(x, y)` | Element-wise minimum |
 | `tl.fma(x, y, z)` | Element-wise fused multiply-add |
 | `tl.div_rn(x, y)` | Element-wise precise division (IEEE round-to-nearest) |
@@ -130,12 +130,17 @@ Docs: https://ascend.github.io/triton-ascend/sources/python-api/triton.language.
 | API | Description |
 |---|---|
 | `tl.sum(x, axis)` | Sum along `axis` |
-| `tl.max(x, axis)` | Maximum along `axis` |
+| `tl.max(x, axis, propagate_nan?)` | Maximum along `axis`; `propagate_nan=True` requests NaN propagation |
 | `tl.min(x, axis)` | Minimum along `axis` |
 | `tl.argmax(x, axis)` | Index of maximum along `axis` |
 | `tl.argmin(x, axis)` | Index of minimum along `axis` |
 | `tl.xor_sum(x, axis)` | XOR reduction along `axis` |
 | `tl.reduce(x, axis, combine_fn)` | Custom reduction with `combine_fn` |
+
+`propagate_nan` is semantically significant and may also change Ascend backend
+lowering. When tuning max-heavy kernels, benchmark the explicit forms while
+preserving required NaN behavior. For online softmax, use the same policy for
+the tile reduction and running merge rather than mixing defaults.
 
 ### Scan / Sort Ops
 

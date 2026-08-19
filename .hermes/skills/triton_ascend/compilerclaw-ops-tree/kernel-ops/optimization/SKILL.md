@@ -346,6 +346,22 @@ Do NOT reassign its return. Call `al.compile_hint` BEFORE `al.multibuffer` on th
 When using `tl.dot(a, b, acc)` in-place accumulation, prefer it over `al.multibuffer` —
 larger gain, eliminates UB overflow risk.
 
+### Max reductions and staged masks
+
+- For row-wise max/online-softmax paths, A/B explicit NaN semantics:
+  `tl.max(x, axis, propagate_nan=True)` and
+  `tl.maximum(a, b, propagate_nan=tl.PropagateNan.ALL)`. On Ascend these
+  semantics can select a different reduction lowering; require correctness and
+  same-run hardware evidence rather than treating the flags as performance-neutral.
+- If a causal or structural predicate is rebuilt as broadcasted row/column
+  indices in every loop iteration, benchmark a cached host mask and contiguous
+  mask-tile load. Include mask creation in end-to-end measurements, even when a
+  filtered device-kernel profile excludes it.
+- Do not pass a GM mask pointer directly into an outlined SIMD helper when the
+  helper's argument is inferred as UB. Load the complete tile in the caller and
+  pass the UB-resident tensor through the outlined helper graph; otherwise
+  BiSheng may fail with a GM/UB `memref` operand-type mismatch.
+
 ---
 
 ## Compounding Effects — Matmul Optimizations Are Multiple
@@ -462,6 +478,7 @@ See `references/two_phase_reduction_threshold.md` for full data.
 ## Reference files
 
 ### Local references
+- `../prefetching/references/stage2-performance-model.md` — FlashAttention Cube/Vector scheduling, outlined row-softmax lowering, explicit max semantics, cached causal-mask attribution, and GM-to-UB helper-boundary rules
 - `references/kernel-status-flag-timing.md` — When to set kernel_status flags (verified/recorded) without them being reset by pipeline advances
 - `references/trace_comparison_methodology.md` — Sub-kernel trace comparison methodology
 - `references/two_phase_reduction_threshold.md` — Two-phase reduction tile-count sweet spot

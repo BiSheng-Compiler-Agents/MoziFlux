@@ -174,7 +174,8 @@ def _run_torch_ref(q, k, v, sm_scale, causal):
 
 def _unsupported_reason(key, q, causal, BLOCK_M, BLOCK_N):
     if key == "baseline":
-        core_dim = triton.cdiv(q.shape[2], BLOCK_M) * q.shape[0] * q.shape[1]
+        # The original beta-form baseline fixes BLOCK_M=BLOCK_N=64 internally.
+        core_dim = triton.cdiv(q.shape[2], 64) * q.shape[0] * q.shape[1]
         if core_dim > 65535:
             return f"single baseline launch coreDim={core_dim} exceeds 65535"
         if causal:
@@ -186,7 +187,7 @@ def _run_provider(key, q, k, v, sm_scale, causal, BLOCK_M, BLOCK_N):
     if key == "torch_ref":
         return _run_torch_ref(q, k, v, sm_scale, causal)
     if key == "baseline":
-        return _base_mod.attention(q, k, v, sm_scale, causal, BLOCK_M, BLOCK_N)
+        return _base_mod.attention(q, k, v, sm_scale, causal)
     if key == "v1":
         return _v1_mod.attention(q, k, v, sm_scale, causal, BLOCK_M, BLOCK_N)
     if key == "v2":

@@ -239,6 +239,45 @@ IR through `InferHIVMMemScope`, which is sufficient for structural counts.
    be attributed to this change. BN64 and BN128 correctness pass; benchmark
    BN64 separately before claiming a speedup.
 
+### Max-reduction semantics and causal-mask staging
+
+Later same-run ablations isolated two additional vector-side controls:
+
+1. **Specify NaN propagation consistently.** Use
+   `tl.max(row, axis, propagate_nan=True)` for the row reduction and
+   `tl.maximum(running, tile, propagate_nan=tl.PropagateNan.ALL)` for the
+   running merge (including the BN128 half merge). Removing only these options
+   from the otherwise identical schedule regressed representative noncausal
+   shapes from 219.14→269.72 ms and 3.45→4.16 ms; the no-flag form returned to
+   V1-class performance. The flags select a different max-reduction lowering on
+   this backend, not merely documentation of equivalent source semantics.
+
+2. **Stage a cached causal mask instead of rebuilding broadcast indices.** Cache
+   one upper-triangular bool mask per `(device, N_CTX)`, load the contiguous
+   `[SUB_M, BLOCK_N]` tile in the vector caller, and pass that tensor to the
+   row-wise outlined helper. Holding max semantics constant, replacing the
+   staged tile with generated row/column comparisons regressed representative
+   causal shapes from 129.44→192.99 ms and 2.75→4.33 ms. The custom-kernel
+   profiler excludes first-use mask construction, so report end-to-end cost
+   separately and do not rebuild the O(N_CTX²) mask on every call.
+
+3. **Respect memory space at outlined boundaries.** Passing the GM mask pointer
+   directly through an outlined SIMD helper graph failed BiSheng lowering with
+   `expected memref ... <ub>, provided ... <gm>`. Load the full mask tile in the
+   non-outlined caller, then pass the UB-resident tensor through the helper
+   chain. This also keeps the outlined row helper focused on extract/compute/
+   insert operations.
+
+Control ablations found no material gain from helper call syntax itself, moving
+CV buffers inside versus outside the persistent tile loop, loop-carried block
+pointers, constexpr launch metadata, mutating QK before `exp`, or delaying state
+assignment. Treat the max semantics and staged predicate as the load-bearing
+changes; do not copy the surrounding syntax without an A/B.
+
+The pattern transferred to the ping-pong and preload schedules: across eight
+canonical shapes, V2 improved 1.3249x geometric mean and V3 improved 1.3926x,
+with every specialization preserving its prior numerical error.
+
 ### Why final V2 beats beta-free V1
 
 Same-run all-shape geometric mean: V2 is 1.2512x faster than V1 (noncausal

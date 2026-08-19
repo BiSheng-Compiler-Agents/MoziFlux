@@ -64,6 +64,7 @@ def _fwd_kernel(
     k_ptrs = K + off_k
     v_ptrs = V + off_v
     # initialize pointer to m and l
+    t_ptrs = TMP + off_hz * N_CTX + offs_m
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
@@ -84,15 +85,25 @@ def _fwd_kernel(
         if IS_CAUSAL:
             qk += tl.where(offs_m[:, None] >= (start_n + offs_n[None, :]), 0,
                            float("-inf"))
-        # -- compute running max, beta-free p, and l_ij
+        # -- compute m_ij, p, l_ij
         m_ij = tl.max(qk, 1)
+        p = tl.exp(qk - m_ij[:, None])
+        l_ij = tl.sum(p, 1)
+        # -- update m_i and l_i
         m_i_new = tl.maximum(m_i, m_ij)
         alpha = tl.exp(m_i - m_i_new)
-        p = tl.exp(qk - m_i_new[:, None])
-        l_ij = tl.sum(p, 1)
-        l_i_new = alpha * l_i + l_ij
-        # -- update unnormalized output numerator --
-        acc = acc * alpha[:, None]
+        beta = tl.exp(m_ij - m_i_new)
+        l_i_new = alpha * l_i + beta * l_ij
+        # -- update output accumulator --
+        # scale p
+        p_scale = beta / l_i_new
+        p = p * p_scale[:, None]
+        # scale acc
+        acc_scale = l_i / l_i_new * alpha
+        tl.store(t_ptrs, acc_scale)
+        acc_scale = tl.load(t_ptrs)  # BUG: have to store and immediately load
+        acc = acc * acc_scale[:, None]
+        # update acc
         v = tl.load(v_ptrs + start_n * stride_vk)
         p = p.to(v.dtype)
         acc += tl.dot(p, v)
@@ -112,7 +123,7 @@ def _fwd_kernel(
     off_o = off_hz * stride_oh + offs_m[:, None] * stride_om + offs_n[
         None, :] * stride_on
     out_ptrs = Out + off_o
-    tl.store(out_ptrs, acc / l_i[:, None])
+    tl.store(out_ptrs, acc)
 
 
 @triton.jit
@@ -254,12 +265,14 @@ def _bwd_kernel(
 class _attention(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, q, k, v, sm_scale, causal=True, BLOCK_M=64, BLOCK_N=64):
+    def forward(ctx, q, k, v, sm_scale, causal=True):
+        BLOCK = 64
         # shape constraints
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
         assert Lq == Lk and Lk == Lv
         assert Lk in {16, 32, 64, 128}
         o = torch.empty_like(q)
+        grid = (triton.cdiv(q.shape[2], BLOCK), q.shape[0] * q.shape[1])
         tmp = torch.empty((q.shape[0] * q.shape[1], q.shape[2]),
                           device=q.device,
                           dtype=torch.float32)
@@ -270,7 +283,7 @@ class _attention(torch.autograd.Function):
                         device=q.device,
                         dtype=torch.float32)
         num_warps = 4 if Lk <= 64 else 8
-        grid = (triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1])
+
         _fwd_kernel[grid](
             q,
             k,
@@ -299,17 +312,16 @@ class _attention(torch.autograd.Function):
             q.shape[0],
             q.shape[1],
             q.shape[2],
-            BLOCK_M=BLOCK_M,
-            BLOCK_N=BLOCK_N,
+            BLOCK_M=BLOCK,
+            BLOCK_N=BLOCK,
             BLOCK_DMODEL=Lk,
             IS_CAUSAL=causal,
             num_warps=num_warps,
             num_stages=2,
         )
         ctx.save_for_backward(q, k, v, o, L, m)
-        ctx.BLOCK = BLOCK_M
-        ctx.BLOCK_N = BLOCK_N
-        ctx.grid = (triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1])
+        ctx.BLOCK = BLOCK
+        ctx.grid = grid
         ctx.sm_scale = sm_scale
         ctx.BLOCK_DMODEL = Lk
         return o
@@ -365,13 +377,12 @@ class _attention(torch.autograd.Function):
             q.shape[2],
             ctx.grid[0],
             BLOCK_M=ctx.BLOCK,
-            BLOCK_N=ctx.BLOCK_N,
+            BLOCK_N=ctx.BLOCK,
             BLOCK_DMODEL=ctx.BLOCK_DMODEL,
             num_warps=num_warps,
             num_stages=1,
         )
-        return dq.to(q.dtype), dk, dv, None, None, None, None
+        return dq.to(q.dtype), dk, dv, None
 
 
-def attention(q, k, v, sm_scale, causal=True, BLOCK_M=64, BLOCK_N=64):
-    return _attention.apply(q, k, v, sm_scale, causal, BLOCK_M, BLOCK_N)
+attention = _attention.apply

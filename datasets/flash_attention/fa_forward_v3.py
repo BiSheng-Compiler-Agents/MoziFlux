@@ -1,19 +1,21 @@
-# [2022-10-23] Downloaded from https://github.com/openai/triton/blob/master/python/tutorials/06-fused-attention.py
-# for benchmarking.
-# We fixed a few dtype cast to make it work for bf16
-"""
-Fused Attention
-===============
-This is a Triton implementation of the Flash Attention algorithm
-(see: Dao et al., https://arxiv.org/pdf/2205.14135v2.pdf; Rabe and Staats https://arxiv.org/pdf/2112.05682v2.pdf)
-"""
-
 import torch
 import triton
 import triton.language as tl
 import triton.language.extra.cann.extension as al
 import triton.extension.buffer.language as bl
 import triton.runtime.driver as driver
+
+_CAUSAL_MASK_CACHE = {}
+
+
+def _causal_mask(n_ctx, device):
+    key = (device, n_ctx)
+    mask = _CAUSAL_MASK_CACHE.get(key)
+    if mask is None:
+        mask = torch.ones((n_ctx, n_ctx), device=device,
+                          dtype=torch.bool).triu(diagonal=1)
+        _CAUSAL_MASK_CACHE[key] = mask
+    return mask
 
 
 @triton.jit
@@ -111,9 +113,10 @@ def _pv_matmul(v_ptr, p_l1_0, p_l1_1, pv_ub0, pv_ub1, pv_l0c, pvid,
 
 
 @triton.jit
-def _softmax_rows_bn64(qk, p_buf, m_i, sm_scale, m_base, start_n,
-                       SUB_M: tl.constexpr, BLOCK_N: tl.constexpr,
-                       IS_CAUSAL: tl.constexpr, NEED_UPDATE: tl.constexpr):
+def _softmax_rows_bn64(qk, p_buf, m_i, sm_scale, m_base, start_n, causal_mask,
+                       N_CTX: tl.constexpr, SUB_M: tl.constexpr,
+                       BLOCK_N: tl.constexpr, IS_CAUSAL: tl.constexpr,
+                       NEED_UPDATE: tl.constexpr):
     if NEED_UPDATE:
         tmp_max = bl.alloc(tl.float32, [SUB_M], al.ascend_address_space.UB)
         tmp_max = bl.to_tensor(tmp_max)
@@ -130,18 +133,18 @@ def _softmax_rows_bn64(qk, p_buf, m_i, sm_scale, m_base, start_n,
             row = al.extract_slice(qk, (i, 0), (1, BLOCK_N), (1, 1))
             row = row * sm_scale
             if IS_CAUSAL:
-                cols = start_n + tl.arange(0, BLOCK_N)
-                row += tl.where((m_base + i) >= cols[None, :], 0.0,
-                                float("-inf"))
+                mask = al.extract_slice(causal_mask, (i, 0), (1, BLOCK_N),
+                                        (1, 1))
+                row += tl.where(mask != 0, -1.0e4, 0.0)
             qk_scale = al.insert_slice(qk_scale, row, (i, 0), (1, BLOCK_N),
                                        (1, 1))
-            m_row = tl.max(row, 1)
+            m_row = tl.max(row, 1, propagate_nan=True)
             if NEED_UPDATE:
                 tmp_max = al.insert_slice(tmp_max, m_row, (i, ), (1, ), (1, ))
             else:
                 m_ij = al.insert_slice(m_ij, m_row, (i, ), (1, ), (1, ))
         if NEED_UPDATE:
-            m_ij = tl.maximum(m_i, tmp_max)
+            m_ij = tl.maximum(m_i, tmp_max, propagate_nan=tl.PropagateNan.ALL)
         for i in range(SUB_M):
             row = al.extract_slice(qk_scale, (i, 0), (1, BLOCK_N), (1, 1))
             m_r = al.extract_slice(m_ij, (i, ), (1, ), (1, ))
@@ -157,9 +160,10 @@ def _softmax_rows_bn64(qk, p_buf, m_i, sm_scale, m_base, start_n,
 
 
 @triton.jit
-def _softmax_rows_bn128(qk, p_buf, m_i, sm_scale, m_base, start_n,
-                        SUB_M: tl.constexpr, BLOCK_N: tl.constexpr,
-                        IS_CAUSAL: tl.constexpr, NEED_UPDATE: tl.constexpr):
+def _softmax_rows_bn128(qk, p_buf, m_i, sm_scale, m_base, start_n, causal_mask,
+                        N_CTX: tl.constexpr, SUB_M: tl.constexpr,
+                        BLOCK_N: tl.constexpr, IS_CAUSAL: tl.constexpr,
+                        NEED_UPDATE: tl.constexpr):
     HALF: tl.constexpr = BLOCK_N // 2
     m_ij = bl.alloc(tl.float32, [SUB_M], al.ascend_address_space.UB)
     m_ij = bl.to_tensor(m_ij)
@@ -180,24 +184,27 @@ def _softmax_rows_bn128(qk, p_buf, m_i, sm_scale, m_base, start_n,
             row_hi = al.extract_slice(qk, (i, off_hi), (1, HALF),
                                       (1, 1)) * sm_scale
             if IS_CAUSAL:
-                cols = start_n + tl.arange(0, HALF)
-                row_lo += tl.where((m_base + i) >= cols[None, :], 0.0,
-                                   float("-inf"))
-                row_hi += tl.where((m_base + i) >= (cols + HALF)[None, :], 0.0,
-                                   float("-inf"))
+                mask_lo = al.extract_slice(causal_mask, (i, 0), (1, HALF),
+                                           (1, 1))
+                mask_hi = al.extract_slice(causal_mask, (i, HALF), (1, HALF),
+                                           (1, 1))
+                row_lo += tl.where(mask_lo != 0, -1.0e4, 0.0)
+                row_hi += tl.where(mask_hi != 0, -1.0e4, 0.0)
             qk_scale = al.insert_slice(qk_scale, row_lo, (i, 0), (1, HALF),
                                        (1, 1))
             qk_scale = al.insert_slice(qk_scale, row_hi, (i, off_hi),
                                        (1, HALF), (1, 1))
-            row_max = tl.maximum(row_lo, row_hi)
-            row_max_agg = tl.max(row_max, 1)
+            row_max = tl.maximum(row_lo,
+                                 row_hi,
+                                 propagate_nan=tl.PropagateNan.ALL)
+            row_max_agg = tl.max(row_max, 1, propagate_nan=True)
             if NEED_UPDATE:
                 tmp_max = al.insert_slice(tmp_max, row_max_agg, (i, ), (1, ),
                                           (1, ))
             else:
                 m_ij = al.insert_slice(m_ij, row_max_agg, (i, ), (1, ), (1, ))
         if NEED_UPDATE:
-            m_ij = tl.maximum(m_i, tmp_max)
+            m_ij = tl.maximum(m_i, tmp_max, propagate_nan=tl.PropagateNan.ALL)
     with al.scope(vector_mode="simd", outline=True):
         l_ij = tl.zeros([SUB_M], dtype=tl.float32)
         for i in range(SUB_M):
@@ -231,16 +238,19 @@ def _online_update(m_i, l_i, m_new, l_ij, SUB_M: tl.constexpr):
 
 @triton.jit
 def _softmax_with_mask_with_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf,
-                                   sm_scale, m_base, start_n,
-                                   SUB_M: tl.constexpr, BLOCK_N: tl.constexpr):
+                                   sm_scale, m_base, start_n, ATTEN_MASK,
+                                   N_CTX: tl.constexpr, SUB_M: tl.constexpr,
+                                   BLOCK_N: tl.constexpr):
     m_i = bl.to_tensor(m_i_buf)
     l_i = bl.to_tensor(l_i_buf)
     if BLOCK_N == 64:
         m_new, l_ij = _softmax_rows_bn64(qk, p_buf, m_i, sm_scale, m_base,
-                                         start_n, SUB_M, BLOCK_N, True, True)
+                                         start_n, ATTEN_MASK, N_CTX, SUB_M,
+                                         BLOCK_N, True, True)
     else:
         m_new, l_ij = _softmax_rows_bn128(qk, p_buf, m_i, sm_scale, m_base,
-                                          start_n, SUB_M, BLOCK_N, True, True)
+                                          start_n, ATTEN_MASK, N_CTX, SUB_M,
+                                          BLOCK_N, True, True)
     m_new, l_new, acc_scale = _online_update(m_i, l_i, m_new, l_ij, SUB_M)
     al.copy(bl.to_buffer(m_new, space=al.ascend_address_space.UB), m_i_buf)
     al.copy(bl.to_buffer(l_new, space=al.ascend_address_space.UB), l_i_buf)
@@ -250,16 +260,18 @@ def _softmax_with_mask_with_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf,
 
 @triton.jit
 def _softmax_no_mask_with_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf,
-                                 sm_scale, SUB_M: tl.constexpr,
-                                 BLOCK_N: tl.constexpr):
+                                 sm_scale, ATTEN_MASK, N_CTX: tl.constexpr,
+                                 SUB_M: tl.constexpr, BLOCK_N: tl.constexpr):
     m_i = bl.to_tensor(m_i_buf)
     l_i = bl.to_tensor(l_i_buf)
     if BLOCK_N == 64:
-        m_new, l_ij = _softmax_rows_bn64(qk, p_buf, m_i, sm_scale, 0, 0, SUB_M,
-                                         BLOCK_N, False, True)
+        m_new, l_ij = _softmax_rows_bn64(qk, p_buf, m_i, sm_scale, 0, 0,
+                                         ATTEN_MASK, N_CTX, SUB_M, BLOCK_N,
+                                         False, True)
     else:
         m_new, l_ij = _softmax_rows_bn128(qk, p_buf, m_i, sm_scale, 0, 0,
-                                          SUB_M, BLOCK_N, False, True)
+                                          ATTEN_MASK, N_CTX, SUB_M, BLOCK_N,
+                                          False, True)
     m_new, l_new, acc_scale = _online_update(m_i, l_i, m_new, l_ij, SUB_M)
     al.copy(bl.to_buffer(m_new, space=al.ascend_address_space.UB), m_i_buf)
     al.copy(bl.to_buffer(l_new, space=al.ascend_address_space.UB), l_i_buf)
@@ -269,16 +281,18 @@ def _softmax_no_mask_with_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf,
 
 @triton.jit
 def _softmax_with_mask_no_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf,
-                                 sm_scale, m_base, start_n,
-                                 SUB_M: tl.constexpr, BLOCK_N: tl.constexpr):
+                                 sm_scale, m_base, start_n, ATTEN_MASK,
+                                 N_CTX: tl.constexpr, SUB_M: tl.constexpr,
+                                 BLOCK_N: tl.constexpr):
     m_init = tl.zeros([SUB_M], dtype=tl.float32) - float("inf")
     if BLOCK_N == 64:
         m_new, l_new = _softmax_rows_bn64(qk, p_buf, m_init, sm_scale, m_base,
-                                          start_n, SUB_M, BLOCK_N, True, False)
+                                          start_n, ATTEN_MASK, N_CTX, SUB_M,
+                                          BLOCK_N, True, False)
     else:
         m_new, l_new = _softmax_rows_bn128(qk, p_buf, m_init, sm_scale, m_base,
-                                           start_n, SUB_M, BLOCK_N, True,
-                                           False)
+                                           start_n, ATTEN_MASK, N_CTX, SUB_M,
+                                           BLOCK_N, True, False)
     al.copy(bl.to_buffer(m_new, space=al.ascend_address_space.UB), m_i_buf)
     al.copy(bl.to_buffer(l_new, space=al.ascend_address_space.UB), l_i_buf)
     acc_scale = tl.zeros([SUB_M], dtype=tl.float32)
@@ -288,15 +302,17 @@ def _softmax_with_mask_no_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf,
 
 @triton.jit
 def _softmax_no_mask_no_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf,
-                               sm_scale, SUB_M: tl.constexpr,
-                               BLOCK_N: tl.constexpr):
+                               sm_scale, ATTEN_MASK, N_CTX: tl.constexpr,
+                               SUB_M: tl.constexpr, BLOCK_N: tl.constexpr):
     m_init = tl.zeros([SUB_M], dtype=tl.float32) - float("inf")
     if BLOCK_N == 64:
         m_new, l_new = _softmax_rows_bn64(qk, p_buf, m_init, sm_scale, 0, 0,
-                                          SUB_M, BLOCK_N, False, False)
+                                          ATTEN_MASK, N_CTX, SUB_M, BLOCK_N,
+                                          False, False)
     else:
         m_new, l_new = _softmax_rows_bn128(qk, p_buf, m_init, sm_scale, 0, 0,
-                                           SUB_M, BLOCK_N, False, False)
+                                           ATTEN_MASK, N_CTX, SUB_M, BLOCK_N,
+                                           False, False)
     al.copy(bl.to_buffer(m_new, space=al.ascend_address_space.UB), m_i_buf)
     al.copy(bl.to_buffer(l_new, space=al.ascend_address_space.UB), l_i_buf)
     acc_scale = tl.zeros([SUB_M], dtype=tl.float32)
@@ -306,30 +322,33 @@ def _softmax_no_mask_no_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf,
 
 @triton.jit
 def softmax_vf_select(need_mask, need_update, qk, p_buf, m_i_buf, l_i_buf,
-                      acc_scale_buf, sm_scale, m_base, start_n,
-                      SUB_M: tl.constexpr, BLOCK_N: tl.constexpr):
+                      acc_scale_buf, sm_scale, m_base, start_n, ATTEN_MASK,
+                      N_CTX: tl.constexpr, SUB_M: tl.constexpr,
+                      BLOCK_N: tl.constexpr):
     if need_mask & need_update:
         _softmax_with_mask_with_update(qk, p_buf, m_i_buf, l_i_buf,
                                        acc_scale_buf, sm_scale, m_base,
-                                       start_n, SUB_M, BLOCK_N)
+                                       start_n, ATTEN_MASK, N_CTX, SUB_M,
+                                       BLOCK_N)
     elif need_mask & ~need_update:
         _softmax_with_mask_no_update(qk, p_buf, m_i_buf, l_i_buf,
                                      acc_scale_buf, sm_scale, m_base, start_n,
-                                     SUB_M, BLOCK_N)
+                                     ATTEN_MASK, N_CTX, SUB_M, BLOCK_N)
     elif ~need_mask & need_update:
         _softmax_no_mask_with_update(qk, p_buf, m_i_buf, l_i_buf,
-                                     acc_scale_buf, sm_scale, SUB_M, BLOCK_N)
+                                     acc_scale_buf, sm_scale, ATTEN_MASK,
+                                     N_CTX, SUB_M, BLOCK_N)
     else:
         _softmax_no_mask_no_update(qk, p_buf, m_i_buf, l_i_buf, acc_scale_buf,
-                                   sm_scale, SUB_M, BLOCK_N)
+                                   sm_scale, ATTEN_MASK, N_CTX, SUB_M, BLOCK_N)
 
 
 @triton.jit
 def _softmax_v1(qk_ub0, qk_ub1, p_l1_0, p_l1_1, p, m_i_tb0, m_i_tb1, m_i_tb2,
                 l_i_tb0, l_i_tb1, l_i_tb2, acc_scale0, acc_scale1, acc_scale2,
                 sm_scale, vtaskId, v_s1_task_mod3, m_base, start_n, cast_dtype,
-                need_mask, need_update, SUB_M: tl.constexpr,
-                BLOCK_N: tl.constexpr):
+                need_mask, need_update, ATTEN_MASK, N_CTX: tl.constexpr,
+                SUB_M: tl.constexpr, BLOCK_N: tl.constexpr):
     al.sync_block_wait("cube", "vector", 0, al.PIPE.PIPE_FIX, al.PIPE.PIPE_V)
     sub_vec_id = al.sub_vec_id()
     if (vtaskId % 2) == 1:
@@ -337,43 +356,47 @@ def _softmax_v1(qk_ub0, qk_ub1, p_l1_0, p_l1_1, p, m_i_tb0, m_i_tb1, m_i_tb2,
     else:
         qk = bl.to_tensor(qk_ub1)
 
+    mask_offsets = ((m_base + tl.arange(0, SUB_M))[:, None] * N_CTX + start_n +
+                    tl.arange(0, BLOCK_N)[None, :])
+    causal_mask = tl.load(ATTEN_MASK + mask_offsets, mask=need_mask, other=0)
+
     scale_slot = (vtaskId - 1) % 3
     if v_s1_task_mod3 == 0 and scale_slot == 0:
         softmax_vf_select(need_mask, need_update, qk, p, m_i_tb0, l_i_tb0,
-                          acc_scale0, sm_scale, m_base, start_n, SUB_M,
-                          BLOCK_N)
+                          acc_scale0, sm_scale, m_base, start_n, causal_mask,
+                          N_CTX, SUB_M, BLOCK_N)
     elif v_s1_task_mod3 == 0 and scale_slot == 1:
         softmax_vf_select(need_mask, need_update, qk, p, m_i_tb0, l_i_tb0,
-                          acc_scale1, sm_scale, m_base, start_n, SUB_M,
-                          BLOCK_N)
+                          acc_scale1, sm_scale, m_base, start_n, causal_mask,
+                          N_CTX, SUB_M, BLOCK_N)
     elif v_s1_task_mod3 == 0 and scale_slot == 2:
         softmax_vf_select(need_mask, need_update, qk, p, m_i_tb0, l_i_tb0,
-                          acc_scale2, sm_scale, m_base, start_n, SUB_M,
-                          BLOCK_N)
+                          acc_scale2, sm_scale, m_base, start_n, causal_mask,
+                          N_CTX, SUB_M, BLOCK_N)
     elif v_s1_task_mod3 == 1 and scale_slot == 0:
         softmax_vf_select(need_mask, need_update, qk, p, m_i_tb1, l_i_tb1,
-                          acc_scale0, sm_scale, m_base, start_n, SUB_M,
-                          BLOCK_N)
+                          acc_scale0, sm_scale, m_base, start_n, causal_mask,
+                          N_CTX, SUB_M, BLOCK_N)
     elif v_s1_task_mod3 == 1 and scale_slot == 1:
         softmax_vf_select(need_mask, need_update, qk, p, m_i_tb1, l_i_tb1,
-                          acc_scale1, sm_scale, m_base, start_n, SUB_M,
-                          BLOCK_N)
+                          acc_scale1, sm_scale, m_base, start_n, causal_mask,
+                          N_CTX, SUB_M, BLOCK_N)
     elif v_s1_task_mod3 == 1 and scale_slot == 2:
         softmax_vf_select(need_mask, need_update, qk, p, m_i_tb1, l_i_tb1,
-                          acc_scale2, sm_scale, m_base, start_n, SUB_M,
-                          BLOCK_N)
+                          acc_scale2, sm_scale, m_base, start_n, causal_mask,
+                          N_CTX, SUB_M, BLOCK_N)
     elif v_s1_task_mod3 == 2 and scale_slot == 0:
         softmax_vf_select(need_mask, need_update, qk, p, m_i_tb2, l_i_tb2,
-                          acc_scale0, sm_scale, m_base, start_n, SUB_M,
-                          BLOCK_N)
+                          acc_scale0, sm_scale, m_base, start_n, causal_mask,
+                          N_CTX, SUB_M, BLOCK_N)
     elif v_s1_task_mod3 == 2 and scale_slot == 1:
         softmax_vf_select(need_mask, need_update, qk, p, m_i_tb2, l_i_tb2,
-                          acc_scale1, sm_scale, m_base, start_n, SUB_M,
-                          BLOCK_N)
+                          acc_scale1, sm_scale, m_base, start_n, causal_mask,
+                          N_CTX, SUB_M, BLOCK_N)
     else:
         softmax_vf_select(need_mask, need_update, qk, p, m_i_tb2, l_i_tb2,
-                          acc_scale2, sm_scale, m_base, start_n, SUB_M,
-                          BLOCK_N)
+                          acc_scale2, sm_scale, m_base, start_n, causal_mask,
+                          N_CTX, SUB_M, BLOCK_N)
 
     al.sync_block_set("vector", "cube", 2, al.PIPE.PIPE_V, al.PIPE.PIPE_FIX)
     p_nz = bl.to_tensor(p).reshape(BLOCK_N // 16, SUB_M // 16, 16, 16)
@@ -592,6 +615,7 @@ def _fwd_kernel(
     Q,
     K,
     V,
+    ATTEN_MASK,
     sm_scale,
     TMP,
     L,
@@ -882,8 +906,8 @@ def _fwd_kernel(
                                 m_i_tb1, m_i_tb2, l_i_tb0, l_i_tb1, l_i_tb2,
                                 acc_scale0, acc_scale1, acc_scale2, sm_scale,
                                 vtaskId, v1_s1_task_mod3, m_base, start_n,
-                                tl.float16, need_mask, v1_need_update, SUB_M,
-                                BLOCK_N)
+                                tl.float16, need_mask, v1_need_update,
+                                ATTEN_MASK, N_CTX, SUB_M, BLOCK_N)
 
                 # get v2 task
                 v2_use_b_idx, v2_use_n_idx, v2_use_s1_idx, v2_use_s2_idx, v2_use_s2_size = get_cur_task(
@@ -1101,12 +1125,17 @@ class _attention(torch.autograd.Function):
         m = torch.empty((q.shape[0] * q.shape[1], q.shape[2]),
                         device=q.device,
                         dtype=torch.float32)
+        if causal:
+            atten_mask = _causal_mask(q.shape[2], q.device)
+        else:
+            atten_mask = torch.empty((1, ), device=q.device, dtype=torch.bool)
         num_warps = 4 if Lk <= 64 else 8
 
         _fwd_kernel[grid](
             q,
             k,
             v,
+            atten_mask,
             sm_scale,
             tmp,
             L,

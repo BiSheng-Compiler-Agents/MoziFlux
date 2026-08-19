@@ -1,13 +1,3 @@
-# [2022-10-23] Downloaded from https://github.com/openai/triton/blob/master/python/tutorials/06-fused-attention.py
-# for benchmarking.
-# We fixed a few dtype cast to make it work for bf16
-"""
-Fused Attention
-===============
-This is a Triton implementation of the Flash Attention algorithm
-(see: Dao et al., https://arxiv.org/pdf/2205.14135v2.pdf; Rabe and Staats https://arxiv.org/pdf/2112.05682v2.pdf)
-"""
-
 import torch
 import triton
 import triton.language as tl
@@ -15,12 +5,25 @@ import triton.language.extra.cann.extension as al
 import triton.extension.buffer.language as bl
 import triton.runtime.driver as driver
 
+_CAUSAL_MASK_CACHE = {}
+
+
+def _causal_mask(n_ctx, device):
+    key = (device, n_ctx)
+    mask = _CAUSAL_MASK_CACHE.get(key)
+    if mask is None:
+        mask = torch.ones((n_ctx, n_ctx), device=device,
+                          dtype=torch.bool).triu(diagonal=1)
+        _CAUSAL_MASK_CACHE[key] = mask
+    return mask
+
 
 @triton.jit
 def _fwd_kernel(
     Q,
     K,
     V,
+    ATTEN_MASK,
     sm_scale,
     TMP,
     L,
@@ -100,13 +103,19 @@ def _fwd_kernel(
             block_shape=(BLOCK_N, BLOCK_DMODEL),
             order=(1, 0),
         )
+        v_block_ptr = tl.make_block_ptr(
+            base=V + qkv_offset,
+            shape=(N_CTX, BLOCK_DMODEL),
+            strides=(stride_vk, stride_vn),
+            offsets=(0, 0),
+            block_shape=(BLOCK_N, BLOCK_DMODEL),
+            order=(1, 0),
+        )
 
         # ---------------- Cube side (one scope per tile) ----------------
         with al.scope(core_mode="cube"):
             # q tile stays in SRAM for the whole start_n loop
             q = tl.load(q_block_ptr)
-            offs_nc = tl.arange(0, BLOCK_N)
-            offs_dc = tl.arange(0, BLOCK_DMODEL)
 
             for start_n in tl.range(0, loop_end, BLOCK_N):
                 start_n = tl.multiple_of(start_n, BLOCK_N)
@@ -122,12 +131,7 @@ def _fwd_kernel(
                 # Wait for P in L1 (NZ fractal), then PV matmul
                 al.sync_block_wait("vector", "cube", 1, al.PIPE.PIPE_MTE3,
                                    al.PIPE.PIPE_MTE1)
-                # Raw-pointer V load (in-loop block-ptr loads hit the PlanMemory
-                # empty-addrs bug on CANN 9.0-gen bishengir). Convention from
-                # fa_forward.py: stride_vk = N(row) stride, stride_vn = D(col) stride.
-                v = tl.load(V + qkv_offset +
-                            (start_n + offs_nc)[:, None] * stride_vk +
-                            offs_dc[None, :] * stride_vn)
+                v = tl.load(tl.advance(v_block_ptr, (start_n, 0)))
                 pv_l0c = tl.dot(
                     bl.to_tensor(p_l1, target_shape=[BLOCK_M, BLOCK_N]), v)
                 al.fixpipe(pv_l0c,
@@ -164,14 +168,16 @@ def _fwd_kernel(
                 offs_m_sub = task_m_idx * BLOCK_M + row0 + tl.arange(0, SUB_M)
                 qk_sub *= sm_scale
                 if IS_CAUSAL:
-                    qk_sub += tl.where(
-                        offs_m_sub[:, None]
-                        >= (start_n + tl.arange(0, BLOCK_N)[None, :]), 0,
-                        float("-inf"))
+                    mask_offsets = (offs_m_sub[:, None] * N_CTX + start_n +
+                                    tl.arange(0, BLOCK_N)[None, :])
+                    causal_mask = tl.load(ATTEN_MASK + mask_offsets)
+                    qk_sub += tl.where(causal_mask != 0, -1.0e4, 0.0)
 
                 # online softmax update on this core's rows
-                m_ij = tl.max(qk_sub, 1)
-                m_new = tl.maximum(m_i, m_ij)
+                m_ij = tl.max(qk_sub, 1, propagate_nan=True)
+                m_new = tl.maximum(m_i,
+                                   m_ij,
+                                   propagate_nan=tl.PropagateNan.ALL)
                 alpha = tl.exp(m_i - m_new)
                 p = tl.exp(qk_sub - m_new[:, None])
                 l_ij = tl.sum(p, 1)
@@ -377,12 +383,17 @@ class _attention(torch.autograd.Function):
         m = torch.empty((q.shape[0] * q.shape[1], q.shape[2]),
                         device=q.device,
                         dtype=torch.float32)
+        if causal:
+            atten_mask = _causal_mask(q.shape[2], q.device)
+        else:
+            atten_mask = torch.empty((1, ), device=q.device, dtype=torch.bool)
         num_warps = 4 if Lk <= 64 else 8
 
         _fwd_kernel[grid](
             q,
             k,
             v,
+            atten_mask,
             sm_scale,
             tmp,
             L,
