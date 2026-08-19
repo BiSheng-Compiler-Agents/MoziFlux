@@ -1,0 +1,21 @@
+UNIT_TEST PASS
+
+remote_verify test output:
+CHECK Baseline Triton1 small: max_abs_diff=4.28259e-05 PASS
+CHECK Baseline Triton2 small: max_abs_diff=4.28259e-05 PASS
+CHECK Optimized Triton small: max_abs_diff=4.28259e-05 PASS
+CHECK Optimized Triton forced_persistent small: max_abs_diff=4.28259e-05 PASS
+CHECK Baseline Triton1 irregular: max_abs_diff=4.72665e-05 PASS
+CHECK Baseline Triton2 irregular: max_abs_diff=4.72665e-05 PASS
+CHECK Optimized Triton irregular: max_abs_diff=4.72665e-05 PASS
+CHECK Baseline Triton1 target: max_abs_diff=0.00013864 PASS
+CHECK Baseline Triton2 target: max_abs_diff=0.00013864 PASS
+CHECK Optimized Triton target: max_abs_diff=0.00013864 PASS
+UNIT_TEST PASS
+
+remote_verify benchmark output:
+gemm_scaling_hardtanh_gelu:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small       0.346292          0.362505          0.332907          0.317968
+1  irregular       0.401919          0.526113          0.389573          0.360715
+2     target      32.898743         36.758179         33.551254         33.437344

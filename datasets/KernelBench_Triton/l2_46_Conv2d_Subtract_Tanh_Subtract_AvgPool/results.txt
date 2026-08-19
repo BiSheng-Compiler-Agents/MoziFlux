@@ -1,0 +1,22 @@
+REMOTE_VERIFY test_passed=True bench_passed=True
+
+[TEST]
+UNIT small_direct baseline1: max_abs=1.19209e-07 PASS
+UNIT small_direct baseline2: max_abs=1.19209e-07 PASS
+UNIT small_direct optimized: max_abs=0 PASS
+UNIT irregular_direct baseline1: max_abs=1.19209e-07 PASS
+UNIT irregular_direct baseline2: max_abs=1.19209e-07 PASS
+UNIT irregular_direct optimized: max_abs=0 PASS
+ERROR default_persistent_boundary baseline1: RuntimeError
+UNIT default_persistent_boundary baseline2: max_abs=0 PASS
+UNIT default_persistent_boundary optimized: max_abs=0 PASS
+UNIT forced_direct opt_triton_direct: max_abs=0 PASS
+UNIT forced_persistent opt_triton_persistent: max_abs=0 PASS
+UNIT_TEST PASS
+
+[BENCH]
+conv2d_subtract_tanh_subtract_avgpool:
+                         label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0                 small_direct       0.419981         10.864983         10.875407          0.420399
+1             irregular_direct       0.364125          6.727750          6.755273          0.362723
+2  default_persistent_boundary      85.747398          0.029898          0.028505          0.028576

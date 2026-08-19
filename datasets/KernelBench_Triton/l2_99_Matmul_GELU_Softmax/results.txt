@@ -1,0 +1,25 @@
+PASS baseline1 small_16x512x512
+PASS baseline2 small_16x512x512
+PASS optimized small_16x512x512
+INFO baseline1 medium_128x2048x2048 preskip: comparison baseline is too slow for this GEMM size
+INFO baseline2 medium_128x2048x2048 preskip: comparison baseline is too slow for this GEMM size
+PASS optimized medium_128x2048x2048
+INFO baseline1 target_1024x8192x8192 preskip: comparison baseline is too slow for this GEMM size
+INFO baseline2 target_1024x8192x8192 preskip: comparison baseline is too slow for this GEMM size
+PASS optimized target_1024x8192x8192
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l2_99_Matmul_GELU_Softmax_1782751257/opt_99_Matmul_GELU_Softmax.py:80: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(z)
+INFO bench baseline1 medium_128x2048x2048 preskip: comparison baseline is too slow for this GEMM size
+INFO bench baseline2 medium_128x2048x2048 preskip: comparison baseline is too slow for this GEMM size
+INFO bench baseline1 target_1024x8192x8192 preskip: comparison baseline is too slow for this GEMM size
+INFO bench baseline2 target_1024x8192x8192 preskip: comparison baseline is too slow for this GEMM size
+matmul_gelu_softmax:
+                   label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0       small_16x512x512       0.082914           0.34648          0.335544          0.069608
+1   medium_128x2048x2048       0.269145               inf               inf          0.258522
+2  target_1024x8192x8192       7.253624               inf               inf          7.247609
+
+/home/s00929845/kernel_verify/l2_99_Matmul_GELU_Softmax_1782751257/opt_99_Matmul_GELU_Softmax.py:80: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(z)

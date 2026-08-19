@@ -32,8 +32,10 @@ Sub-kernel pattern:
 - **grid = (1, 1, 1)** — one block is enough to see the bottleneck
 - **M = BLOCK_M, N = BLOCK_N** — one tile of data
 - **K = 1×BLOCK_K** (single iteration) — minimizes cannsim instruction count; use 2× only if single iteration is insufficient to exercise the bottleneck
-- **BLOCK_M/BLOCK_N/BLOCK_K constexpr values must NOT change** — compiled into .npubin
+- **BLOCK_M/BLOCK_N/K constexpr values must NOT change** — compiled into .npubin
 - Allocate buffers sized for exactly 1 tile
+
+**Fair A/B when tuning BLOCK_K:** if the optimization changes `BLOCK_K`, compare both kernels at the same absolute probe `K` (for example `max(old_BLOCK_K, new_BLOCK_K)` or an LCM), even though this gives the smaller-BLOCK kernel multiple loop iterations. Do not compare `K=1×old_BLOCK_K` against `K=1×new_BLOCK_K`; that conflates optimization with different mathematical work.
 
 What is preserved: bottleneck pipeline lane, WAIT_FLAG stall patterns, effect of any code fix.
 What is lost: absolute cycle count (irrelevant), multi-block L2 cache effects.
@@ -384,7 +386,9 @@ reductions (zeros affect mean/count) and softmax (`exp(0)=1` before normalize �
 
 0. **Cannsim output too large for tool context**: `cannsim_local_run` output can exceed 200K characters (236 KB+), which exceeds tool result size limits. When this happens, read trace files directly from disk via `read_file` or terminal instead of relying on the tool return value.
 
-0. **Skill name disambiguation**: When loading skills by short name (e.g., `skill_view(name='optimization')`), plugin-registered skills may cause ambiguity (4+ matches). Always use the fully qualified name: `triton_ascend/compilerclaw-ops-tree/kernel-ops/optimization`.
+0. **Unsafe early-exit wrapper recovery**: `cannsim_local_run` may return failure with `UNSAFE EARLY EXIT` after `instr.bin` is already produced, especially when the host binary exits before the wrapper's quiet-period heuristic is satisfied. Do not discard the run immediately: inspect `cannsim.log` for `[HOST] Kernel completed` / `[HOST] PASS` or simulator finish markers, then manually run `cannsim report -e . -o ./report -n 0` in the job directory. If `trace_core0.json` is generated and `aggregate_trace.py` succeeds, document that the wrapper failed but the report trace was recovered.
+
+0. **Skill name disambiguation**: When loading skills by short name (e.g., `skill_view(name='optimization')`, plugin-registered skills may cause ambiguity (4+ matches). Always use the fully qualified name: `triton_ascend/compilerclaw-ops-tree/kernel-ops/optimization`.
 
 0. **`#include <unistd.h>` required for `_exit()`**: GCC 14+ requires explicit `#include <unistd.h>` for `_exit()`. Add it to every cannsim C++ host — it's portable and needed to bypass CANN 9.0.0 atexit segfault. See `references/cpp-host-build-pitfalls.md`.
 
@@ -393,7 +397,8 @@ reductions (zeros affect mean/count) and softmax (`exp(0)=1` before normalize �
 3. **npubin path**: use `dirname(argv[0]) + "/my_kernel.npubin"` (same directory as the binary). Do NOT use `"../my_kernel.npubin"` — it breaks when cannsim runs the binary directly from the job root.
 4. **`rtFunctionRegister` name**: must match the Python `def` name of the `@triton.jit` kernel, NOT the .npubin filename
 5. **`syncBlockLock`**: camelCase in C++ struct, not `sync_block_lock`
-6. **CANN 9.0.0 atexit segfault**: use `_exit(0)` in host binary after successful simulation
+6. **CANN 9.0.0 `rtFunctionRegister` host pattern**: some headers do not define `rtFunction_t`; use `static size_t func_stub = 0; rtFunctionRegister(handle, &func_stub, "kernel_name", (void*)"kernel_name", 0); rtKernelLaunch(&func_stub, ...)`. See `references/cpp-host-build-pitfalls.md`.
+7. **CANN 9.0.0 atexit segfault**: use `_exit(0)` in host binary after successful simulation
 7. **`[HOST]` diagnostic logging**: print `[HOST] Launching kernel...` before `rtKernelLaunch`, `[HOST] Kernel completed` after successful sync, and `[HOST] PASS` after correctness check. These markers are the diagnostic pattern that `cannsim_subkernel_timeout.md` says to check for in cannsim.log when debugging timeouts. Always use the `[HOST]` prefix for these specific markers; other informational prints can use `[INFO]`.
 8. **`cache_modifier=".cg"`**: silently kills compilation on Ascend — never use
 8. **`num_stages=1`**: causes scalar div-by-zero crash — always use `num_stages=2`
@@ -404,9 +409,10 @@ reductions (zeros affect mean/count) and softmax (`exp(0)=1` before normalize �
 13. **CMake `ASCEND_PATH`**: no stray closing quote in `set(ASCEND_PATH $ENV{ASCEND_HOME_PATH})`
 14. **Stale CMakeCache**: always `rm -rf build` before rebuilding in cannsim_local_run
 15. **False PASS**: use non-zero test data; zero-initialized output masks bugs. Use correctness checks in the host launcher: compute expected values from input pattern, convert bf16 output to fp32 via bit-shift, and fail with per-element diagnostics. See `references/bf16-fp32-conversion.md` for the conversion helper.
-16. **CANN env not sourced**: `run_kernel.sh` must source the CANN environment (`CANNSIM_SETENV_PATH` or `$ASCEND_HOME_PATH/bin/setenv.bash`) BEFORE the compile step (torch_npu/ACL headers) and the cmake step (runtime/rt.h include paths).
+16. **Self-contained local_dir**: `cannsim_local_run` stages only `local_dir` into `/tmp/cannsim_local/<job>/`. Compile scripts must not rely on parent-relative paths such as `Path(SCRIPT_DIR).parent / "opt_*.py"` unless that parent file is also copied into `local_dir`; otherwise the build fails after staging. Either copy the needed Python source into the cannsim work dir or make `compile_kernel.py` fully self-contained.
+17. **CANN env not sourced**: `run_kernel.sh` must source the CANN environment (`CANNSIM_SETENV_PATH` or `$ASCEND_HOME_PATH/bin/setenv.bash`) BEFORE the compile step (torch_npu/ACL headers) and the cmake step (runtime/rt.h include paths).
 17. **CANN fp16 type**: CANN defines `fp16_t` (a struct wrapping `uint16_t`) in `fp16.h`. For raw host buffer storage, `uint16_t` is correct. If you need a typed fp16 variable, use `fp16_t`. See `references/cannsim-cpp-host-dtype-matching.md`.
-18. **Cannsim sub-kernel timeout**: On machines with <32 GB RAM or <16 CPU cores, cannsim may time out even with a sub-kernel host. Mitigations: (a) use K=1×BLOCK_K (single iteration) instead of 2×BLOCK_K to halve instruction count, (b) use smaller blocks (BLOCK_M/N=64 instead of 128) to reduce per-iteration work 4×. Diagnostic: after cannsim record, search cannsim.log for `[HOST] Kernel completed` and `[HOST] PASS`. If missing, the kernel did not finish. See `references/cannsim_subkernel_timeout.md`.
+18. **Cannsim sub-kernel timeout**: On machines with <32 GB RAM or <16 CPU cores, cannsim may time out even with a sub-kernel host. Mitigations: (a) use K=1×BLOCK_K (single iteration) instead of 2×BLOCK_K to halve instruction count, (b) use smaller matrix blocks (BLOCK_M/N=64 instead of 128) to reduce per-iteration work 4×, (c) for scalar-heavy vector epilogues such as activation+pool, shrink the diagnostic host much more aggressively (e.g. one NC tile, `BLOCK_HW=16`, tiny `H/W`) because the goal is bottleneck classification, not full tile throughput. Diagnostic: after cannsim record, search cannsim.log for `[HOST] Kernel completed` and `[HOST] PASS`. If missing, the kernel did not finish. See `references/cannsim_subkernel_timeout.md`.
 
 ---
 

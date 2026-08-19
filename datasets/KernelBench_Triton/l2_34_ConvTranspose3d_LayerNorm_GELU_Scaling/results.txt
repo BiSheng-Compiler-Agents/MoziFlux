@@ -1,0 +1,8 @@
+REMOTE_VERIFY test_passed=True bench_passed=True remote_dir=/home/s00929845/kernel_verify/l2_34_ConvTranspose3d_LayerNorm_GELU_Scaling_1782756044
+CHECK Optimized Triton/direct_small PASS max_abs=0.000473499
+CHECK Optimized Triton/gridcap_default PASS max_abs=0
+BENCH direct_small PyTorch_ACL_ms=0.410294 Baseline_Triton1_ms=0.379279 Baseline_Triton2_ms=inf Optimized_Triton_ms=0.335984
+BENCH gridcap_default PyTorch_ACL_ms=125.313812 Baseline_Triton1_ms=inf Baseline_Triton2_ms=inf Optimized_Triton_ms=124.906784
+CANNSIM_BASELINE trace=/tmp/cannsim_local/l2_34_baseline/cannsim_20260629174847_test_kernel/report/trace_core0.json wall_cycles=12257 rows=8 cycles_per_row=1532.1
+CANNSIM_OPTIMIZED_TRACE_DIRECT_PATH trace=/tmp/cannsim_local/l2_34_optimized/cannsim_20260629175103_test_kernel/report/trace_core0.json wall_cycles=16459 rows=16 cycles_per_row=1028.7
+UNIT_TEST PASS

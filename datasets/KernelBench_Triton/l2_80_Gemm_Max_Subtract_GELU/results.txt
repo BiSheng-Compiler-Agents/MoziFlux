@@ -1,0 +1,23 @@
+TEST PyTorch / ACL small: PASS max_abs=0
+TEST Baseline Triton1 small: PASS max_abs=0
+TEST Baseline Triton2 small: SKIP_REFERENCE_SANDBOX max_abs=inf
+TEST Optimized Triton small: PASS max_abs=0
+TEST Optimized Triton forced_persistent_small: PASS max_abs=0
+TEST PyTorch / ACL irregular: PASS max_abs=0
+TEST Baseline Triton1 irregular: PASS max_abs=0
+TEST Baseline Triton2 irregular: SKIP_REFERENCE_SANDBOX max_abs=inf
+TEST Optimized Triton irregular: PASS max_abs=0
+TEST PyTorch / ACL target: PASS max_abs=0
+TEST Baseline Triton1 target: PASS max_abs=0
+TEST Baseline Triton2 target: SKIP_REFERENCE_SANDBOX max_abs=inf
+TEST Optimized Triton target: PASS max_abs=0
+UNIT_TEST PASS
+
+INFO benchmark Baseline Triton2 small: unavailable_reference_sandbox -> inf
+INFO benchmark Baseline Triton2 irregular: unavailable_reference_sandbox -> inf
+INFO benchmark Baseline Triton2 target: unavailable_reference_sandbox -> inf
+l2_80_gemm_max_subtract_gelu:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small       0.017975          0.010542               inf          0.009561
+1  irregular       0.019502          0.010467               inf          0.010449
+2     target       0.019579          0.010670               inf          0.010731

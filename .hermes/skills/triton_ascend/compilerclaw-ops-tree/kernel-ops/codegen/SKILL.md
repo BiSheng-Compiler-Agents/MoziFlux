@@ -142,6 +142,7 @@ After the kernel runs correctly, profile with cannsim and optimize based on bott
 - Hardcode grid as `ceil(M/128)` in ModelNew when autotune has different BLOCK configs — use `ceil(M/min_BLOCK_M)`
 - Autotune `key=['param']` but kernel signature is missing `param: tl.constexpr` — every key name MUST appear as a `tl.constexpr` parameter in EVERY kernel decorated by that autotune, including persistent kernels (causes "No valid triton configs" RuntimeError)
 - Persistent kernel iterating over elements instead of tiles — use `n_tiles = cdiv(n_elements, BLOCK_SIZE)` then `range(pid, n_tiles, n_programs)`, NOT `range(pid, n_elements, n_programs)`
+- Storing a block-shaped scalar (`tl.full((1,), ...)`, `tl.sum(..., axis=0)`) to a scalar pointer expression — make the pointer block-shaped too, e.g. `offs = row * stride + tl.arange(0, 1); tl.store(ptr + offs, value)`. Ascend/Triton raises `Value argument cannot be block type if pointer argument is not a block` otherwise.
 - Deliver a kernel that only works for the benchmark shape
 - Skip writing an episode after a successful optimization
 

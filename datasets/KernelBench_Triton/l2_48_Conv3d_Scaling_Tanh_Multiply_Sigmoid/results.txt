@@ -1,0 +1,17 @@
+TEST small Baseline Triton: max_abs=1.19209e-07 PASS
+TEST small Optimized Triton: max_abs=1.19209e-07 PASS
+TEST medium Baseline Triton: max_abs=1.19209e-07 PASS
+TEST medium Optimized Triton: max_abs=1.19209e-07 PASS
+TEST default Baseline Triton: max_abs=1.78814e-07 PASS
+TEST default Optimized Triton: max_abs=1.78814e-07 PASS
+TEST dispatch C16_direct: max_abs=1.19209e-07 PASS
+TEST dispatch C16_persistent: max_abs=1.19209e-07 PASS
+TEST dispatch generic_direct: max_abs=1.19209e-07 PASS
+TEST dispatch generic_persistent: max_abs=1.19209e-07 PASS
+UNIT_TEST PASS
+
+conv3d_scaling_tanh_multiply_sigmoid:
+     label  PyTorch / ACL  Baseline Triton  Optimized Triton
+0    small       0.315372         2.079632          0.212052
+1   medium       2.155447        22.577723          1.982612
+2  default      46.876396       973.403809         35.403500

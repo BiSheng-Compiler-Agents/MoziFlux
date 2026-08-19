@@ -1,0 +1,22 @@
+INFO Baseline Triton1 small exception MLIRCompilationError
+INFO Baseline Triton2 small exception MLIRCompilationError
+TEST Optimized Triton small: shape=(1, 1, 4, 8, 8) max_abs=4.76837e-07 PASS
+INFO Baseline Triton1 medium exception MLIRCompilationError
+INFO Baseline Triton2 medium exception MLIRCompilationError
+TEST Optimized Triton medium: shape=(2, 1, 8, 32, 32) max_abs=4.76837e-07 PASS
+INFO Baseline Triton1 default exception MLIRCompilationError
+INFO Baseline Triton2 default exception MLIRCompilationError
+TEST Optimized Triton default: shape=(4, 1, 16, 64, 64) max_abs=4.76837e-07 PASS
+UNIT_TEST PASS
+
+INFO benchmark_preskip Baseline Triton1 small: MLIRCompilationError
+INFO benchmark_preskip Baseline Triton2 small: MLIRCompilationError
+INFO benchmark_preskip Baseline Triton1 medium: MLIRCompilationError
+INFO benchmark_preskip Baseline Triton2 medium: MLIRCompilationError
+INFO benchmark_preskip Baseline Triton1 default: MLIRCompilationError
+INFO benchmark_preskip Baseline Triton2 default: MLIRCompilationError
+conv3d_max_lse_relu:
+     label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    small       0.642187               inf               inf          0.453910
+1   medium       4.393136               inf               inf          4.665996
+2  default      57.263958               inf               inf         60.777836

@@ -1,0 +1,24 @@
+TEST PyTorch / ACL small: PASS max_abs=0.000000e+00
+TEST Baseline Triton1 small: PASS max_abs=3.671646e-05
+TEST Baseline Triton2 small: SKIP_sandbox_forbids_base_read max_abs=inf
+TEST Optimized Triton small: PASS max_abs=3.671646e-05
+TEST PyTorch / ACL medium: PASS max_abs=0.000000e+00
+TEST Baseline Triton1 medium: PASS max_abs=2.729893e-05
+TEST Baseline Triton2 medium: SKIP_sandbox_forbids_base_read max_abs=inf
+TEST Optimized Triton medium: PASS max_abs=2.729893e-05
+TEST PyTorch / ACL default: PASS max_abs=0.000000e+00
+TEST Baseline Triton1 default: SKIP_comparison_provider_preskipped_grid_cap max_abs=inf
+TEST Baseline Triton2 default: SKIP_sandbox_forbids_base_read max_abs=inf
+TEST Optimized Triton default: PASS max_abs=4.148483e-05
+TEST Optimized Triton forced_persistent: PASS max_abs=3.671646e-05
+UNIT_TEST PASS
+
+INFO bench_skip Baseline Triton2 small: sandbox_forbids_base_read
+INFO bench_skip Baseline Triton2 medium: sandbox_forbids_base_read
+INFO bench_skip Baseline Triton1 default: comparison_provider_preskipped_grid_cap
+INFO bench_skip Baseline Triton2 default: sandbox_forbids_base_read
+l2_7_conv3d_postops_biasadd:
+     label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    small       0.206402          0.361933               inf          0.144910
+1   medium       0.494866          2.919591               inf          0.444751
+2  default     109.769173               inf               inf        102.081329

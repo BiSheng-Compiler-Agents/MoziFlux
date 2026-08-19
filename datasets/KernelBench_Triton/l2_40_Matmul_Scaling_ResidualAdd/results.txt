@@ -1,0 +1,16 @@
+UNIT Baseline Triton1 small_acl_128x512x512 max_abs_diff=2.14577e-06 PASS
+UNIT Baseline Triton2 small_acl_128x512x512 max_abs_diff=2.14577e-06 PASS
+UNIT Optimized Triton small_acl_128x512x512 max_abs_diff=0 PASS
+UNIT Baseline Triton1 irregular_triton_257x512x512 max_abs_diff=2.14577e-06 PASS
+UNIT Baseline Triton2 irregular_triton_257x512x512 max_abs_diff=2.14577e-06 PASS
+UNIT Optimized Triton irregular_triton_257x512x512 max_abs_diff=1.19209e-06 PASS
+UNIT Baseline Triton1 required_acl_16384x4096x4096 max_abs_diff=3.09944e-06 PASS
+UNIT Baseline Triton2 required_acl_16384x4096x4096 max_abs_diff=2.86102e-06 PASS
+UNIT Optimized Triton required_acl_16384x4096x4096 max_abs_diff=0 PASS
+UNIT_TEST PASS
+
+l2_40_matmul_scaling_residualadd:
+                          label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0         small_acl_128x512x512       0.160523          0.216013          0.202427          0.157611
+1  irregular_triton_257x512x512       0.227856          0.394795          0.212094          0.382661
+2  required_acl_16384x4096x4096     391.452087        697.611084        484.247101        391.466370

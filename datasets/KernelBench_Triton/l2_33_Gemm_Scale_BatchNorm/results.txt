@@ -1,0 +1,19 @@
+UNIT_TEST PASS Baseline Triton1 small_K1024
+INFO comparison_provider_unavailable Baseline Triton2 small_K1024: MLIRCompilationError
+UNIT_TEST PASS Optimized Triton small_K1024
+UNIT_TEST PASS Baseline Triton1 medium_K4096
+INFO comparison_provider_unavailable Baseline Triton2 medium_K4096: MLIRCompilationError
+UNIT_TEST PASS Optimized Triton medium_K4096
+UNIT_TEST PASS Baseline Triton1 required_K8192
+INFO comparison_provider_unavailable Baseline Triton2 required_K8192: MLIRCompilationError
+UNIT_TEST PASS Optimized Triton required_K8192
+UNIT_TEST PASS
+
+INFO baseline2 small_K1024 benchmark_inf: MLIRCompilationError
+INFO baseline2 medium_K4096 benchmark_inf: MLIRCompilationError
+INFO baseline2 required_K8192 benchmark_inf: MLIRCompilationError
+gemm_scale_batchnorm_perf:
+            label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0     small_K1024       0.409222          1.508298               inf          0.611062
+1    medium_K4096       1.973866         50.022953               inf          4.568573
+2  required_K8192      17.538818        733.081360               inf         48.622585

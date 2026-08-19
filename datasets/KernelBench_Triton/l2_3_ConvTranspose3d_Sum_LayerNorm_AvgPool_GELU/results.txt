@@ -1,0 +1,19 @@
+REMOTE_VERIFY PASS
+
+UNIT TEST OUTPUT
+CHECK Baseline Triton1 tiny_triton_path max_abs=0.000138164
+CHECK Baseline Triton2 tiny_triton_path max_abs=0.000138164
+CHECK Optimized Triton tiny_triton_path max_abs=0.000138164
+CHECK Baseline Triton1 medium_acl_path max_abs=0.000209689
+CHECK Baseline Triton2 medium_acl_path max_abs=0.000209689
+CHECK Optimized Triton medium_acl_path max_abs=1.84774e-06
+INFO unit_preskip Baseline Triton1 default_required comparison_provider_preskipped_to_avoid_grid_cap_poisoning
+INFO unit_preskip Baseline Triton2 default_required comparison_provider_preskipped_to_avoid_grid_cap_poisoning
+CHECK Optimized Triton default_required max_abs=3.01003e-06
+UNIT_TEST PASS
+
+BENCHMARK OUTPUT (ms)
+label,PyTorch / ACL,Baseline Triton1,Baseline Triton2,Optimized Triton
+tiny_triton_path,0.319749,0.569217,0.789990,0.488683
+medium_acl_path,0.794584,3.746531,3.997688,0.764638
+default_required,93.553238,inf,inf,79.572739

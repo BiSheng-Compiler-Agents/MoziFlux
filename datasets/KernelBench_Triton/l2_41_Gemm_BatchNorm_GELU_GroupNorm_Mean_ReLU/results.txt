@@ -1,0 +1,17 @@
+UNIT Baseline Triton1 default_128: max_abs=1.30385e-08 PASS
+UNIT Baseline Triton2 default_128: max_abs=1.30385e-08 PASS
+UNIT Optimized Triton default_128: max_abs=1.30385e-08 PASS
+UNIT Baseline Triton1 small_7: max_abs=4.65661e-09 PASS
+UNIT Baseline Triton2 small_7: max_abs=4.65661e-09 PASS
+UNIT Optimized Triton small_7: max_abs=4.65661e-09 PASS
+UNIT Baseline Triton1 irregular_257: max_abs=1.58325e-08 PASS
+UNIT Baseline Triton2 irregular_257: max_abs=1.58325e-08 PASS
+UNIT Optimized Triton irregular_257: max_abs=1.58325e-08 PASS
+UNIT Optimized Triton forced_persistent_2049: max_abs=1.95578e-08 PASS
+UNIT_TEST PASS
+
+l2_41_gemm_batchnorm_gelu_groupnorm_mean_relu:
+           label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0    default_128       0.450315          0.686621          0.298299          0.010961
+1        small_7       0.288558          0.271848          0.195891          0.011068
+2  irregular_257       0.645881          1.132989          0.444944          0.011483

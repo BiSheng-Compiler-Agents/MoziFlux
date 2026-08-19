@@ -53,8 +53,9 @@ if HAS_TRITON:
         hw_tile = pid - b_idx * n_hw_tiles
         offs_hw = hw_tile * BLOCK_HW + tl.arange(0, BLOCK_HW)
         mask_hw = (b_idx < B) & (offs_hw < H * W)
-        h = offs_hw // W
-        w = offs_hw - h * W
+        safe_hw = tl.where(offs_hw < H * W, offs_hw, 0)
+        h = safe_hw // W
+        w = safe_hw - h * W
         offs_c = tl.arange(0, BLOCK_C)
         acc = tl.full((BLOCK_HW, ), float("inf"), tl.float32)
         for c0 in range(0, C, BLOCK_C):
@@ -101,11 +102,11 @@ if HAS_TRITON:
         for tile_id in range(pid, n_tiles, n_programs):
             b_idx = tile_id // n_hw_tiles
             hw_tile = tile_id - b_idx * n_hw_tiles
-            offs_hw = (hw_tile * BLOCK_HW + tl.arange(0, BLOCK_HW)).to(
-                tl.int64)
+            offs_hw = hw_tile * BLOCK_HW + tl.arange(0, BLOCK_HW)
             mask_hw = (b_idx < B) & (offs_hw < H * W)
-            h = offs_hw // W
-            w = offs_hw - h * W
+            safe_hw = tl.where(offs_hw < H * W, offs_hw, 0)
+            h = safe_hw // W
+            w = safe_hw - h * W
             offs_c = tl.arange(0, BLOCK_C)
             acc = tl.full((BLOCK_HW, ), float("inf"), tl.float32)
             for c0 in range(0, C, BLOCK_C):
