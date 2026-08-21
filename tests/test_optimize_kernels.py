@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 import sys
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.resolve()))
 
@@ -16,9 +17,16 @@ from optimize_kernels import (
     get_baseline_file,
     kernel_is_complete,
     setup_workspace,
+    disable_batch_agent_background_reviews,
+    KERNEL_AGENT_TOOLSETS,
     MODEL,
     main,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_remote_verify_environment(monkeypatch):
+    monkeypatch.delenv("REMOTE_VERIFY_HOST", raising=False)
 
 
 class TestStateManagement:
@@ -37,6 +45,23 @@ class TestStateManagement:
         with open(state_file) as f:
             saved = json.load(f)
         assert saved["kernels"]["l1_25_Swish"]["model"] == MODEL
+
+    def test_batch_agent_disables_background_memory_and_skill_reviews(self):
+        class Agent:
+            _memory_nudge_interval = 5
+            _skill_nudge_interval = 10
+
+        agent = Agent()
+        disable_batch_agent_background_reviews(agent)
+        assert agent._memory_nudge_interval == 0
+        assert agent._skill_nudge_interval == 0
+
+    def test_kernel_agent_uses_project_files_not_global_skill_tools(self):
+        assert KERNEL_AGENT_TOOLSETS == [
+            "terminal", "file", "todo", "triton_ascend"]
+        assert "skills" not in KERNEL_AGENT_TOOLSETS
+        assert "hermes-cli" not in KERNEL_AGENT_TOOLSETS
+        assert "cronjob" not in KERNEL_AGENT_TOOLSETS
 
 
 class TestCliConfig:
@@ -78,6 +103,32 @@ class TestCliConfig:
         assert optimize_kernels.MAX_ITERATIONS == 12
         assert optimize_kernels.MAX_PIPELINE_TURNS == 3
         assert os.environ["HERMES_HOME"] == str(hermes_home)
+
+    def test_guided_mode_does_not_mutate_plugin_environment_or_config(
+            self, tmp_path, monkeypatch):
+        import optimize_kernels
+
+        dataset_dir = tmp_path / "dataset"
+        dataset_dir.mkdir()
+        monkeypatch.setenv("HERMES_ENABLE_PROJECT_PLUGINS",
+                           "user-project-value")
+        monkeypatch.setattr(sys, "argv", [
+            "optimize_kernels.py",
+            "--dry-run",
+            "--guided-search",
+            "--dataset-dir",
+            str(dataset_dir),
+            "--state-file",
+            str(tmp_path / "state.json"),
+            "--hermes-home",
+            str(tmp_path / "home"),
+        ])
+
+        main()
+
+        assert os.environ[
+            "HERMES_ENABLE_PROJECT_PLUGINS"] == "user-project-value"
+        assert optimize_kernels.GUIDED_SEARCH is True
 
 
 class TestGetBaselineFile:
@@ -196,3 +247,64 @@ class TestSetupWorkspace:
 
         sf = tmp_path / ".pipeline_state.json"
         assert sf.exists()
+
+    def test_guided_search_is_explicit_opt_in(self, tmp_path):
+        (tmp_path / "25_Swish.py").write_text("# kernel")
+        state = {"kernels": {}}
+        result = setup_workspace(
+            tmp_path,
+            state,
+            guided_search=True,
+            guided_budget=20,
+        )
+        assert result is True
+        pipeline = json.loads(
+            (tmp_path / ".pipeline_state.json").read_text(encoding="utf-8"))
+        assert pipeline["current_stage"] == "search"
+        assert pipeline["guided_search"] == {
+            "enabled": True,
+            "run_id": None,
+            "budget": 20,
+            "revision": 0,
+            "pre_search_deliverable_hashes": {},
+        }
+
+    def test_new_guided_run_clears_terminal_pipeline_flags(self, tmp_path):
+        (tmp_path / "25_Swish.py").write_text("# kernel")
+        (tmp_path / ".pipeline_state.json").write_text(
+            json.dumps({
+                "baseline": "25_Swish.py",
+                "current_stage": "done",
+                "verified": True,
+                "verify_failed": True,
+                "verify_error": "old failure",
+                "recorded": True,
+                "results_txt_errors": ["old"],
+                "stages_completed": ["optimize", "verify", "record"],
+            }))
+        setup_workspace(
+            tmp_path,
+            {"kernels": {}},
+            guided_search=True,
+            guided_resume=False,
+        )
+        pipeline = json.loads(
+            (tmp_path / ".pipeline_state.json").read_text(encoding="utf-8"))
+        for key in (
+                "verified",
+                "verify_failed",
+                "verify_error",
+                "recorded",
+                "results_txt_errors",
+        ):
+            assert key not in pipeline
+        assert pipeline["stages_completed"] == []
+
+    def test_legacy_mode_has_no_guided_state(self, tmp_path):
+        (tmp_path / "25_Swish.py").write_text("# kernel")
+        state = {"kernels": {}}
+        setup_workspace(tmp_path, state)
+        pipeline = json.loads(
+            (tmp_path / ".pipeline_state.json").read_text(encoding="utf-8"))
+        assert pipeline["current_stage"] == "optimize"
+        assert "guided_search" not in pipeline

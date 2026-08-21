@@ -22,6 +22,7 @@ Usage:
 """
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -66,6 +67,18 @@ MAX_ITERATIONS = int(os.environ.get("OPTIMIZE_MAX_ITERATIONS", "90"))
 # run). We re-enter the conversation with a continuation nudge until the
 # pipeline reaches "done" or stalls (no stage progress between turns).
 MAX_PIPELINE_TURNS = int(os.environ.get("OPTIMIZE_MAX_PIPELINE_TURNS", "6"))
+GUIDED_SEARCH = False
+GUIDED_SEARCH_BUDGET = int(os.environ.get("GUIDED_SEARCH_BUDGET", "20"))
+GUIDED_SEARCH_WALL_TIME_MINUTES: float | None = None
+GUIDED_SEARCH_RESUME = False
+GUIDED_SEARCH_SEED_RUN_ID: int | None = None
+KERNEL_AGENT_TOOLSETS = ["terminal", "file", "todo", "triton_ascend"]
+
+
+def disable_batch_agent_background_reviews(agent) -> None:
+    """Keep autonomous batch runs from mutating global memory or skills."""
+    agent._memory_nudge_interval = 0
+    agent._skill_nudge_interval = 0
 
 # Continuation prompt for re-entering a parked pipeline. The kernel-sandbox
 # pre_llm_call hook injects the authoritative stage instructions; this just
@@ -89,6 +102,17 @@ Required deliverables (all 5 must be produced):
 
 Use cannsim_local_run to simulate the kernel and get trace data.
 Use kernel_status to check your pipeline state and mark stages complete.
+"""
+
+GUIDED_TASK_PROMPT = """
+Run guided MAP-Elites search for the Triton kernel in this directory.
+
+The guided-search and kernel-sandbox hooks provide the authoritative active
+attempt, parent, mutation direction, and stage instructions. During SEARCH,
+edit only opt_<baseline>.py, keep each attempt sticky through compile,
+correctness, and evaluation, then call guided_search_submit_candidate. Do not
+create final deliverables or call kernel_status advance until guided search has
+selected and materialized a hardware-confirmed winner.
 """
 
 # ── State management (orchestrator-level, separate from plugin state) ────────
@@ -154,8 +178,10 @@ def kernel_is_complete(kernel_dir: Path) -> tuple[bool, list[str]]:
         missing.append("opt_*.py")
     if "profile_kernels.py" not in py_files:
         missing.append("profile_kernels.py")
-    for name in ("Optimizations.md", "performance_report.md", "review.md",
-                 "results.txt"):
+    required_files = ["Optimizations.md", "performance_report.md", "review.md"]
+    if os.environ.get("REMOTE_VERIFY_HOST"):
+        required_files.append("results.txt")
+    for name in required_files:
         if name not in all_files:
             missing.append(name)
     return len(missing) == 0, missing
@@ -164,7 +190,16 @@ def kernel_is_complete(kernel_dir: Path) -> tuple[bool, list[str]]:
 # ── Workspace setup ──────────────────────────────────────────────────────────
 
 
-def setup_workspace(kernel_dir: Path, state: dict) -> bool:
+def setup_workspace(
+    kernel_dir: Path,
+    state: dict,
+    *,
+    guided_search: bool = False,
+    guided_budget: int = 20,
+    guided_wall_time_minutes: float | None = None,
+    guided_resume: bool = False,
+    guided_seed_run_id: int | None = None,
+) -> bool:
     """
     Ensure the kernel directory has a .pipeline_state.json.
     Returns True if ready to run.
@@ -200,6 +235,69 @@ def setup_workspace(kernel_dir: Path, state: dict) -> bool:
             json.dump(pipeline_state, f, indent=2)
         log.info("  Initialized .pipeline_state.json for %s", kernel_dir.name)
 
+    if guided_search:
+        try:
+            with open(sf) as f:
+                pipeline_state = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pipeline_state = {
+                "baseline": baseline.name,
+                "stages_completed": []
+            }
+        previous = pipeline_state.get("guided_search")
+        run_id = (previous.get("run_id")
+                  if guided_resume and isinstance(previous, dict) else None)
+        if not guided_resume:
+            for key in (
+                    "verified",
+                    "verify_failed",
+                    "verify_error",
+                    "recorded",
+                    "results_txt_errors",
+                    "last_turn_at",
+            ):
+                pipeline_state.pop(key, None)
+            pipeline_state["stages_completed"] = []
+            pipeline_state["turn_count"] = 0
+        pipeline_state["current_stage"] = "search"
+        final_names = (
+            "profile_kernels.py",
+            "Optimizations.md",
+            "performance_report.md",
+            "review.md",
+            "results.txt",
+        )
+        pre_search_hashes = {}
+        for name in final_names:
+            path = kernel_dir / name
+            if path.is_file():
+                pre_search_hashes[name] = hashlib.sha256(
+                    path.read_bytes()).hexdigest()
+        pipeline_state["guided_search"] = {
+            "enabled":
+            True,
+            "run_id":
+            run_id,
+            "budget":
+            max(1, int(guided_budget)),
+            "revision": (int(previous.get("revision", 0)) if isinstance(
+                previous, dict) else 0),
+            "pre_search_deliverable_hashes":
+            pre_search_hashes,
+        }
+        if guided_wall_time_minutes is not None:
+            pipeline_state["guided_search"]["wall_time_limit_seconds"] = (
+                max(0.0, float(guided_wall_time_minutes)) * 60.0)
+        if guided_seed_run_id is not None:
+            pipeline_state["guided_search"]["seed_run_id"] = int(
+                guided_seed_run_id)
+        pipeline_state["deliverables_complete"] = False
+        pipeline_state["deliverables_missing"] = ["guided-search completion"]
+        with open(sf, "w") as f:
+            json.dump(pipeline_state, f, indent=2)
+        log.info("  Guided search enabled for %s (budget=%d, resume=%s)",
+                 kernel_dir.name, guided_budget, guided_resume)
+
     return True
 
 
@@ -219,7 +317,14 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
     t0 = time.time()
 
     # Setup workspace (creates .pipeline_state.json if needed)
-    if not setup_workspace(kernel_dir, state):
+    if not setup_workspace(
+            kernel_dir,
+            state,
+            guided_search=GUIDED_SEARCH,
+            guided_budget=GUIDED_SEARCH_BUDGET,
+            guided_wall_time_minutes=GUIDED_SEARCH_WALL_TIME_MINUTES,
+            guided_resume=GUIDED_SEARCH_RESUME,
+            guided_seed_run_id=GUIDED_SEARCH_SEED_RUN_ID):
         return {
             "kernel": name,
             "status": "failed",
@@ -227,17 +332,21 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
             "elapsed_s": 0.0
         }
 
-    prompt = TASK_PROMPT.strip()
+    prompt = (GUIDED_TASK_PROMPT if GUIDED_SEARCH else TASK_PROMPT).strip()
 
     agent = AIAgent(
         model=MODEL,
         provider=PROVIDER,
         quiet_mode=True,
-        enabled_toolsets=["hermes-cli", "triton_ascend"],
+        # Project skills are ordinary files under .hermes/skills and are read through
+        # the file toolset. Excluding the global `skills` toolset prevents unrelated
+        # or mutable home-profile skills from contaminating reproducible kernel runs.
+        enabled_toolsets=KERNEL_AGENT_TOOLSETS,
         session_id=f"kernelbench-{name}",
         max_iterations=MAX_ITERATIONS,
         save_trajectories=True,
     )
+    disable_batch_agent_background_reviews(agent)
 
     try:
         mark_kernel(state, name, "running",
@@ -245,14 +354,26 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
 
         sf = kernel_dir / ".pipeline_state.json"
 
-        def _read_stage() -> str:
+        def _read_progress() -> tuple[str, int, int, str, int, str, int, int]:
             if sf.exists():
                 try:
                     with open(sf) as f:
-                        return json.load(f).get("current_stage", "unknown")
+                        current = json.load(f)
+                    guided = current.get("guided_search") or {}
+                    active = guided.get("active_attempt") or {}
+                    return (
+                        current.get("current_stage", "unknown"),
+                        int(guided.get("revision", 0)),
+                        int(guided.get("completed_attempts", 0)),
+                        str(guided.get("status", "")),
+                        int(active.get("id", 0) or 0),
+                        str(active.get("phase", "")),
+                        int(active.get("tool_calls_used", 0) or 0),
+                        int(active.get("llm_iterations_used", 0) or 0),
+                    )
                 except (json.JSONDecodeError, OSError):
                     pass
-            return "unknown"
+            return "unknown", 0, 0, "", 0, "", 0, 0
 
         # Drive the pipeline forward across multiple turns. The agent often ends
         # its turn with the pipeline parked mid-stage (deliverables written but
@@ -261,7 +382,7 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
         result = {}
         history = None
         msg = prompt
-        prev_stage = None
+        prev_progress = None
         for turn in range(1, MAX_PIPELINE_TURNS + 1):
             result = agent.run_conversation(
                 user_message=msg,
@@ -269,20 +390,27 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
                 task_id=f"kernelbench-{name}",
             )
             history = result.get("messages")
-            stage = _read_stage()
-            log.info("  %s turn %d → stage=%s", name, turn, stage)
+            progress = _read_progress()
+            stage = progress[0]
+            log.info(
+                "  %s turn %d → stage=%s guided_revision=%d attempts=%d "
+                "status=%s active=%d phase=%s tools=%d llm=%d",
+                name, turn, *progress)
 
             if stage == "done":
+                break
+            if progress[3].startswith("failed_"):
+                log.error("  %s guided search failed: %s", name, progress[3])
                 break
             # Stall guard: if the agent made no stage progress this turn (and it
             # isn't the very first optimize turn that still needs deliverables),
             # don't keep burning identical turns.
-            if stage == prev_stage and turn > 1:
+            if progress == prev_progress and turn > 1:
                 log.warning(
                     "  %s stalled at stage=%s after turn %d — stopping", name,
                     stage, turn)
                 break
-            prev_stage = stage
+            prev_progress = progress
             msg = CONTINUE_PROMPT
 
         # Fire on_session_finalize for the plugin
@@ -306,6 +434,8 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
         complete = pipeline_state.get("deliverables_complete", False)
         missing = pipeline_state.get("deliverables_missing", [])
         verified = pipeline_state.get("verified", False)
+        guided_state = pipeline_state.get("guided_search") or {}
+        guided_status = str(guided_state.get("status", ""))
         turns = pipeline_state.get("turn_count", 0)
 
         log.info(
@@ -318,6 +448,15 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
             elapsed,
         )
 
+        if guided_status.startswith("failed_"):
+            failure = guided_state.get("failure_reason") or guided_status
+            mark_kernel(state, name, "failed", detail=str(failure))
+            return {
+                "kernel": name,
+                "status": "failed",
+                "detail": str(failure),
+                "elapsed_s": elapsed,
+            }
         if current_stage == "done":
             mark_kernel(
                 state,
@@ -426,6 +565,8 @@ def print_summary(results: list[dict], state: dict) -> None:
 
 def main():
     global DATASET_DIR, STATE_FILE, MODEL, PROVIDER, MAX_ITERATIONS, MAX_PIPELINE_TURNS
+    global GUIDED_SEARCH, GUIDED_SEARCH_BUDGET, GUIDED_SEARCH_RESUME
+    global GUIDED_SEARCH_SEED_RUN_ID, GUIDED_SEARCH_WALL_TIME_MINUTES
 
     parser = argparse.ArgumentParser(
         description="Sandboxed Triton kernel optimization pipeline")
@@ -447,6 +588,36 @@ def main():
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--max", type=int, default=None)
     parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument(
+        "--guided-search",
+        action="store_true",
+        help=
+        "Opt into SQL-backed Ascend MAP-Elites search before finalization.",
+    )
+    parser.add_argument(
+        "--guided-search-budget",
+        type=int,
+        default=GUIDED_SEARCH_BUDGET,
+        help="Completed candidate attempts per kernel (default: 20).",
+    )
+    parser.add_argument(
+        "--guided-search-wall-time-minutes",
+        type=float,
+        default=None,
+        help="Optional wall-time limit per kernel; no limit by default.",
+    )
+    parser.add_argument(
+        "--resume-guided-search",
+        action="store_true",
+        help="Resume the workspace's incomplete guided-search run.",
+    )
+    parser.add_argument(
+        "--seed-guided-search",
+        type=int,
+        default=None,
+        metavar="RUN_ID",
+        help="Seed a new guided-search run from a retained prior run.",
+    )
     args = parser.parse_args()
 
     DATASET_DIR = args.dataset_dir
@@ -455,6 +626,13 @@ def main():
     PROVIDER = args.provider
     MAX_ITERATIONS = args.max_iterations
     MAX_PIPELINE_TURNS = args.max_pipeline_turns
+    GUIDED_SEARCH = bool(args.guided_search)
+    GUIDED_SEARCH_BUDGET = max(1, int(args.guided_search_budget))
+    GUIDED_SEARCH_WALL_TIME_MINUTES = args.guided_search_wall_time_minutes
+    GUIDED_SEARCH_RESUME = bool(args.resume_guided_search)
+    GUIDED_SEARCH_SEED_RUN_ID = args.seed_guided_search
+    if GUIDED_SEARCH:
+        MAX_PIPELINE_TURNS = max(MAX_PIPELINE_TURNS, GUIDED_SEARCH_BUDGET + 4)
     os.environ["HERMES_HOME"] = str(args.hermes_home)
 
     state = load_state()

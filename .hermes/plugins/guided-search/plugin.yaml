@@ -1,0 +1,19 @@
+name: guided-search
+version: "1.0.0"
+description: >
+  SQL-backed MAP-Elites guided search specialized for Ascend NPU kernels.
+  Maintains sticky multi-tool attempts, simulation and hardware elite tracks,
+  transition gradients, and per-model-request phase-aware context middleware.
+author: "Hermes Agent & Shayan"
+requires_env: []
+provides_tools:
+  - guided_search_status
+  - guided_search_checkout_parent
+  - guided_search_submit_candidate
+  - guided_search_finalize
+provides_hooks:
+  - pre_tool_call
+  - post_tool_call
+  - post_llm_call
+  - pre_verify
+  - on_session_end
