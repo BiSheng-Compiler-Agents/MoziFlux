@@ -34,6 +34,7 @@ class FakeSpan:
 
 
 class FakeTracer:
+
     def __init__(self):
         self.spans = []
 
@@ -44,6 +45,7 @@ class FakeTracer:
 
 
 class FakeProvider:
+
     def __init__(self, *args, **kwargs):
         self.processors = []
         self.flushes = 0
@@ -64,7 +66,8 @@ def phoenix(monkeypatch):
     trace_module.get_tracer = lambda name: tracer
     trace_module.set_span_in_context = lambda span: ("context", span)
     setattr(trace_module, "StatusCode", types.SimpleNamespace(ERROR="ERROR"))
-    setattr(trace_module, "Status",
+    setattr(trace_module,
+            "Status",
             lambda code, description="": (code, description))
 
     sdk_trace = types.ModuleType("opentelemetry.sdk.trace")
@@ -77,19 +80,26 @@ def phoenix(monkeypatch):
     grpc_export.OTLPSpanExporter = lambda **kwargs: ("exporter", kwargs)
 
     modules = {
-        "opentelemetry": types.ModuleType("opentelemetry"),
-        "opentelemetry.trace": trace_module,
-        "opentelemetry.sdk": types.ModuleType("opentelemetry.sdk"),
-        "opentelemetry.sdk.trace": sdk_trace,
-        "opentelemetry.sdk.trace.export": sdk_export,
-        "opentelemetry.exporter": types.ModuleType("opentelemetry.exporter"),
-        "opentelemetry.exporter.otlp": types.ModuleType(
-            "opentelemetry.exporter.otlp"),
-        "opentelemetry.exporter.otlp.proto": types.ModuleType(
-            "opentelemetry.exporter.otlp.proto"),
-        "opentelemetry.exporter.otlp.proto.grpc": types.ModuleType(
-            "opentelemetry.exporter.otlp.proto.grpc"),
-        "opentelemetry.exporter.otlp.proto.grpc.trace_exporter": grpc_export,
+        "opentelemetry":
+        types.ModuleType("opentelemetry"),
+        "opentelemetry.trace":
+        trace_module,
+        "opentelemetry.sdk":
+        types.ModuleType("opentelemetry.sdk"),
+        "opentelemetry.sdk.trace":
+        sdk_trace,
+        "opentelemetry.sdk.trace.export":
+        sdk_export,
+        "opentelemetry.exporter":
+        types.ModuleType("opentelemetry.exporter"),
+        "opentelemetry.exporter.otlp":
+        types.ModuleType("opentelemetry.exporter.otlp"),
+        "opentelemetry.exporter.otlp.proto":
+        types.ModuleType("opentelemetry.exporter.otlp.proto"),
+        "opentelemetry.exporter.otlp.proto.grpc":
+        types.ModuleType("opentelemetry.exporter.otlp.proto.grpc"),
+        "opentelemetry.exporter.otlp.proto.grpc.trace_exporter":
+        grpc_export,
     }
     modules["opentelemetry"].trace = trace_module
     for name, module in modules.items():
@@ -117,7 +127,10 @@ def test_traces_every_provider_request_with_complete_payloads(phoenix):
     plugin._on_pre_llm_call(
         session_id="session-1",
         user_message="optimize",
-        conversation_history=[{"role": "user", "content": "history"}],
+        conversation_history=[{
+            "role": "user",
+            "content": "history"
+        }],
         model="model",
         platform="python",
     )
@@ -131,20 +144,36 @@ def test_traces_every_provider_request_with_complete_payloads(phoenix):
             model="model",
             provider="provider",
             api_mode="chat_completions",
-            request={"body": {"messages": [{"role": "user", "content": long_input}]}},
-            middleware_trace=[{"plugin": "guided-search"}],
+            request={
+                "body": {
+                    "messages": [{
+                        "role": "user",
+                        "content": long_input
+                    }]
+                }
+            },
+            middleware_trace=[{
+                "plugin": "guided-search"
+            }],
         )
         plugin._on_post_api_request(
             session_id="session-1",
             api_request_id=f"request-{count}",
             api_call_count=count,
-            response={"assistant": {"content": long_output}},
-            usage={"prompt_tokens": 10, "completion_tokens": 20},
+            response={"assistant": {
+                "content": long_output
+            }},
+            usage={
+                "prompt_tokens": 10,
+                "completion_tokens": 20
+            },
             finish_reason="tool_calls" if count == 1 else "stop",
         )
 
-    llm_spans = [span for span in tracer.spans
-                 if span.name.startswith("hermes.llm.request")]
+    llm_spans = [
+        span for span in tracer.spans
+        if span.name.startswith("hermes.llm.request")
+    ]
     assert len(llm_spans) == 2
     for span in llm_spans:
         assert long_input in span.attributes["input.value"]
@@ -154,9 +183,12 @@ def test_traces_every_provider_request_with_complete_payloads(phoenix):
         assert span.ended is True
         assert span.context[1].name == "hermes.turn"
         assert span.attributes["llm.input_messages.0.message.role"] == "user"
-        assert long_input in span.attributes["llm.input_messages.0.message.content"]
-        assert span.attributes["llm.output_messages.0.message.role"] == "assistant"
-        assert long_output in span.attributes["llm.output_messages.0.message.content"]
+        assert long_input in span.attributes[
+            "llm.input_messages.0.message.content"]
+        assert span.attributes[
+            "llm.output_messages.0.message.role"] == "assistant"
+        assert long_output in span.attributes[
+            "llm.output_messages.0.message.content"]
         assert span.attributes["llm.token_count.prompt"] == 10
         assert span.attributes["llm.token_count.completion"] == 20
         assert span.attributes["llm.token_count.total"] == 30
@@ -167,8 +199,10 @@ def test_exact_post_middleware_request_and_message_tool_metadata(phoenix):
     plugin._on_pre_llm_call(session_id="session-1", user_message="run")
     exact = {
         "body": {
-            "model": "model",
-            "instructions": "system instructions",
+            "model":
+            "model",
+            "instructions":
+            "system instructions",
             "input": [{
                 "role": "user",
                 "content": "[GUIDED SEARCH] exact middleware context",
@@ -176,7 +210,9 @@ def test_exact_post_middleware_request_and_message_tool_metadata(phoenix):
             "tools": [{
                 "type": "function",
                 "name": "remote_verify",
-                "parameters": {"type": "object"},
+                "parameters": {
+                    "type": "object"
+                },
             }],
         }
     }
@@ -185,7 +221,10 @@ def test_exact_post_middleware_request_and_message_tool_metadata(phoenix):
         session_id="session-1",
         api_request_id="exact-1",
         api_call_count=1,
-        request={"_truncated": True, "preview": "observer payload"},
+        request={
+            "_truncated": True,
+            "preview": "observer payload"
+        },
         model="model",
         provider="provider",
     )
@@ -197,17 +236,25 @@ def test_exact_post_middleware_request_and_message_tool_metadata(phoenix):
             api_call_count=1,
             response={
                 "assistant_message": {
-                    "role": "assistant",
-                    "content": "",
+                    "role":
+                    "assistant",
+                    "content":
+                    "",
                     "tool_calls": [{
-                        "id": "call-1",
-                        "name": "remote_verify",
-                        "arguments": "{\"local_dir\":\"/tmp/kernel\"}",
+                        "id":
+                        "call-1",
+                        "name":
+                        "remote_verify",
+                        "arguments":
+                        "{\"local_dir\":\"/tmp/kernel\"}",
                     }],
                 }
             },
             assistant_message={},
-            usage={"input_tokens": 12, "output_tokens": 3},
+            usage={
+                "input_tokens": 12,
+                "output_tokens": 3
+            },
             finish_reason="tool_calls",
         )
         return "ok"
@@ -222,17 +269,18 @@ def test_exact_post_middleware_request_and_message_tool_metadata(phoenix):
 
     span = next(item for item in tracer.spans
                 if item.name == "hermes.llm.request.1")
-    assert "[GUIDED SEARCH] exact middleware context" in span.attributes["input.value"]
+    assert "[GUIDED SEARCH] exact middleware context" in span.attributes[
+        "input.value"]
     assert "observer payload" in span.attributes["llm.observer_request"]
-    assert span.attributes["llm.request.capture_source"] == "llm_execution_post_middleware"
+    assert span.attributes[
+        "llm.request.capture_source"] == "llm_execution_post_middleware"
     assert span.attributes["llm.input_messages.0.message.role"] == "system"
     assert span.attributes["llm.input_messages.1.message.role"] == "user"
     assert "exact middleware context" in span.attributes[
         "llm.input_messages.1.message.content"]
     assert "remote_verify" in span.attributes["llm.tools.0.tool.json_schema"]
     assert span.attributes[
-        "llm.output_messages.0.message.tool_calls.0.tool_call.function.name"
-    ] == "remote_verify"
+        "llm.output_messages.0.message.tool_calls.0.tool_call.function.name"] == "remote_verify"
     assert span.attributes["llm.token_count.total"] == 15
     assert plugin._effective_requests == {}
 
@@ -267,7 +315,10 @@ def test_traces_complete_tool_io_and_provider_errors(phoenix):
     )
     plugin._on_post_tool_call(
         tool_name="remote_verify",
-        result={"success": False, "error": "remote timeout"},
+        result={
+            "success": False,
+            "error": "remote timeout"
+        },
         session_id="session-1",
         tool_call_id="tool-error",
     )
@@ -275,13 +326,18 @@ def test_traces_complete_tool_io_and_provider_errors(phoenix):
         session_id="session-1",
         api_request_id="request-error",
         api_call_count=3,
-        request={"body": {"messages": []}},
+        request={"body": {
+            "messages": []
+        }},
     )
     plugin._on_api_request_error(
         session_id="session-1",
         api_request_id="request-error",
         api_call_count=3,
-        error={"type": "timeout", "message": "provider timed out"},
+        error={
+            "type": "timeout",
+            "message": "provider timed out"
+        },
         retry_count=1,
         max_retries=3,
         retryable=True,
@@ -310,6 +366,7 @@ def test_registers_request_tool_and_session_hooks(phoenix):
     plugin, _ = phoenix
 
     class Context:
+
         def __init__(self):
             self.hooks = {}
             self.middleware = {}

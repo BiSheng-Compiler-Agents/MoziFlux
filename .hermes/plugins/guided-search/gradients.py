@@ -8,19 +8,21 @@ from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any
 
-
 ORDINAL_DIMENSIONS = ("algorithm", "engine", "memory", "dispatch")
 
 
 def estimate_gradients(
-    transitions: Iterable[dict[str, Any]], *, decay: float = 0.95,
+    transitions: Iterable[dict[str, Any]],
+    *,
+    decay: float = 0.95,
     parent: dict[str, Any] | None = None,
     elites: Iterable[dict[str, Any]] = (),
     gradient_weights: tuple[float, float, float] = (0.4, 0.4, 0.2),
 ) -> dict[str, dict[str, float]]:
     """Calculate and combine all gradient components."""
     records = list(transitions)
-    if records and all(record.get("created_at") is not None for record in records):
+    if records and all(
+            record.get("created_at") is not None for record in records):
         records = sorted(
             records,
             key=lambda record: (
@@ -43,9 +45,8 @@ def estimate_gradients(
         child = transition.get("child", {})
         improved = int(bool(transition.get("improved", delta_fitness > 0)))
         for dimension in ORDINAL_DIMENSIONS:
-            movement = (
-                int(child.get(dimension, 0))
-                - int(transition_parent.get(dimension, 0)))
+            movement = (int(child.get(dimension, 0)) -
+                        int(transition_parent.get(dimension, 0)))
             if movement == 0:
                 continue
             direction = 1.0 if movement > 0 else -1.0
@@ -62,30 +63,33 @@ def estimate_gradients(
             if str(elite.get("mechanism")) != mechanism:
                 continue
             coordinate = tuple(
-                int(elite.get(dimension, 0)) for dimension in ORDINAL_DIMENSIONS)
+                int(elite.get(dimension, 0))
+                for dimension in ORDINAL_DIMENSIONS)
             quality = elite.get("hardware_score")
             if quality is None:
                 quality = elite.get("simulation_score")
-            occupied[coordinate] = max(
-                occupied.get(coordinate, 0.0), float(quality or 0.0))
+            occupied[coordinate] = max(occupied.get(coordinate, 0.0),
+                                       float(quality or 0.0))
         max_quality = max(occupied.values(), default=0.0)
         origin = tuple(
             int(parent.get(dimension, 0)) for dimension in ORDINAL_DIMENSIONS)
         for cell in product(range(4), repeat=len(ORDINAL_DIMENSIONS)):
             distance = sum(
-                abs(cell[index] - origin[index]) for index in range(len(origin)))
+                abs(cell[index] - origin[index])
+                for index in range(len(origin)))
             if distance == 0:
                 continue
             if cell in occupied:
-                potential = (
-                    max(0.0, 1.0 - occupied[cell] / max_quality)
-                    if max_quality > 0 else 0.0)
+                potential = (max(0.0, 1.0 - occupied[cell] / max_quality)
+                             if max_quality > 0 else 0.0)
             else:
                 potential = 1.0
             for index, dimension in enumerate(ORDINAL_DIMENSIONS):
-                exploration[dimension] += (
-                    potential * (cell[index] - origin[index]) / distance**2)
-        scale = max((abs(value) for value in exploration.values()), default=0.0)
+                exploration[dimension] += (potential *
+                                           (cell[index] - origin[index]) /
+                                           distance**2)
+        scale = max((abs(value) for value in exploration.values()),
+                    default=0.0)
         if scale > 0:
             exploration = {
                 dimension: value / scale
@@ -94,35 +98,23 @@ def estimate_gradients(
 
     result: dict[str, dict[str, float]] = {}
     for dimension in ORDINAL_DIMENSIONS:
-        support = len(positive_improvements[dimension]) + len(negative_improvements[dimension])
+        support = len(positive_improvements[dimension]) + len(
+            negative_improvements[dimension])
         confidence = support / (support + 3.0)
-        fitness = (
-            weighted_delta[dimension] / transition_weights[dimension]
-            if transition_weights[dimension]
-            else 0.0
-        )
-        positive_rate = (
-            sum(positive_improvements[dimension])
-            / len(positive_improvements[dimension])
-            if positive_improvements[dimension]
-            else 0.0
-        )
-        negative_rate = (
-            sum(negative_improvements[dimension])
-            / len(negative_improvements[dimension])
-            if negative_improvements[dimension]
-            else 0.0
-        )
+        fitness = (weighted_delta[dimension] / transition_weights[dimension]
+                   if transition_weights[dimension] else 0.0)
+        positive_rate = (sum(positive_improvements[dimension]) /
+                         len(positive_improvements[dimension])
+                         if positive_improvements[dimension] else 0.0)
+        negative_rate = (sum(negative_improvements[dimension]) /
+                         len(negative_improvements[dimension])
+                         if negative_improvements[dimension] else 0.0)
         rate = positive_rate - negative_rate
         fitness_component = math.tanh(fitness)
         exploration_component = float(exploration[dimension])
-        combined = (
-            confidence * (
-                gradient_weights[0] * fitness_component
-                + gradient_weights[1] * rate
-            )
-            + gradient_weights[2] * exploration_component
-        )
+        combined = (confidence * (gradient_weights[0] * fitness_component +
+                                  gradient_weights[1] * rate) +
+                    gradient_weights[2] * exploration_component)
         result[dimension] = {
             "fitness": fitness,
             "fitness_normalized": fitness_component,

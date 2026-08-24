@@ -9,7 +9,6 @@ from typing import Any, Mapping
 
 from .source_features import DescriptorEvidence, extract_source_features
 
-
 _NPU_OPTIONS = {
     "allow_fp8e4nv",
     "allowed_dot_input_precisions",
@@ -204,37 +203,46 @@ DESCRIPTOR_SCHEMA: dict[str, dict[str, Any]] = {
         "label": "algorithmic structure",
         "bins": {
             0: {
-                "name": "direct_single_stage",
-                "description": (
-                    "One direct stage with no reachable fusion, online recurrence, or "
-                    "multi-kernel decomposition."),
-                "guidance": (
-                    "Use a direct formulation; remove unnecessary fusion or complex "
-                    "reformulation when its overhead exceeds its benefit."),
+                "name":
+                "direct_single_stage",
+                "description":
+                ("One direct stage with no reachable fusion, online recurrence, or "
+                 "multi-kernel decomposition."),
+                "guidance":
+                ("Use a direct formulation; remove unnecessary fusion or complex "
+                 "reformulation when its overhead exceeds its benefit."),
             },
             1: {
-                "name": "local_fusion",
-                "description": (
-                    "Locally fused operations or a fused pointwise/reduction epilogue."),
-                "guidance": (
-                    "Fuse adjacent pointwise, reduction, or epilogue work to avoid "
-                    "intermediate materialization while preserving exact semantics."),
+                "name":
+                "local_fusion",
+                "description":
+                ("Locally fused operations or a fused pointwise/reduction epilogue."
+                 ),
+                "guidance":
+                ("Fuse adjacent pointwise, reduction, or epilogue work to avoid "
+                 "intermediate materialization while preserving exact semantics."
+                 ),
             },
             2: {
-                "name": "loop_or_reduction_reformulation",
-                "description": (
-                    "Online, scan, chunked, or loop-carried reduction reformulation."),
-                "guidance": (
-                    "Explore a single-pass, online, scan, folding, or other structural "
-                    "rewrite that reduces repeated work or full-tensor intermediates."),
+                "name":
+                "loop_or_reduction_reformulation",
+                "description":
+                ("Online, scan, chunked, or loop-carried reduction reformulation."
+                 ),
+                "guidance":
+                ("Explore a single-pass, online, scan, folding, or other structural "
+                 "rewrite that reduces repeated work or full-tensor intermediates."
+                 ),
             },
             3: {
-                "name": "multi_stage_decomposition",
-                "description": (
-                    "Sequential partial/finalize or producer/consumer kernel stages."),
-                "guidance": (
-                    "Explore a correctness-preserving multi-stage decomposition when an "
-                    "atomic, oversized, or serial stage limits performance."),
+                "name":
+                "multi_stage_decomposition",
+                "description":
+                ("Sequential partial/finalize or producer/consumer kernel stages."
+                 ),
+                "guidance":
+                ("Explore a correctness-preserving multi-stage decomposition when an "
+                 "atomic, oversized, or serial stage limits performance."),
             },
         },
     },
@@ -242,35 +250,43 @@ DESCRIPTOR_SCHEMA: dict[str, dict[str, Any]] = {
         "label": "Ascend execution-engine behavior",
         "bins": {
             0: {
-                "name": "single_engine",
-                "description": "Single-engine execution: Vector-only or mandatory Cube-only.",
-                "guidance": (
-                    "Keep a single engine when no cross-engine handoff is useful; all "
-                    "dot/BMM/matmul work remains on Cube."),
+                "name":
+                "single_engine",
+                "description":
+                "Single-engine execution: Vector-only or mandatory Cube-only.",
+                "guidance":
+                ("Keep a single engine when no cross-engine handoff is useful; all "
+                 "dot/BMM/matmul work remains on Cube."),
             },
             1: {
-                "name": "implicit_mixed",
-                "description": "Reachable Cube work plus a Vector stage without explicit partitioning.",
-                "guidance": (
-                    "Fuse a necessary Vector reduction/epilogue around Cube work before "
-                    "introducing explicit scheduling machinery."),
+                "name":
+                "implicit_mixed",
+                "description":
+                "Reachable Cube work plus a Vector stage without explicit partitioning.",
+                "guidance":
+                ("Fuse a necessary Vector reduction/epilogue around Cube work before "
+                 "introducing explicit scheduling machinery."),
             },
             2: {
-                "name": "explicit_serial_handoff",
-                "description": (
-                    "Explicit Cube/Vector scopes or synchronization without buffering overlap."),
-                "guidance": (
-                    "Partition work across Cube and Vector engines with a simple, correct "
-                    "serial handoff before introducing overlap."),
+                "name":
+                "explicit_serial_handoff",
+                "description":
+                ("Explicit Cube/Vector scopes or synchronization without buffering overlap."
+                 ),
+                "guidance":
+                ("Partition work across Cube and Vector engines with a simple, correct "
+                 "serial handoff before introducing overlap."),
             },
             3: {
-                "name": "overlapped_cv_pipeline",
-                "description": (
-                    "Mixed Cube/Vector execution with explicit or compiler-managed "
-                    "coordination and potential overlap."),
-                "guidance": (
-                    "Explore safe Cube/Vector overlap or coordinated handoff using scopes, "
-                    "events, auto scheduling, or CV balancing; validate event accounting."),
+                "name":
+                "overlapped_cv_pipeline",
+                "description":
+                ("Mixed Cube/Vector execution with explicit or compiler-managed "
+                 "coordination and potential overlap."),
+                "guidance":
+                ("Explore safe Cube/Vector overlap or coordinated handoff using scopes, "
+                 "events, auto scheduling, or CV balancing; validate event accounting."
+                 ),
             },
         },
     },
@@ -278,35 +294,44 @@ DESCRIPTOR_SCHEMA: dict[str, dict[str, Any]] = {
         "label": "memory hierarchy and dataflow",
         "bins": {
             0: {
-                "name": "direct_access",
-                "description": "No explicit tiling, reuse, buffering, or pipelining detected.",
-                "guidance": (
-                    "Use simple direct access when reuse machinery costs more than it saves; "
-                    "minimize temporary storage and data movement."),
+                "name":
+                "direct_access",
+                "description":
+                "No explicit tiling, reuse, buffering, or pipelining detected.",
+                "guidance":
+                ("Use simple direct access when reuse machinery costs more than it saves; "
+                 "minimize temporary storage and data movement."),
             },
             1: {
-                "name": "contiguous_or_accumulator_reuse",
-                "description": (
-                    "Contiguous/aligned access or a numerical accumulator reuses values on chip."),
-                "guidance": (
-                    "Carry an accumulator across repeated work so partial results stay on chip "
-                    "instead of being reloaded or rematerialized."),
+                "name":
+                "contiguous_or_accumulator_reuse",
+                "description":
+                ("Contiguous/aligned access or a numerical accumulator reuses values on chip."
+                 ),
+                "guidance":
+                ("Carry an accumulator across repeated work so partial results stay on chip "
+                 "instead of being reloaded or rematerialized."),
             },
             2: {
-                "name": "explicit_tiling_or_local_buffer",
-                "description": (
-                    "Explicit block pointers, local allocation, tiling, or register blocking."),
-                "guidance": (
-                    "Use explicit tiling/local buffers or register blocking to increase reuse "
-                    "without exceeding UB/L1/register limits."),
+                "name":
+                "explicit_tiling_or_local_buffer",
+                "description":
+                ("Explicit block pointers, local allocation, tiling, or register blocking."
+                 ),
+                "guidance":
+                ("Use explicit tiling/local buffers or register blocking to increase reuse "
+                 "without exceeding UB/L1/register limits."),
             },
             3: {
-                "name": "pipelined_buffering",
-                "description": (
-                    "Multibuffer, preload, UB-saving, workspace buffering, or ping-pong dataflow."),
-                "guidance": (
-                    "Explore preload/multibuffer or ping-pong dataflow to overlap movement and "
-                    "compute; check UB pressure, alignment, synchronization, and queue depth."),
+                "name":
+                "pipelined_buffering",
+                "description":
+                ("Multibuffer, preload, UB-saving, workspace buffering, or ping-pong dataflow."
+                 ),
+                "guidance":
+                ("Explore preload/multibuffer or ping-pong dataflow to overlap movement and "
+                 "compute; check UB pressure, alignment, synchronization, and queue depth."
+                 ),
             },
         },
     },
@@ -314,68 +339,84 @@ DESCRIPTOR_SCHEMA: dict[str, dict[str, Any]] = {
         "label": "work decomposition and dispatch",
         "bins": {
             0: {
-                "name": "fixed_direct",
-                "description": "One fixed direct launch policy.",
-                "guidance": (
-                    "Prefer a simple launch/grid when specialization or persistent dispatch "
-                    "adds overhead without enough parallel benefit."),
+                "name":
+                "fixed_direct",
+                "description":
+                "One fixed direct launch policy.",
+                "guidance":
+                ("Prefer a simple launch/grid when specialization or persistent dispatch "
+                 "adds overhead without enough parallel benefit."),
             },
             1: {
-                "name": "tuned_or_swizzled_direct",
-                "description": "Autotuned or GROUP_M/N-swizzled direct launch.",
-                "guidance": (
-                    "Choose an explicit block/tile decomposition that balances parallelism, "
-                    "tail masking, and per-program work."),
+                "name":
+                "tuned_or_swizzled_direct",
+                "description":
+                "Autotuned or GROUP_M/N-swizzled direct launch.",
+                "guidance":
+                ("Choose an explicit block/tile decomposition that balances parallelism, "
+                 "tail masking, and per-program work."),
             },
             2: {
-                "name": "persistent_or_decomposed",
-                "description": (
-                    "Persistent/grid-stride traversal or sequential multi-stage launches."),
-                "guidance": (
-                    "Explore persistent or grid-stride decomposition, auto-blockification, "
-                    "or diagonal scheduling while respecting grid and resource limits."),
+                "name":
+                "persistent_or_decomposed",
+                "description":
+                ("Persistent/grid-stride traversal or sequential multi-stage launches."
+                 ),
+                "guidance":
+                ("Explore persistent or grid-stride decomposition, auto-blockification, "
+                 "or diagonal scheduling while respecting grid and resource limits."
+                 ),
             },
             3: {
-                "name": "specialized_multi_path",
-                "description": (
-                    "Autotuned, persistent-specialized, direct, or native multi-path dispatch."),
-                "guidance": (
-                    "Use shape-aware/autotuned or multi-path dispatch only when branches are "
-                    "fully covered and dispatch overhead is justified."),
+                "name":
+                "specialized_multi_path",
+                "description":
+                ("Autotuned, persistent-specialized, direct, or native multi-path dispatch."
+                 ),
+                "guidance":
+                ("Use shape-aware/autotuned or multi-path dispatch only when branches are "
+                 "fully covered and dispatch overhead is justified."),
             },
         },
     },
 }
 
-
 MECHANISM_SCHEMA: dict[str, dict[str, str]] = {
     "standard_triton": {
-        "label": "standard Triton",
-        "guidance": "Use portable Triton primitives and ordinary launch configuration.",
+        "label":
+        "standard Triton",
+        "guidance":
+        "Use portable Triton primitives and ordinary launch configuration.",
     },
     "compiler_managed": {
-        "label": "compiler-managed Triton",
-        "guidance": (
-            "Use BishengIR/NPUOptions such as auto scheduling, CV balancing, flattening, "
-            "vectorization, preload, or UB-saving without manual pipeline ownership."),
+        "label":
+        "compiler-managed Triton",
+        "guidance":
+        ("Use BishengIR/NPUOptions such as auto scheduling, CV balancing, flattening, "
+         "vectorization, preload, or UB-saving without manual pipeline ownership."
+         ),
     },
     "extension_hinted": {
-        "label": "Ascend extension hinted",
-        "guidance": (
-            "Use lightweight Ascend compile hints, casts, indexing, gather/scatter, or "
-            "multibuffer hints while leaving scheduling mostly compiler managed."),
+        "label":
+        "Ascend extension hinted",
+        "guidance":
+        ("Use lightweight Ascend compile hints, casts, indexing, gather/scatter, or "
+         "multibuffer hints while leaving scheduling mostly compiler managed."
+         ),
     },
     "manual_extension": {
-        "label": "manual Ascend extension scheduling",
-        "guidance": (
-            "Use explicit AL/BL scopes, allocation, sub-vector binding, and synchronization; "
-            "prove event balance, alignment, and resource safety."),
+        "label":
+        "manual Ascend extension scheduling",
+        "guidance":
+        ("Use explicit AL/BL scopes, allocation, sub-vector binding, and synchronization; "
+         "prove event balance, alignment, and resource safety."),
     },
     "native_hybrid": {
-        "label": "native/ACL hybrid dispatch",
-        "guidance": (
-            "Use ACL/torch_npu/native dispatch for justified shape regimes while preserving "
-            "the public API and covering every fallback path."),
+        "label":
+        "native/ACL hybrid dispatch",
+        "guidance":
+        ("Use ACL/torch_npu/native dispatch for justified shape regimes while preserving "
+         "the public API and covering every fallback path."),
     },
 }
 
@@ -386,7 +427,8 @@ def describe_coordinate(
     """Return semantic records for a stored coordinate."""
     values = list(coordinate)
     records: list[dict[str, Any]] = []
-    for index, dimension in enumerate(("algorithm", "engine", "memory", "dispatch")):
+    for index, dimension in enumerate(
+        ("algorithm", "engine", "memory", "dispatch")):
         value = int(values[index])
         spec = DESCRIPTOR_SCHEMA[dimension]
         bin_spec = spec["bins"][value]
@@ -397,10 +439,11 @@ def describe_coordinate(
             **bin_spec,
         })
     mechanism = str(values[4])
-    mechanism_spec = MECHANISM_SCHEMA.get(mechanism, {
-        "label": mechanism,
-        "guidance": "Treat this implementation mechanism as categorical.",
-    })
+    mechanism_spec = MECHANISM_SCHEMA.get(
+        mechanism, {
+            "label": mechanism,
+            "guidance": "Treat this implementation mechanism as categorical.",
+        })
     records.append({
         "dimension": "mechanism",
         "label": "implementation mechanism",
@@ -420,10 +463,11 @@ def annotate_target(
     """Translate a numeric target into explicit mutation semantics."""
     spec = DESCRIPTOR_SCHEMA[dimension]
     result: dict[str, Any] = {
-        "dimension_label": spec["label"],
-        "direction_meaning": (
-            "move toward the next higher behavioral bin"
-            if direction > 0 else "move toward the next lower behavioral bin"),
+        "dimension_label":
+        spec["label"],
+        "direction_meaning":
+        ("move toward the next higher behavioral bin"
+         if direction > 0 else "move toward the next lower behavioral bin"),
     }
     if parent_coordinate is not None:
         index = ("algorithm", "engine", "memory", "dispatch").index(dimension)
@@ -433,10 +477,9 @@ def annotate_target(
         target_spec = spec["bins"][target_bin]
         transition_guidance = (
             "Introduce behavior characteristic of the target bin. "
-            if direction > 0
-            else "Simplify or remove behavior characteristic of the current bin, "
-                 "then realize the target bin. "
-        ) + target_spec["guidance"]
+            if direction > 0 else
+            "Simplify or remove behavior characteristic of the current bin, "
+            "then realize the target bin. ") + target_spec["guidance"]
         result.update({
             "current_bin": current_bin,
             "current_name": current_spec["name"],
@@ -466,6 +509,7 @@ def annotate_target(
         })
     return result
 
+
 def classify_candidate(
     source: str,
     launch_options: Mapping[str, Any] | None = None,
@@ -485,30 +529,16 @@ def classify_candidate(
         environment=environment or {},
     )
 
-    algorithm = (
-        3 if features.multi_stage
-        else 2 if features.online_recurrence or features.scan
-        else 1 if features.fused_kernel
-        else 0
-    )
-    engine = (
-        3 if features.overlapped_cv_pipeline
-        else 2 if features.explicit_cv_handoff
-        else 1 if features.cube_ops and features.vector_ops
-        else 0
-    )
+    algorithm = (3 if features.multi_stage else 2 if features.online_recurrence
+                 or features.scan else 1 if features.fused_kernel else 0)
+    engine = (3 if features.overlapped_cv_pipeline else
+              2 if features.explicit_cv_handoff else
+              1 if features.cube_ops and features.vector_ops else 0)
     memory = (
-        3 if features.buffered_pipeline
-        else 2 if features.explicit_tiling
-        else 1 if features.contiguous_access or features.accumulator_reuse
-        else 0
-    )
-    dispatch = (
-        3 if features.multi_path
-        else 2 if features.persistent or features.multi_stage
-        else 1 if features.tuned_direct
-        else 0
-    )
+        3 if features.buffered_pipeline else 2 if features.explicit_tiling else
+        1 if features.contiguous_access or features.accumulator_reuse else 0)
+    dispatch = (3 if features.multi_path else 2 if features.persistent
+                or features.multi_stage else 1 if features.tuned_direct else 0)
 
     if features.native_call:
         mechanism = "native_hybrid"
@@ -529,6 +559,8 @@ def classify_candidate(
         mechanism=mechanism,
         evidence=tuple(features.evidence),
     )
+
+
 def candidate_fingerprint(
     source: str,
     launch_options: Mapping[str, Any] | None = None,
@@ -544,5 +576,8 @@ def candidate_fingerprint(
         "target": target,
         "compiler": compiler,
     }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    encoded = json.dumps(payload,
+                         sort_keys=True,
+                         separators=(",", ":"),
+                         default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()

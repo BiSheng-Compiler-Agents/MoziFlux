@@ -84,8 +84,8 @@ def _remote_verify_available() -> bool:
 
 def _sandbox_root() -> Path:
     return Path(
-        os.environ.get("KERNEL_SANDBOX_ROOT", "~/CompilerClaw/kernels")
-    ).expanduser().resolve()
+        os.environ.get("KERNEL_SANDBOX_ROOT",
+                       "~/CompilerClaw/kernels")).expanduser().resolve()
 
 
 def _session_workspace(session_id: str) -> Path | None:
@@ -115,7 +115,8 @@ def _save_pipeline(workspace: Path, state: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
-def _guided_context(session_id: str) -> tuple[Path, dict[str, Any], int] | None:
+def _guided_context(
+        session_id: str) -> tuple[Path, dict[str, Any], int] | None:
     if not _guided_search_available():
         return None
     workspace = _session_workspace(session_id)
@@ -135,22 +136,24 @@ def _guided_context(session_id: str) -> tuple[Path, dict[str, Any], int] | None:
             budget=int(guided.get("budget", 20)),
             target_soc=os.environ.get("CANNSIM_SOC_VERSION", ""),
             wall_time_limit_seconds=guided.get("wall_time_limit_seconds"),
-            promotion_domain=(
-                "hardware" if _remote_verify_available() else "simulation"),
+            promotion_domain=("hardware"
+                              if _remote_verify_available() else "simulation"),
         )
         pipeline = _load_pipeline(workspace)
     return workspace, pipeline, int(run_id)
 
 
-def initialize_run_for_workspace(
-    workspace: str | Path, session_id: str, budget: int = 20
-) -> int:
+def initialize_run_for_workspace(workspace: str | Path,
+                                 session_id: str,
+                                 budget: int = 20) -> int:
     """Public setup helper for programmatic orchestrators and tests."""
     return initialize_search_run(
-        workspace=Path(workspace), session_id=session_id, budget=budget,
+        workspace=Path(workspace),
+        session_id=session_id,
+        budget=budget,
         target_soc=os.environ.get("CANNSIM_SOC_VERSION", ""),
-        promotion_domain=(
-            "hardware" if _remote_verify_available() else "simulation"),
+        promotion_domain=("hardware"
+                          if _remote_verify_available() else "simulation"),
     )
 
 
@@ -183,55 +186,58 @@ def _on_pre_llm_call(
             instruction = (
                 f"SEARCH FAILED ({stopped_status}): "
                 f"{stopped_run.get('failure_reason') or exc}. Do not call "
-                "guided_search_finalize or kernel_status advance."
-            )
+                "guided_search_finalize or kernel_status advance.")
         elif stopped_status == "completed":
             instruction = (
                 "A hardware-confirmed winner has been materialized. Call "
-                "kernel_status(action='advance') to enter FINALIZE."
-            )
+                "kernel_status(action='advance') to enter FINALIZE.")
         else:
             if stopped_run.get("promotion_domain") == "hardware":
                 instruction = (
                     "Obtain physical-NPU confirmation for an elite, then call "
                     "guided_search_finalize. Do not call kernel_status advance "
-                    "before the winner is materialized."
-                )
+                    "before the winner is materialized.")
             else:
                 instruction = (
                     "remote_verify is unavailable; finalize the best cannsim elite "
                     "with guided_search_finalize, then call kernel_status advance."
                 )
         return {
-            "context": (
-                "[GUIDED SEARCH - ASCEND MAP-ELITES]\n"
-                f"RUN: {run_id}\nSTATUS: {exc}\n"
-                f"{instruction}"
-            )
+            "context": ("[GUIDED SEARCH - ASCEND MAP-ELITES]\n"
+                        f"RUN: {run_id}\nSTATUS: {exc}\n"
+                        f"{instruction}")
         }
     record_llm_iteration(run_id, api_request_id)
     run = get_run(run_id)
     assert run is not None
     parent = get_candidate(attempt.get("parent_candidate_id"))
-    return {"context": render_attempt_prompt(run=run, attempt=attempt, parent=parent)}
+    return {
+        "context": render_attempt_prompt(run=run,
+                                         attempt=attempt,
+                                         parent=parent)
+    }
 
 
-def _inject_latest_user_context(
-    request: dict[str, Any], context: str, *, api_mode: str = ""
-) -> dict[str, Any]:
+def _inject_latest_user_context(request: dict[str, Any],
+                                context: str,
+                                *,
+                                api_mode: str = "") -> dict[str, Any]:
     """Append bounded dynamic context to a request-local user message copy."""
-    message_key = (
-        "messages" if isinstance(request.get("messages"), list)
-        else "input" if isinstance(request.get("input"), list)
-        else None)
+    message_key = ("messages" if isinstance(request.get("messages"), list) else
+                   "input" if isinstance(request.get("input"), list) else None)
     if message_key is None:
         return request
     messages = list(request[message_key])
-    synthetic = (
-        {"role": "user", "content": [{"type": "input_text", "text": context}]}
-        if message_key == "input" or api_mode == "codex_responses"
-        else {"role": "user", "content": context}
-    )
+    synthetic = ({
+        "role": "user",
+        "content": [{
+            "type": "input_text",
+            "text": context
+        }]
+    } if message_key == "input" or api_mode == "codex_responses" else {
+        "role": "user",
+        "content": context
+    })
     messages.append(synthetic)
     effective = dict(request)
     effective[message_key] = messages
@@ -253,16 +259,18 @@ def _on_llm_execution(
     )
     if not rendered or not rendered.get("context"):
         return next_call(request)
-    effective = _inject_latest_user_context(
-        request, str(rendered["context"]), api_mode=api_mode)
+    effective = _inject_latest_user_context(request,
+                                            str(rendered["context"]),
+                                            api_mode=api_mode)
     if effective is request:
         return next_call(request)
     return next_call(effective)
 
 
-def _on_pre_tool_call(
-    tool_name: str = "", args: dict | None = None, session_id: str = "", **_: Any
-) -> dict[str, str] | None:
+def _on_pre_tool_call(tool_name: str = "",
+                      args: dict | None = None,
+                      session_id: str = "",
+                      **_: Any) -> dict[str, str] | None:
     context = _guided_context(session_id)
     if context is None:
         return None
@@ -277,7 +285,9 @@ def _parse_result(result: Any) -> dict[str, Any]:
     if isinstance(result, str):
         try:
             parsed = json.loads(result)
-            return parsed if isinstance(parsed, dict) else {"text": result[:4000]}
+            return parsed if isinstance(parsed, dict) else {
+                "text": result[:4000]
+            }
         except json.JSONDecodeError:
             return {"text": result[:4000]}
     return {"text": str(result)[:4000]}
@@ -285,7 +295,8 @@ def _parse_result(result: Any) -> dict[str, Any]:
 
 def _content_hash(path: Path) -> str | None:
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+        return hashlib.sha256(
+            path.read_bytes()).hexdigest() if path.is_file() else None
     except OSError:
         return None
 
@@ -298,10 +309,11 @@ def _single_candidate_hash(directory: Path) -> str | None:
     return _content_hash(candidates[0]) if len(candidates) == 1 else None
 
 
-def _evaluator_source_hash(
-    tool_name: str, args: dict[str, Any], workspace: Path
-) -> str | None:
-    if tool_name in {"cannsim_local_run", "cannsim_remote_run", "remote_verify"}:
+def _evaluator_source_hash(tool_name: str, args: dict[str, Any],
+                           workspace: Path) -> str | None:
+    if tool_name in {
+            "cannsim_local_run", "cannsim_remote_run", "remote_verify"
+    }:
         local_dir = args.get("local_dir")
         if local_dir:
             return _single_candidate_hash(Path(str(local_dir)).expanduser())
@@ -325,17 +337,18 @@ def _on_post_tool_call(
     raw = _parse_result(result)
     source_content_hash = _evaluator_source_hash(tool_name, args, workspace)
     if not record_tool_event(
-        run_id=run_id,
-        session_id=session_id,
-        tool_call_id=tool_call_id,
-        tool_name=tool_name,
-        result=raw,
-        source_content_hash=source_content_hash,
+            run_id=run_id,
+            session_id=session_id,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            result=raw,
+            source_content_hash=source_content_hash,
     ):
         return
     if tool_name in {"patch", "write_file"}:
         if source_content_hash:
-            update_current_source_hash(run_id, source_content_hash, "compiling")
+            update_current_source_hash(run_id, source_content_hash,
+                                       "compiling")
         else:
             update_attempt_phase(run_id, "compiling")
     elif tool_name in {"cannsim_local_run", "cannsim_remote_run"}:
@@ -343,12 +356,14 @@ def _on_post_tool_call(
         if raw.get("success") is True and "[HOST] PASS" in text:
             update_attempt_phase(run_id, "testing")
         else:
-            update_attempt_phase(run_id, "debugging_compile", raw.get("error", text[:1000]))
+            update_attempt_phase(run_id, "debugging_compile",
+                                 raw.get("error", text[:1000]))
     elif tool_name == "remote_verify":
         if raw.get("test_passed") is True:
             update_attempt_phase(run_id, "profiling")
         elif raw.get("test_passed") is False or raw.get("success") is False:
-            update_attempt_phase(run_id, "debugging_correctness", raw.get("error", "correctness failed"))
+            update_attempt_phase(run_id, "debugging_correctness",
+                                 raw.get("error", "correctness failed"))
 
 
 def _on_post_llm_call(session_id: str = "", **_: Any) -> None:
@@ -390,12 +405,12 @@ def _on_pre_verify(session_id: str = "", **_: Any) -> dict[str, str] | None:
     if not attempt:
         return None
     return {
-        "action": "continue",
-        "message": (
-            f"Guided-search attempt {attempt['id']} is still in phase "
-            f"{attempt['phase']}. Obtain a conclusive evaluation or submit the "
-            "attempt as invalid before stopping."
-        ),
+        "action":
+        "continue",
+        "message":
+        (f"Guided-search attempt {attempt['id']} is still in phase "
+         f"{attempt['phase']}. Obtain a conclusive evaluation or submit the "
+         "attempt as invalid before stopping."),
     }
 
 
@@ -405,19 +420,22 @@ def _on_session_end(session_id: str = "", **_: Any) -> None:
     context = _guided_context(session_id)
     if context is not None:
         workspace, pipeline, run_id = context
-        logger.info("guided-search session paused: %s", json.dumps(run_summary(run_id), default=str))
+        logger.info("guided-search session paused: %s",
+                    json.dumps(run_summary(run_id), default=str))
 
 
 def _resolve_run(session_id: str) -> tuple[Path, dict[str, Any], int]:
     context = _guided_context(session_id)
     if context is None:
-        raise RuntimeError("guided search is unavailable or not enabled for this workspace")
+        raise RuntimeError(
+            "guided search is unavailable or not enabled for this workspace")
     return context
 
 
 def _handle_status(args: dict[str, Any], **_: Any) -> str:
     try:
-        workspace, pipeline, run_id = _resolve_run(str(args.get("session_id", "")))
+        workspace, pipeline, run_id = _resolve_run(
+            str(args.get("session_id", "")))
         return json.dumps(run_summary(run_id), indent=2, default=str)
     except Exception as exc:
         return json.dumps({"error": str(exc)})
@@ -425,7 +443,8 @@ def _handle_status(args: dict[str, Any], **_: Any) -> str:
 
 def _handle_checkout(args: dict[str, Any], **_: Any) -> str:
     try:
-        workspace, pipeline, run_id = _resolve_run(str(args.get("session_id", "")))
+        workspace, pipeline, run_id = _resolve_run(
+            str(args.get("session_id", "")))
         attempt = get_active_attempt(run_id)
         if not attempt:
             raise RuntimeError("no active guided-search attempt")
@@ -441,7 +460,8 @@ def _handle_checkout(args: dict[str, Any], **_: Any) -> str:
             raise RuntimeError("pipeline baseline is unknown")
         output = workspace / f"opt_{baseline}"
         output.write_text(parent["source_text"], encoding="utf-8")
-        actual_hash = hashlib.sha256(parent["source_text"].encode("utf-8")).hexdigest()
+        actual_hash = hashlib.sha256(
+            parent["source_text"].encode("utf-8")).hexdigest()
         mark_parent_checked_out(run_id, actual_hash)
         return json.dumps({
             "ok": True,
@@ -456,34 +476,39 @@ def _handle_checkout(args: dict[str, Any], **_: Any) -> str:
 
 def _handle_submit(args: dict[str, Any], **_: Any) -> str:
     try:
-        workspace, pipeline, run_id = _resolve_run(str(args.get("session_id", "")))
-        candidate_path = Path(str(args.get("candidate_path", ""))).expanduser().resolve()
+        workspace, pipeline, run_id = _resolve_run(
+            str(args.get("session_id", "")))
+        candidate_path = Path(str(args.get("candidate_path",
+                                           ""))).expanduser().resolve()
         if workspace not in candidate_path.parents:
-            raise ValueError("candidate_path must be inside the kernel workspace")
-        if not candidate_path.name.startswith("opt_") or not candidate_path.is_file():
-            raise ValueError("candidate_path must be an existing opt_*.py file")
+            raise ValueError(
+                "candidate_path must be inside the kernel workspace")
+        if not candidate_path.name.startswith(
+                "opt_") or not candidate_path.is_file():
+            raise ValueError(
+                "candidate_path must be an existing opt_*.py file")
         source = candidate_path.read_text(encoding="utf-8")
-        source_content_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        source_content_hash = hashlib.sha256(
+            source.encode("utf-8")).hexdigest()
         attempt = get_active_attempt(run_id)
         attempt_id = int(attempt["id"]) if attempt else None
         if attempt and attempt.get("kind") == "baseline":
             baseline_parent = get_candidate(attempt.get("parent_candidate_id"))
-            if (baseline_parent is None
-                    or baseline_parent.get("content_hash") != source_content_hash):
+            if (baseline_parent is None or baseline_parent.get("content_hash")
+                    != source_content_hash):
                 raise RuntimeError(
                     "baseline calibration must submit the unchanged checked-out "
                     "baseline source")
-        archived_source = get_candidate_by_content_hash(run_id, source_content_hash)
+        archived_source = get_candidate_by_content_hash(
+            run_id, source_content_hash)
         if attempt is None and archived_source is None:
             raise RuntimeError(
                 "submission without an active attempt is allowed only for an "
                 "already archived source awaiting hardware confirmation")
-        launch_options = args.get("launch_options") or (
-            json.loads(archived_source["launch_options_json"])
-            if archived_source else {})
-        environment = args.get("environment") or (
-            json.loads(archived_source["environment_json"])
-            if archived_source else {})
+        launch_options = args.get("launch_options") or (json.loads(
+            archived_source["launch_options_json"]) if archived_source else {})
+        environment = args.get("environment") or (json.loads(
+            archived_source["environment_json"]) if archived_source else {})
         descriptor = classify_candidate(source, launch_options, environment)
         simulation_score = None
         simulation = args.get("simulation")
@@ -495,12 +520,14 @@ def _handle_submit(args: dict[str, Any], **_: Any) -> str:
                     or forbidden_metrics & set(baseline_metrics)):
                 raise ValueError(
                     "simulation useful_work and wall_cycles are evaluator-owned; "
-                    "submit only probe_contract and baseline source_content_hash")
+                    "submit only probe_contract and baseline source_content_hash"
+                )
             if (not candidate_metrics.get("probe_contract")
                     or baseline_metrics.get("probe_contract")
                     != candidate_metrics.get("probe_contract")):
                 raise ValueError(
-                    "simulation promotion requires one matching non-empty probe contract")
+                    "simulation promotion requires one matching non-empty probe contract"
+                )
             evidence = successful_tool_evidence(
                 run_id,
                 {"cannsim_local_run", "cannsim_remote_run"},
@@ -524,22 +551,24 @@ def _handle_submit(args: dict[str, Any], **_: Any) -> str:
             )
             if baseline_evidence is None:
                 raise RuntimeError(
-                    "simulation promotion requires source-bound baseline cannsim evidence")
+                    "simulation promotion requires source-bound baseline cannsim evidence"
+                )
             candidate_metrics = {
                 **candidate_metrics,
                 # Equal work is defined by the shared probe contract. Use a
                 # normalized unit here rather than trusting an LLM-supplied count.
-                "useful_work": 1.0,
-                "wall_cycles": trace_wall_cycles(evidence),
+                "useful_work":
+                1.0,
+                "wall_cycles":
+                trace_wall_cycles(evidence),
             }
             baseline_metrics = {
                 **baseline_metrics,
                 "useful_work": 1.0,
                 "wall_cycles": trace_wall_cycles(baseline_evidence),
             }
-            simulation_score = simulation_fitness(
-                candidate_metrics, baseline_metrics
-            )
+            simulation_score = simulation_fitness(candidate_metrics,
+                                                  baseline_metrics)
         hardware_score = None
         hardware = args.get("hardware")
         if isinstance(hardware, dict):
@@ -554,19 +583,19 @@ def _handle_submit(args: dict[str, Any], **_: Any) -> str:
                     "hardware promotion requires remote_verify test/benchmark evidence "
                     "for this attempt and exact source hash")
             hardware_score = hardware_fitness_from_benchmark(
-                str(evidence.get("bench_output") or "")
-            )
+                str(evidence.get("bench_output") or ""))
         run = get_run(run_id)
         if run is None:
             raise RuntimeError(f"guided-search run {run_id} disappeared")
         required_domain = str(run["promotion_domain"])
-        required_score = (
-            hardware_score if required_domain == "hardware" else simulation_score)
+        required_score = (hardware_score if required_domain == "hardware" else
+                          simulation_score)
         if bool(args.get("correct")) and required_score is None:
             if required_domain == "hardware":
                 raise RuntimeError(
                     "remote_verify is available; a correct candidate requires "
-                    "source-bound physical-NPU correctness and PyTorch/ACL timing")
+                    "source-bound physical-NPU correctness and PyTorch/ACL timing"
+                )
             raise RuntimeError(
                 "remote_verify is unavailable; a correct candidate requires "
                 "source-bound equal-work cannsim evidence")
@@ -575,7 +604,8 @@ def _handle_submit(args: dict[str, Any], **_: Any) -> str:
                 source_content_hash=source_content_hash,
                 attempt_id=attempt_id)):
             raise RuntimeError(
-                "an invalid candidate requires source-bound evaluator failure evidence")
+                "an invalid candidate requires source-bound evaluator failure evidence"
+            )
         candidate_id = record_candidate(
             run_id=run_id,
             source=source,
@@ -597,25 +627,34 @@ def _handle_submit(args: dict[str, Any], **_: Any) -> str:
             "failure_reason": summary.get("failure_reason", ""),
         })
         _save_pipeline(workspace, pipeline)
-        return json.dumps({
-            "ok": True,
-            "candidate_id": candidate_id,
-            "coordinate": descriptor.coordinate(),
-            "descriptor_evidence": [
-                item.as_dict() for item in descriptor.evidence
-            ],
-            "simulation_score": simulation_score,
-            "hardware_score": hardware_score,
-            "completed_attempts": summary["completed_attempts"],
-            "budget": summary["budget"],
-        }, default=str)
+        return json.dumps(
+            {
+                "ok":
+                True,
+                "candidate_id":
+                candidate_id,
+                "coordinate":
+                descriptor.coordinate(),
+                "descriptor_evidence":
+                [item.as_dict() for item in descriptor.evidence],
+                "simulation_score":
+                simulation_score,
+                "hardware_score":
+                hardware_score,
+                "completed_attempts":
+                summary["completed_attempts"],
+                "budget":
+                summary["budget"],
+            },
+            default=str)
     except Exception as exc:
         return json.dumps({"error": str(exc)})
 
 
 def _handle_finalize(args: dict[str, Any], **_: Any) -> str:
     try:
-        workspace, pipeline, run_id = _resolve_run(str(args.get("session_id", "")))
+        workspace, pipeline, run_id = _resolve_run(
+            str(args.get("session_id", "")))
         summary = run_summary(run_id)
         if str(summary["status"]).startswith("failed_"):
             raise RuntimeError(
@@ -644,7 +683,8 @@ def _handle_finalize(args: dict[str, Any], **_: Any) -> str:
         return json.dumps({"error": str(exc)})
 
 
-def _tool_schema(name: str, description: str, properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
+def _tool_schema(name: str, description: str, properties: dict[str, Any],
+                 required: list[str]) -> dict[str, Any]:
     return {
         "name": name,
         "description": description,
@@ -677,7 +717,9 @@ def register(ctx) -> None:
         schema=_tool_schema(
             "guided_search_status",
             "Read the active Ascend MAP-Elites run, archive, budget, and sticky attempt.",
-            {"session_id": {"type": "string"}},
+            {"session_id": {
+                "type": "string"
+            }},
             ["session_id"],
         ),
         handler=_handle_status,
@@ -688,7 +730,9 @@ def register(ctx) -> None:
         schema=_tool_schema(
             "guided_search_checkout_parent",
             "Atomically materialize the active attempt's selected parent as opt_*.py. Valid only in CHECKOUT phase.",
-            {"session_id": {"type": "string"}},
+            {"session_id": {
+                "type": "string"
+            }},
             ["session_id"],
         ),
         handler=_handle_checkout,
@@ -700,21 +744,33 @@ def register(ctx) -> None:
             "guided_search_submit_candidate",
             "Submit the current opt_*.py candidate with structured correctness, cannsim, and optional physical-NPU evidence.",
             {
-                "session_id": {"type": "string"},
-                "candidate_path": {"type": "string"},
-                "correct": {"type": "boolean"},
-                "safe": {"type": "boolean"},
+                "session_id": {
+                    "type": "string"
+                },
+                "candidate_path": {
+                    "type": "string"
+                },
+                "correct": {
+                    "type": "boolean"
+                },
+                "safe": {
+                    "type": "boolean"
+                },
                 "simulation": {
-                    "type": "object",
-                    "description": (
-                        "Request simulation promotion after source-bound cannsim "
-                        "runs for candidate and baseline under one fixed-work probe "
-                        "contract. Work and wall cycles are not accepted from the caller."),
+                    "type":
+                    "object",
+                    "description":
+                    ("Request simulation promotion after source-bound cannsim "
+                     "runs for candidate and baseline under one fixed-work probe "
+                     "contract. Work and wall cycles are not accepted from the caller."
+                     ),
                     "properties": {
                         "candidate": {
                             "type": "object",
                             "properties": {
-                                "probe_contract": {"type": "string"},
+                                "probe_contract": {
+                                    "type": "string"
+                                },
                             },
                             "required": ["probe_contract"],
                             "additionalProperties": False,
@@ -722,25 +778,37 @@ def register(ctx) -> None:
                         "baseline": {
                             "type": "object",
                             "properties": {
-                                "probe_contract": {"type": "string"},
-                                "source_content_hash": {"type": "string"},
+                                "probe_contract": {
+                                    "type": "string"
+                                },
+                                "source_content_hash": {
+                                    "type": "string"
+                                },
                             },
-                            "required": ["probe_contract", "source_content_hash"],
+                            "required":
+                            ["probe_contract", "source_content_hash"],
                             "additionalProperties": False,
                         },
                     },
                     "required": ["candidate", "baseline"],
-                    "additionalProperties": False,
+                    "additionalProperties":
+                    False,
                 },
                 "hardware": {
-                    "type": "object",
-                    "description": (
-                        "Request hardware promotion after source-bound remote_verify. "
-                        "Fitness is parsed from raw PyTorch/ACL and Optimized Triton "
-                        "benchmark output; caller-provided latency arrays are ignored."),
+                    "type":
+                    "object",
+                    "description":
+                    ("Request hardware promotion after source-bound remote_verify. "
+                     "Fitness is parsed from raw PyTorch/ACL and Optimized Triton "
+                     "benchmark output; caller-provided latency arrays are ignored."
+                     ),
                 },
-                "launch_options": {"type": "object"},
-                "environment": {"type": "object"},
+                "launch_options": {
+                    "type": "object"
+                },
+                "environment": {
+                    "type": "object"
+                },
             },
             ["session_id", "candidate_path", "correct"],
         ),
@@ -752,7 +820,9 @@ def register(ctx) -> None:
         schema=_tool_schema(
             "guided_search_finalize",
             "After the configured budget, materialize the best hardware-confirmed elite and hand off to kernel-sandbox FINALIZE.",
-            {"session_id": {"type": "string"}},
+            {"session_id": {
+                "type": "string"
+            }},
             ["session_id"],
         ),
         handler=_handle_finalize,

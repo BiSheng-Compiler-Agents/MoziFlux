@@ -61,21 +61,30 @@ def test_successful_remote_verify_clears_stale_validation_errors(
         tmp_path, monkeypatch):
     workspace = tmp_path / "kernel"
     workspace.mkdir()
-    _save_state(workspace, {
-        "current_stage": "verify",
-        "results_txt_errors": ["stale parser failure"],
-        "verify_failed": True,
-        "verify_error": "old failure",
-    })
-    monkeypatch.setattr(_mod, "_session_workspace", lambda _session_id: workspace)
-    monkeypatch.setattr(_mod, "_save_results_txt", lambda _workspace, _raw: None)
+    _save_state(
+        workspace, {
+            "current_stage": "verify",
+            "results_txt_errors": ["stale parser failure"],
+            "verify_failed": True,
+            "verify_error": "old failure",
+        })
+    monkeypatch.setattr(_mod, "_session_workspace",
+                        lambda _session_id: workspace)
+    monkeypatch.setattr(_mod, "_save_results_txt",
+                        lambda _workspace, _raw: None)
     monkeypatch.setattr(_mod, "_remote_verify_available", lambda: True)
-    monkeypatch.setattr(_mod, "_validate_results_txt", lambda _workspace: (True, []))
-    monkeypatch.setattr(_mod, "_advance_stage", lambda _state, _workspace: ("record", "ok"))
+    monkeypatch.setattr(_mod, "_validate_results_txt", lambda _workspace:
+                        (True, []))
+    monkeypatch.setattr(_mod, "_advance_stage", lambda _state, _workspace:
+                        ("record", "ok"))
 
     _on_post_tool_call(
         tool_name="remote_verify",
-        result={"success": True, "test_passed": True, "bench_passed": True},
+        result={
+            "success": True,
+            "test_passed": True,
+            "bench_passed": True
+        },
         session_id="kernelbench-test",
     )
 
@@ -368,26 +377,29 @@ class TestPreToolCallHook:
         original_root = _sandbox_root()
         os.environ["KERNEL_SANDBOX_ROOT"] = str(tmp_workspace.parent)
         try:
-            _save_state(tmp_workspace, {
-                "baseline": "25_Swish.py",
-                "current_stage": "search",
-                "guided_search": {"enabled": True, "run_id": 1},
-            })
+            _save_state(
+                tmp_workspace, {
+                    "baseline": "25_Swish.py",
+                    "current_stage": "search",
+                    "guided_search": {
+                        "enabled": True,
+                        "run_id": 1
+                    },
+                })
             for target in (
-                str(tmp_workspace / "opt_25_Swish.py"),
-                os.path.relpath(
-                    tmp_workspace / "opt_25_Swish.py", Path.cwd()),
+                    str(tmp_workspace / "opt_25_Swish.py"),
+                    os.path.relpath(tmp_workspace / "opt_25_Swish.py",
+                                    Path.cwd()),
             ):
                 result = _on_pre_tool_call(
                     tool_name="patch",
                     args={
-                        "mode": "patch",
-                        "patch": (
-                            "*** Begin Patch\n"
-                            f"*** Update File: {target}\n"
-                            "@@\n-old\n+new\n"
-                            "*** End Patch"
-                        ),
+                        "mode":
+                        "patch",
+                        "patch": ("*** Begin Patch\n"
+                                  f"*** Update File: {target}\n"
+                                  "@@\n-old\n+new\n"
+                                  "*** End Patch"),
                     },
                     session_id=f"kernelbench-{tmp_workspace.name}",
                 )
@@ -402,13 +414,13 @@ class TestPreToolCallHook:
             result = _on_pre_tool_call(
                 tool_name="patch",
                 args={
-                    "mode": "patch",
-                    "patch": (
-                        "*** Begin Patch\n"
-                        f"*** Update File: {tmp_workspace / 'opt_25_Swish.py'}\n"
-                        f"*** Update File: {tmp_workspace / '25_Swish.py'}\n"
-                        "*** End Patch"
-                    ),
+                    "mode":
+                    "patch",
+                    "patch":
+                    ("*** Begin Patch\n"
+                     f"*** Update File: {tmp_workspace / 'opt_25_Swish.py'}\n"
+                     f"*** Update File: {tmp_workspace / '25_Swish.py'}\n"
+                     "*** End Patch"),
                 },
                 session_id=f"kernelbench-{tmp_workspace.name}",
             )
@@ -443,11 +455,15 @@ class TestPreToolCallHook:
                 ("search", "profile_kernels.py"),
                 ("verify", "opt_25_Swish.py"),
             ):
-                _save_state(tmp_workspace, {
-                    "baseline": "25_Swish.py",
-                    "current_stage": stage,
-                    "guided_search": {"enabled": True, "run_id": 1},
-                })
+                _save_state(
+                    tmp_workspace, {
+                        "baseline": "25_Swish.py",
+                        "current_stage": stage,
+                        "guided_search": {
+                            "enabled": True,
+                            "run_id": 1
+                        },
+                    })
                 result = _on_pre_tool_call(
                     tool_name="terminal",
                     args={"command": f"sha256sum {tmp_workspace / filename}"},
@@ -461,16 +477,21 @@ class TestPreToolCallHook:
         original_root = _sandbox_root()
         os.environ["KERNEL_SANDBOX_ROOT"] = str(tmp_workspace.parent)
         try:
-            _save_state(tmp_workspace, {
-                "baseline": "25_Swish.py",
-                "current_stage": "verify",
-                "guided_search": {"enabled": True, "run_id": 1},
-            })
+            _save_state(
+                tmp_workspace, {
+                    "baseline": "25_Swish.py",
+                    "current_stage": "verify",
+                    "guided_search": {
+                        "enabled": True,
+                        "run_id": 1
+                    },
+                })
             result = _on_pre_tool_call(
                 tool_name="terminal",
                 args={
-                    "command": (
-                        f"cp /tmp/replacement.py {tmp_workspace / 'opt_25_Swish.py'}")
+                    "command":
+                    (f"cp /tmp/replacement.py {tmp_workspace / 'opt_25_Swish.py'}"
+                     )
                 },
                 session_id=f"kernelbench-{tmp_workspace.name}",
             )
@@ -589,8 +610,7 @@ class TestPreLlmCallHook:
         assert result is None
 
     def test_request_middleware_refreshes_stage_without_accumulation(
-        self, tmp_workspace
-    ):
+            self, tmp_workspace):
         original_root = _sandbox_root()
         os.environ["KERNEL_SANDBOX_ROOT"] = str(tmp_workspace.parent)
         try:
@@ -599,7 +619,10 @@ class TestPreLlmCallHook:
                 "current_stage": "optimize",
             })
             request = {
-                "messages": [{"role": "user", "content": "optimize"}],
+                "messages": [{
+                    "role": "user",
+                    "content": "optimize"
+                }],
             }
             first = _on_llm_execution(
                 request=request,
@@ -640,14 +663,18 @@ class TestPreLlmCallHook:
                 api_mode="codex_responses",
             )
             assert third["input"][-1]["role"] == "user"
-            assert "KERNEL SANDBOX" in third["input"][-1]["content"][-1]["text"]
+            assert "KERNEL SANDBOX" in third["input"][-1]["content"][-1][
+                "text"]
         finally:
             os.environ["KERNEL_SANDBOX_ROOT"] = str(original_root)
 
 
 class TestRegistration:
+
     def test_uses_llm_request_middleware_not_once_per_turn_hook(self):
+
         class Context:
+
             def __init__(self):
                 self.hooks = []
                 self.middleware = []

@@ -50,8 +50,7 @@ def connect() -> Iterator[sqlite3.Connection]:
 
 def ensure_schema() -> None:
     with connect() as conn:
-        conn.executescript(
-            """
+        conn.executescript("""
             CREATE TABLE IF NOT EXISTS schema_meta (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -179,29 +178,27 @@ def ensure_schema() -> None:
                 support_count INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
             );
-            """
-        )
+            """)
         row = conn.execute(
             "SELECT value FROM schema_meta WHERE key='schema_version'"
         ).fetchone()
         if row is None:
             conn.execute(
                 "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?)",
-                (str(SCHEMA_VERSION),),
+                (str(SCHEMA_VERSION), ),
             )
         elif int(row["value"]) != SCHEMA_VERSION:
             raise RuntimeError(
-                f"unsupported guided-search schema version: {row['value']}"
-            )
+                f"unsupported guided-search schema version: {row['value']}")
         candidate_columns = {
-            item["name"] for item in conn.execute(
+            item["name"]
+            for item in conn.execute(
                 "PRAGMA table_info(candidates)").fetchall()
         }
         if "descriptor_evidence_json" not in candidate_columns:
             conn.execute(
                 """ALTER TABLE candidates ADD COLUMN descriptor_evidence_json
-                   TEXT NOT NULL DEFAULT '[]'"""
-            )
+                   TEXT NOT NULL DEFAULT '[]'""")
 
 
 def _pipeline_path(workspace: Path) -> Path:
@@ -241,8 +238,8 @@ def initialize_search_run(
     if existing_id:
         with connect() as conn:
             existing = conn.execute(
-                "SELECT workspace FROM search_runs WHERE id=?", (int(existing_id),)
-            ).fetchone()
+                "SELECT workspace FROM search_runs WHERE id=?",
+                (int(existing_id), )).fetchone()
             if (existing is not None
                     and Path(existing["workspace"]).resolve() == workspace):
                 return int(existing_id)
@@ -296,7 +293,7 @@ def initialize_search_run(
                    JOIN elite_cells e ON e.run_id=c.run_id AND
                      (e.simulation_candidate_id=c.id OR e.hardware_candidate_id=c.id)
                    WHERE c.run_id=?""",
-                (int(seed_run_id),),
+                (int(seed_run_id), ),
             ).fetchall()
         for seed in seed_rows:
             record_candidate(
@@ -326,7 +323,8 @@ def initialize_search_run(
 def get_run(run_id: int) -> dict[str, Any] | None:
     ensure_schema()
     with connect() as conn:
-        row = conn.execute("SELECT * FROM search_runs WHERE id=?", (run_id,)).fetchone()
+        row = conn.execute("SELECT * FROM search_runs WHERE id=?",
+                           (run_id, )).fetchone()
         return dict(row) if row else None
 
 
@@ -335,15 +333,13 @@ def get_candidate(candidate_id: int | None) -> dict[str, Any] | None:
         return None
     ensure_schema()
     with connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM candidates WHERE id=?", (candidate_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM candidates WHERE id=?",
+                           (candidate_id, )).fetchone()
         return dict(row) if row else None
 
 
-def get_candidate_by_content_hash(
-    run_id: int, content_hash: str
-) -> dict[str, Any] | None:
+def get_candidate_by_content_hash(run_id: int,
+                                  content_hash: str) -> dict[str, Any] | None:
     ensure_schema()
     with connect() as conn:
         row = conn.execute(
@@ -358,8 +354,8 @@ def get_active_attempt(run_id: int) -> dict[str, Any] | None:
     ensure_schema()
     with connect() as conn:
         row = conn.execute(
-            "SELECT * FROM attempts WHERE run_id=? AND status='active'", (run_id,)
-        ).fetchone()
+            "SELECT * FROM attempts WHERE run_id=? AND status='active'",
+            (run_id, )).fetchone()
         return dict(row) if row else None
 
 
@@ -370,16 +366,16 @@ def run_summary(run_id: int) -> dict[str, Any]:
     active = get_active_attempt(run_id)
     with connect() as conn:
         occupied = conn.execute(
-            "SELECT COUNT(*) AS n FROM elite_cells WHERE run_id=?", (run_id,)
-        ).fetchone()["n"]
+            "SELECT COUNT(*) AS n FROM elite_cells WHERE run_id=?",
+            (run_id, )).fetchone()["n"]
         sim = conn.execute(
             "SELECT COUNT(*) AS n FROM elite_cells WHERE run_id=? "
-            "AND simulation_candidate_id IS NOT NULL", (run_id,)
-        ).fetchone()["n"]
+            "AND simulation_candidate_id IS NOT NULL",
+            (run_id, )).fetchone()["n"]
         hardware = conn.execute(
             "SELECT COUNT(*) AS n FROM elite_cells WHERE run_id=? "
-            "AND hardware_candidate_id IS NOT NULL", (run_id,)
-        ).fetchone()["n"]
+            "AND hardware_candidate_id IS NOT NULL",
+            (run_id, )).fetchone()["n"]
     return {
         **run,
         "active_attempt": active,
@@ -390,22 +386,19 @@ def run_summary(run_id: int) -> dict[str, Any]:
 
 
 def _selection_data(
-    conn: sqlite3.Connection, run_id: int
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    run = conn.execute(
-        "SELECT promotion_domain FROM search_runs WHERE id=?", (run_id,)
-    ).fetchone()
+        conn: sqlite3.Connection,
+        run_id: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    run = conn.execute("SELECT promotion_domain FROM search_runs WHERE id=?",
+                       (run_id, )).fetchone()
     if run is None:
         raise KeyError(f"unknown guided-search run: {run_id}")
-    elite_column = (
-        "hardware_candidate_id"
-        if run["promotion_domain"] == "hardware"
-        else "simulation_candidate_id")
+    elite_column = ("hardware_candidate_id" if run["promotion_domain"]
+                    == "hardware" else "simulation_candidate_id")
     elite_ids = [
         row[0] for row in conn.execute(
             f"SELECT {elite_column} FROM elite_cells WHERE run_id=? "
             f"AND {elite_column} IS NOT NULL",
-            (run_id,),
+            (run_id, ),
         ).fetchall()
     ]
     if elite_ids:
@@ -420,7 +413,7 @@ def _selection_data(
         candidate_rows = conn.execute(
             """SELECT * FROM candidates WHERE run_id=? AND correct=1 AND safe=1
                AND simulation_score IS NULL AND hardware_score IS NULL""",
-            (run_id,),
+            (run_id, ),
         ).fetchall()
     candidates = [dict(row) for row in candidate_rows]
     transitions = []
@@ -436,45 +429,45 @@ def _selection_data(
            LEFT JOIN candidates c ON c.id=t.child_candidate_id
            WHERE t.run_id=?
            ORDER BY t.created_at ASC, t.id ASC""",
-        (run_id,),
+        (run_id, ),
     ).fetchall()
     for row in rows:
         item = dict(row)
         if row["p_algorithm"] is not None and row["c_algorithm"] is not None:
             item["parent_json"] = {
-                "algorithm": row["p_algorithm"], "engine": row["p_engine"],
-                "memory": row["p_memory"], "dispatch": row["p_dispatch"],
+                "algorithm": row["p_algorithm"],
+                "engine": row["p_engine"],
+                "memory": row["p_memory"],
+                "dispatch": row["p_dispatch"],
                 "mechanism": row["p_mechanism"],
             }
             item["child_json"] = {
-                "algorithm": row["c_algorithm"], "engine": row["c_engine"],
-                "memory": row["c_memory"], "dispatch": row["c_dispatch"],
+                "algorithm": row["c_algorithm"],
+                "engine": row["c_engine"],
+                "memory": row["c_memory"],
+                "dispatch": row["c_dispatch"],
                 "mechanism": row["c_mechanism"],
             }
         transitions.append(item)
     return candidates, transitions
 
 
-def _authoritative_elite_exists(
-    conn: sqlite3.Connection, run_id: int, promotion_domain: str
-) -> bool:
-    candidate_column = (
-        "hardware_candidate_id"
-        if promotion_domain == "hardware"
-        else "simulation_candidate_id")
+def _authoritative_elite_exists(conn: sqlite3.Connection, run_id: int,
+                                promotion_domain: str) -> bool:
+    candidate_column = ("hardware_candidate_id" if promotion_domain
+                        == "hardware" else "simulation_candidate_id")
     row = conn.execute(
         f"""SELECT 1 FROM elite_cells WHERE run_id=?
             AND {candidate_column} IS NOT NULL LIMIT 1""",
-        (run_id,),
+        (run_id, ),
     ).fetchone()
     return row is not None
 
 
-def _set_exhausted_status(
-    conn: sqlite3.Connection, run: sqlite3.Row, reason: str
-) -> str:
-    has_elite = _authoritative_elite_exists(
-        conn, int(run["id"]), str(run["promotion_domain"]))
+def _set_exhausted_status(conn: sqlite3.Connection, run: sqlite3.Row,
+                          reason: str) -> str:
+    has_elite = _authoritative_elite_exists(conn, int(run["id"]),
+                                            str(run["promotion_domain"]))
     status = "ready_to_finalize" if has_elite else "failed_no_valid_elite"
     failure_reason = "" if has_elite else reason
     conn.execute(
@@ -490,11 +483,12 @@ def ensure_active_attempt(run_id: int) -> dict[str, Any]:
     with connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         active = conn.execute(
-            "SELECT * FROM attempts WHERE run_id=? AND status='active'", (run_id,)
-        ).fetchone()
+            "SELECT * FROM attempts WHERE run_id=? AND status='active'",
+            (run_id, )).fetchone()
         if active:
             return dict(active)
-        run = conn.execute("SELECT * FROM search_runs WHERE id=?", (run_id,)).fetchone()
+        run = conn.execute("SELECT * FROM search_runs WHERE id=?",
+                           (run_id, )).fetchone()
         if run is None:
             raise KeyError(f"unknown guided-search run: {run_id}")
         if run["status"] not in ("running", "ready_to_finalize"):
@@ -507,32 +501,35 @@ def ensure_active_attempt(run_id: int) -> dict[str, Any]:
                 status = _set_exhausted_status(
                     conn, run, "wall-time limit reached without a valid elite")
                 raise RuntimeError(
-                    "guided-search wall-time limit reached"
-                    if status == "ready_to_finalize"
-                    else "guided-search failed: no valid elite before wall-time limit")
+                    "guided-search wall-time limit reached" if status ==
+                    "ready_to_finalize" else
+                    "guided-search failed: no valid elite before wall-time limit"
+                )
 
-        if not _authoritative_elite_exists(
-                conn, run_id, str(run["promotion_domain"])):
+        if not _authoritative_elite_exists(conn, run_id,
+                                           str(run["promotion_domain"])):
             baseline_attempt = conn.execute(
                 """SELECT * FROM attempts WHERE run_id=? AND kind='baseline'
                    ORDER BY id LIMIT 1""",
-                (run_id,),
+                (run_id, ),
             ).fetchone()
             if baseline_attempt is not None:
                 reason = (
-                    baseline_attempt["last_error"]
-                    or "baseline evaluation did not produce an authoritative elite")
+                    baseline_attempt["last_error"] or
+                    "baseline evaluation did not produce an authoritative elite"
+                )
                 conn.execute(
                     """UPDATE search_runs SET status='failed_baseline_evaluation',
                        failure_reason=?, updated_at=? WHERE id=?""",
                     (reason, utcnow(), run_id),
                 )
-                raise RuntimeError(f"guided-search baseline evaluation failed: {reason}")
+                raise RuntimeError(
+                    f"guided-search baseline evaluation failed: {reason}")
 
             baseline = conn.execute(
                 """SELECT * FROM candidates WHERE run_id=?
                    AND parent_candidate_id IS NULL ORDER BY id LIMIT 1""",
-                (run_id,),
+                (run_id, ),
             ).fetchone()
             if baseline is None:
                 conn.execute(
@@ -541,10 +538,13 @@ def ensure_active_attempt(run_id: int) -> dict[str, Any]:
                        WHERE id=?""",
                     (utcnow(), run_id),
                 )
-                raise RuntimeError("guided-search baseline candidate is missing")
+                raise RuntimeError(
+                    "guided-search baseline candidate is missing")
             coordinate = [
-                int(baseline["algorithm"]), int(baseline["engine"]),
-                int(baseline["memory"]), int(baseline["dispatch"]),
+                int(baseline["algorithm"]),
+                int(baseline["engine"]),
+                int(baseline["memory"]),
+                int(baseline["dispatch"]),
                 str(baseline["mechanism"]),
             ]
             target = {
@@ -560,25 +560,31 @@ def ensure_active_attempt(run_id: int) -> dict[str, Any]:
                        mutation_objective, created_at, updated_at)
                    VALUES(?,?,?,?,?,?,?,?)""",
                 (
-                    run_id, 0, baseline["id"], "baseline", json.dumps(target),
+                    run_id,
+                    0,
+                    baseline["id"],
+                    "baseline",
+                    json.dumps(target),
                     "Evaluate the unchanged baseline with the run's authoritative "
                     "evaluator and submit its structured evidence. Do not optimize "
                     "or change direction during baseline calibration.",
-                    now, now,
+                    now,
+                    now,
                 ),
             )
             assert cursor.lastrowid is not None
-            return dict(conn.execute(
-                "SELECT * FROM attempts WHERE id=?", (cursor.lastrowid,)
-            ).fetchone())
+            return dict(
+                conn.execute("SELECT * FROM attempts WHERE id=?",
+                             (cursor.lastrowid, )).fetchone())
 
         if int(run["completed_attempts"]) >= int(run["budget"]):
             status = _set_exhausted_status(
                 conn, run, "candidate budget exhausted without a valid elite")
             raise RuntimeError(
-                "guided-search candidate budget exhausted"
-                if status == "ready_to_finalize"
-                else "guided-search failed: candidate budget exhausted without a valid elite")
+                "guided-search candidate budget exhausted" if status ==
+                "ready_to_finalize" else
+                "guided-search failed: candidate budget exhausted without a valid elite"
+            )
         generation = int(run["completed_attempts"]) + 1
         candidates, transitions = _selection_data(conn, run_id)
         parent, selection_mode = select_parent(
@@ -589,43 +595,40 @@ def ensure_active_attempt(run_id: int) -> dict[str, Any]:
             archive_revision=int(run["revision"]),
         )
         parent_id = int(parent["id"]) if parent else None
-        target = select_target(
-            parent, transitions, candidates, generation=generation)
+        target = select_target(parent,
+                               transitions,
+                               candidates,
+                               generation=generation)
         target["selection_mode"] = selection_mode
         target["parent_gradient_magnitude"] = float(
-            parent.get("_selection_gradient_magnitude", 0.0)
-            if parent else 0.0)
-        target["parent_selection_probability"] = float(
-            parent.get("_selection_probability", 1.0)
-            if parent else 1.0)
-        dimension_label = str(target["dimension_label"])
-        mechanism_note = (
-            f" Also explore {target['mechanism_target_label']}: "
-            f"{target['mechanism_guidance']}"
-            if target.get("mechanism_target") else ""
+            parent.get("_selection_gradient_magnitude", 0.0) if parent else 0.0
         )
+        target["parent_selection_probability"] = float(
+            parent.get("_selection_probability", 1.0) if parent else 1.0)
+        dimension_label = str(target["dimension_label"])
+        mechanism_note = (f" Also explore {target['mechanism_target_label']}: "
+                          f"{target['mechanism_guidance']}"
+                          if target.get("mechanism_target") else "")
         objective = (
             f"Use the selected parent's signed gradient vector as optimization "
             f"guidance. The dominant hint is {dimension_label} from "
             f"{target['current_name']} toward {target['target_name']}: "
             f"{target['mutation_guidance']} Behavioral bins are measured outcomes, "
             "not mandatory constraints. Preserve semantics and evaluate one focused "
-            f"candidate before changing direction.{mechanism_note}"
-        )
+            f"candidate before changing direction.{mechanism_note}")
         now = utcnow()
         cursor = conn.execute(
             """INSERT INTO attempts(
                    run_id, generation, parent_candidate_id, target_json,
                    mutation_objective, created_at, updated_at)
                VALUES(?,?,?,?,?,?,?)""",
-            (run_id, generation, parent_id, json.dumps(target), objective, now, now),
+            (run_id, generation, parent_id, json.dumps(target), objective, now,
+             now),
         )
         assert cursor.lastrowid is not None
         return dict(
-            conn.execute(
-                "SELECT * FROM attempts WHERE id=?", (cursor.lastrowid,)
-            ).fetchone()
-        )
+            conn.execute("SELECT * FROM attempts WHERE id=?",
+                         (cursor.lastrowid, )).fetchone())
 
 
 def _descriptor_tuple(
@@ -634,10 +637,14 @@ def _descriptor_tuple(
     if isinstance(descriptor, BehaviorDescriptor):
         return descriptor.coordinate()
     if len(descriptor) != 5:
-        raise ValueError("descriptor must have four ordinal dimensions and a mechanism")
+        raise ValueError(
+            "descriptor must have four ordinal dimensions and a mechanism")
     return (
-        int(descriptor[0]), int(descriptor[1]), int(descriptor[2]),
-        int(descriptor[3]), str(descriptor[4]),
+        int(descriptor[0]),
+        int(descriptor[1]),
+        int(descriptor[2]),
+        int(descriptor[3]),
+        str(descriptor[4]),
     )
 
 
@@ -655,32 +662,32 @@ def record_candidate(
     complete_attempt: bool = True,
 ) -> int:
     ensure_schema()
-    algorithm, engine, memory, dispatch, mechanism = _descriptor_tuple(descriptor)
-    descriptor_evidence = (
-        [item.as_dict() for item in descriptor.evidence]
-        if isinstance(descriptor, BehaviorDescriptor) else []
-    )
-    source_hash = candidate_fingerprint(
-        source, launch_options or {}, environment or {}
-    )
+    algorithm, engine, memory, dispatch, mechanism = _descriptor_tuple(
+        descriptor)
+    descriptor_evidence = ([item.as_dict() for item in descriptor.evidence] if
+                           isinstance(descriptor, BehaviorDescriptor) else [])
+    source_hash = candidate_fingerprint(source, launch_options or {},
+                                        environment or {})
     content_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()
     now = utcnow()
     with connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         run_row = conn.execute(
-            "SELECT promotion_domain FROM search_runs WHERE id=?", (run_id,)
-        ).fetchone()
+            "SELECT promotion_domain FROM search_runs WHERE id=?",
+            (run_id, )).fetchone()
         if run_row is None:
             raise KeyError(f"unknown guided-search run: {run_id}")
         promotion_domain = str(run_row["promotion_domain"])
         attempt = conn.execute(
-            "SELECT * FROM attempts WHERE run_id=? AND status='active'", (run_id,)
-        ).fetchone()
-        parent_id = int(attempt["parent_candidate_id"]) if attempt and attempt["parent_candidate_id"] else None
+            "SELECT * FROM attempts WHERE run_id=? AND status='active'",
+            (run_id, )).fetchone()
+        parent_id = int(
+            attempt["parent_candidate_id"]
+        ) if attempt and attempt["parent_candidate_id"] else None
         if attempt and attempt["kind"] == "baseline" and parent_id:
             baseline_parent = conn.execute(
-                "SELECT content_hash FROM candidates WHERE id=?", (parent_id,)
-            ).fetchone()
+                "SELECT content_hash FROM candidates WHERE id=?",
+                (parent_id, )).fetchone()
             if (baseline_parent is None
                     or baseline_parent["content_hash"] != content_hash):
                 raise ValueError(
@@ -707,12 +714,24 @@ def record_candidate(
                    simulation_score=COALESCE(excluded.simulation_score, candidates.simulation_score),
                    hardware_score=COALESCE(excluded.hardware_score, candidates.hardware_score)""",
             (
-                run_id, parent_id, source_hash, content_hash, source, algorithm, engine, memory,
-                dispatch, mechanism, json.dumps(descriptor_evidence),
-                int(correct), int(safe),
-                simulation_score, hardware_score,
+                run_id,
+                parent_id,
+                source_hash,
+                content_hash,
+                source,
+                algorithm,
+                engine,
+                memory,
+                dispatch,
+                mechanism,
+                json.dumps(descriptor_evidence),
+                int(correct),
+                int(safe),
+                simulation_score,
+                hardware_score,
                 json.dumps(launch_options or {}, sort_keys=True),
-                json.dumps(environment or {}, sort_keys=True), now,
+                json.dumps(environment or {}, sort_keys=True),
+                now,
             ),
         )
         candidate = conn.execute(
@@ -721,10 +740,10 @@ def record_candidate(
         ).fetchone()
         candidate_id = int(candidate["id"])
 
-        promote_simulation = (
-            promotion_domain == "simulation" and simulation_score is not None)
-        promote_hardware = (
-            promotion_domain == "hardware" and hardware_score is not None)
+        promote_simulation = (promotion_domain == "simulation"
+                              and simulation_score is not None)
+        promote_hardware = (promotion_domain == "hardware"
+                            and hardware_score is not None)
         if correct and safe and (promote_simulation or promote_hardware):
             conn.execute(
                 """INSERT INTO elite_cells(
@@ -735,7 +754,12 @@ def record_candidate(
                    ON CONFLICT(run_id, algorithm, engine, memory, dispatch, mechanism)
                    DO NOTHING""",
                 (
-                    run_id, algorithm, engine, memory, dispatch, mechanism,
+                    run_id,
+                    algorithm,
+                    engine,
+                    memory,
+                    dispatch,
+                    mechanism,
                     candidate_id if promote_simulation else None,
                     simulation_score if promote_simulation else None,
                     candidate_id if promote_hardware else None,
@@ -756,8 +780,8 @@ def record_candidate(
                         """UPDATE elite_cells SET simulation_candidate_id=?,
                            simulation_score=?, updated_at=? WHERE run_id=? AND algorithm=?
                            AND engine=? AND memory=? AND dispatch=? AND mechanism=?""",
-                        (candidate_id, simulation_score, now, run_id, algorithm,
-                         engine, memory, dispatch, mechanism),
+                        (candidate_id, simulation_score, now, run_id,
+                         algorithm, engine, memory, dispatch, mechanism),
                     )
             if promote_hardware:
                 assert hardware_score is not None
@@ -782,29 +806,26 @@ def record_candidate(
             if parent_id:
                 parent = conn.execute(
                     "SELECT simulation_score, hardware_score FROM candidates WHERE id=?",
-                    (parent_id,),
+                    (parent_id, ),
                 ).fetchone()
                 if promotion_domain == "hardware":
                     parent_score = parent["hardware_score"]
                 else:
                     parent_score = parent["simulation_score"]
             child_score = active_score
-            delta = (
-                float(child_score) - float(parent_score)
-                if child_score is not None and parent_score is not None
-                else None
-            )
+            delta = (float(child_score) -
+                     float(parent_score) if child_score is not None
+                     and parent_score is not None else None)
             is_baseline = attempt["kind"] == "baseline"
-            outcome = (
-                "baseline_calibrated" if is_baseline and correct and safe
-                else "baseline_failed" if is_baseline
-                else "evaluated" if correct and safe
-                else "invalid")
+            outcome = ("baseline_calibrated" if is_baseline and correct
+                       and safe else "baseline_failed" if is_baseline else
+                       "evaluated" if correct and safe else "invalid")
             conn.execute(
                 """INSERT INTO transitions(run_id, attempt_id, parent_candidate_id,
                    child_candidate_id, delta_fitness, outcome, created_at)
                    VALUES(?,?,?,?,?,?,?)""",
-                (run_id, attempt["id"], parent_id, candidate_id, delta, outcome, now),
+                (run_id, attempt["id"], parent_id, candidate_id, delta,
+                 outcome, now),
             )
             conn.execute(
                 "UPDATE attempts SET status='completed', phase='completed', updated_at=? WHERE id=?",
@@ -835,8 +856,8 @@ def record_candidate(
 
 
 def get_cell_elites(
-    run_id: int, coordinate: tuple[int, int, int, int, str]
-) -> dict[str, Any]:
+        run_id: int, coordinate: tuple[int, int, int, int,
+                                       str]) -> dict[str, Any]:
     ensure_schema()
     with connect() as conn:
         row = conn.execute(
@@ -890,7 +911,8 @@ def mark_parent_checked_out(run_id: int, source_hash: str) -> None:
         )
 
 
-def update_current_source_hash(run_id: int, source_hash: str, phase: str) -> None:
+def update_current_source_hash(run_id: int, source_hash: str,
+                               phase: str) -> None:
     with connect() as conn:
         conn.execute(
             """UPDATE attempts SET current_source_hash=?, phase=?, updated_at=?
@@ -905,8 +927,8 @@ def abandon_active_attempt(run_id: int, reason: str) -> int | None:
     with connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         attempt = conn.execute(
-            "SELECT * FROM attempts WHERE run_id=? AND status='active'", (run_id,)
-        ).fetchone()
+            "SELECT * FROM attempts WHERE run_id=? AND status='active'",
+            (run_id, )).fetchone()
         if attempt is None:
             return None
         conn.execute(
@@ -937,22 +959,27 @@ def abandon_active_attempt(run_id: int, reason: str) -> int | None:
 
 
 def record_tool_event(
-    *, run_id: int, session_id: str, tool_call_id: str, tool_name: str,
-    result: dict[str, Any], source_content_hash: str | None = None,
+    *,
+    run_id: int,
+    session_id: str,
+    tool_call_id: str,
+    tool_name: str,
+    result: dict[str, Any],
+    source_content_hash: str | None = None,
 ) -> bool:
     if not tool_call_id:
         return True
     with connect() as conn:
         attempt = conn.execute(
-            "SELECT id FROM attempts WHERE run_id=? AND status='active'", (run_id,)
-        ).fetchone()
+            "SELECT id FROM attempts WHERE run_id=? AND status='active'",
+            (run_id, )).fetchone()
         cursor = conn.execute(
             """INSERT OR IGNORE INTO tool_events(
                    run_id, attempt_id, session_id, tool_call_id, tool_name,
                    source_content_hash, result_json, created_at)
                VALUES(?,?,?,?,?,?,?,?)""",
-            (run_id, attempt["id"] if attempt else None, session_id, tool_call_id,
-             tool_name, source_content_hash,
+            (run_id, attempt["id"] if attempt else None, session_id,
+             tool_call_id, tool_name, source_content_hash,
              json.dumps(result, default=str), utcnow()),
         )
         return cursor.rowcount == 1
@@ -998,9 +1025,8 @@ def successful_tool_evidence(
     return None
 
 
-def has_matching_evaluator_event(
-    run_id: int, *, source_content_hash: str, attempt_id: int | None
-) -> bool:
+def has_matching_evaluator_event(run_id: int, *, source_content_hash: str,
+                                 attempt_id: int | None) -> bool:
     with connect() as conn:
         if attempt_id is None:
             row = conn.execute(
@@ -1022,39 +1048,36 @@ def has_matching_evaluator_event(
 def finalize_run(run_id: int) -> dict[str, Any]:
     ensure_schema()
     with connect() as conn:
-        run = conn.execute("SELECT * FROM search_runs WHERE id=?", (run_id,)).fetchone()
+        run = conn.execute("SELECT * FROM search_runs WHERE id=?",
+                           (run_id, )).fetchone()
         if run is None:
             raise KeyError(f"unknown guided-search run: {run_id}")
         if str(run["status"]).startswith("failed_"):
-            raise RuntimeError(
-                f"guided-search run failed ({run['status']}): "
-                f"{run['failure_reason'] or 'no valid elite'}")
+            raise RuntimeError(f"guided-search run failed ({run['status']}): "
+                               f"{run['failure_reason'] or 'no valid elite'}")
         hardware_domain = run["promotion_domain"] == "hardware"
         score_column = "hardware_score" if hardware_domain else "simulation_score"
-        candidate_column = (
-            "hardware_candidate_id" if hardware_domain
-            else "simulation_candidate_id")
+        candidate_column = ("hardware_candidate_id"
+                            if hardware_domain else "simulation_candidate_id")
         candidate = conn.execute(
             f"""SELECT c.* FROM elite_cells e
                  JOIN candidates c ON c.id=e.{candidate_column}
                  WHERE e.run_id=? AND c.correct=1 AND c.safe=1
                  AND e.{score_column} IS NOT NULL
                  ORDER BY e.{score_column} DESC LIMIT 1""",
-            (run_id,),
+            (run_id, ),
         ).fetchone()
         if candidate is None:
-            raise RuntimeError(
-                "no hardware-confirmed valid elite is available"
-                if hardware_domain else "no cannsim-confirmed valid elite is available"
-            )
+            raise RuntimeError("no hardware-confirmed valid elite is available"
+                               if hardware_domain else
+                               "no cannsim-confirmed valid elite is available")
         workspace = Path(run["workspace"])
         pipeline = _load_pipeline(workspace)
         baseline = pipeline.get("baseline") or "kernel.py"
         output = workspace / f"opt_{baseline}"
         output.write_text(candidate["source_text"], encoding="utf-8")
         winner_hash = hashlib.sha256(
-            candidate["source_text"].encode("utf-8")
-        ).hexdigest()
+            candidate["source_text"].encode("utf-8")).hexdigest()
         now = utcnow()
         conn.execute(
             """UPDATE search_runs SET status='completed', winner_candidate_id=?,

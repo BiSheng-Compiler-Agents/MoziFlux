@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -31,10 +30,12 @@ def _load_plugin():
 
 @pytest.fixture
 def guided(monkeypatch, tmp_path):
-    for name in ("REMOTE_VERIFY_HOST", "REMOTE_VERIFY_USER", "REMOTE_VERIFY_PASS"):
+    for name in ("REMOTE_VERIFY_HOST", "REMOTE_VERIFY_USER",
+                 "REMOTE_VERIFY_PASS"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    monkeypatch.setenv("GUIDED_SEARCH_DB_PATH", str(tmp_path / "guided.sqlite3"))
+    monkeypatch.setenv("GUIDED_SEARCH_DB_PATH",
+                       str(tmp_path / "guided.sqlite3"))
     return _load_plugin()
 
 
@@ -44,7 +45,8 @@ def search_workspace(monkeypatch, tmp_path):
     workspace = root / "l1_25_Swish"
     workspace.mkdir(parents=True)
     (workspace / "25_Swish.py").write_text("# baseline\n", encoding="utf-8")
-    (workspace / "opt_25_Swish.py").write_text("# candidate\n", encoding="utf-8")
+    (workspace / "opt_25_Swish.py").write_text("# candidate\n",
+                                               encoding="utf-8")
     (workspace / ".pipeline_state.json").write_text(
         json.dumps({
             "baseline": "25_Swish.py",
@@ -62,9 +64,9 @@ def search_workspace(monkeypatch, tmp_path):
 
 
 class TestAvailability:
+
     def test_checks_database_readiness_without_feature_env(
-        self, guided, monkeypatch, tmp_path
-    ):
+            self, guided, monkeypatch, tmp_path):
         assert guided._guided_search_available() is True
         not_a_database = tmp_path / "not-a-database"
         not_a_database.mkdir()
@@ -73,7 +75,9 @@ class TestAvailability:
 
 
 class TestDescriptors:
-    def test_npu_option_inventory_matches_installed_triton_ascend(self, guided):
+
+    def test_npu_option_inventory_matches_installed_triton_ascend(
+            self, guided):
         from dataclasses import fields
         from triton.backends.ascend.compiler import NPUOptions
 
@@ -94,8 +98,7 @@ class TestDescriptors:
         assert desc.mechanism == "compiler_managed"
 
     def test_disabled_and_generic_npu_options_do_not_claim_managed_behavior(
-        self, guided
-    ):
+            self, guided):
         source = """
 def launch(kernel):
     kernel[(1,)](enable_preload=False, num_warps=8, num_stages=2)
@@ -104,9 +107,13 @@ def launch(kernel):
         assert desc.memory == 0
         assert desc.mechanism == "standard_triton"
 
-    def test_every_ordinal_bin_has_semantic_description_and_guidance(self, guided):
+    def test_every_ordinal_bin_has_semantic_description_and_guidance(
+            self, guided):
         assert set(guided.DESCRIPTOR_SCHEMA) == {
-            "algorithm", "engine", "memory", "dispatch",
+            "algorithm",
+            "engine",
+            "memory",
+            "dispatch",
         }
         for dimension in guided.DESCRIPTOR_SCHEMA.values():
             assert set(dimension["bins"]) == {0, 1, 2, 3}
@@ -142,7 +149,8 @@ def helper():
         desc = guided.classify_candidate(source)
         assert desc.coordinate() == (0, 0, 0, 0, "standard_triton")
 
-    def test_concrete_constructs_not_narrative_phrases_drive_bins(self, guided):
+    def test_concrete_constructs_not_narrative_phrases_drive_bins(
+            self, guided):
         source = '''
 @triton.jit
 def kernel(a, b, out):
@@ -251,7 +259,8 @@ def kernel(a, b):
         assert serial.engine == 2
         assert overlap.engine == 3
 
-    def test_memory_bins_distinguish_accumulator_tiling_and_pipeline(self, guided):
+    def test_memory_bins_distinguish_accumulator_tiling_and_pipeline(
+            self, guided):
         accumulator = guided.classify_candidate("""
 def kernel(x):
     acc = 0.0
@@ -265,8 +274,8 @@ def kernel(x):
                               offsets=(0,), block_shape=(64,), order=(0,))
     return tl.load(block)
 """)
-        pipelined = guided.classify_candidate(
-            "def kernel(x): return x", {"enable_preload": True})
+        pipelined = guided.classify_candidate("def kernel(x): return x",
+                                              {"enable_preload": True})
         assert accumulator.memory == 1
         assert tiled.memory == 2
         assert pipelined.memory == 3
@@ -397,7 +406,8 @@ class ModelNew:
         assert any(item.rule == "cube_matmul" for item in desc.evidence)
         assert any(item.rule == "vector_stage" for item in desc.evidence)
 
-    def test_two_phase_reduction_is_multi_stage_and_decomposed_dispatch(self, guided):
+    def test_two_phase_reduction_is_multi_stage_and_decomposed_dispatch(
+            self, guided):
         source = """
 @triton.jit
 def _partial(x, partial):
@@ -445,7 +455,8 @@ def kernel(x):
                     if item.rule == "contiguous_aligned_access")
         assert item.line > 0
 
-    def test_helper_refactor_preserves_online_algorithm_coordinate(self, guided):
+    def test_helper_refactor_preserves_online_algorithm_coordinate(
+            self, guided):
         source = """
 def _online(scores):
     m = tl.max(scores, axis=0)
@@ -464,16 +475,20 @@ def kernel(x):
                    for item in desc.evidence)
 
     def test_candidate_fingerprint_includes_options(self, guided):
-        a = guided.candidate_fingerprint("kernel", {"enable_flatten": False}, {})
-        b = guided.candidate_fingerprint("kernel", {"enable_flatten": True}, {})
+        a = guided.candidate_fingerprint("kernel", {"enable_flatten": False},
+                                         {})
+        b = guided.candidate_fingerprint("kernel", {"enable_flatten": True},
+                                         {})
         assert a != b
 
 
 class TestFitness:
+
     def test_simulation_fitness_uses_normalized_work(self, guided):
         baseline = {"useful_work": 1024.0, "wall_cycles": 2048.0}
         candidate = {"useful_work": 2048.0, "wall_cycles": 2048.0}
-        assert guided.simulation_fitness(candidate, baseline) == pytest.approx(2.0)
+        assert guided.simulation_fitness(candidate,
+                                         baseline) == pytest.approx(2.0)
 
     def test_simulation_fitness_rejects_incomparable_contracts(self, guided):
         baseline = {
@@ -498,31 +513,45 @@ class TestFitness:
 
 
 class TestSelectionAndGradients:
+
     def test_gradient_temporal_decay_sorts_oldest_to_newest(self, guided):
         gradients = guided.estimate_gradients([
             {
                 "id": 2,
                 "created_at": "2026-01-02T00:00:00+00:00",
-                "parent": {"memory": 1},
-                "child": {"memory": 2},
+                "parent": {
+                    "memory": 1
+                },
+                "child": {
+                    "memory": 2
+                },
                 "delta_fitness": 1.0,
                 "improved": True,
             },
             {
                 "id": 1,
                 "created_at": "2026-01-01T00:00:00+00:00",
-                "parent": {"memory": 1},
-                "child": {"memory": 2},
+                "parent": {
+                    "memory": 1
+                },
+                "child": {
+                    "memory": 2
+                },
                 "delta_fitness": -1.0,
                 "improved": False,
             },
-        ], decay=0.5)
+        ],
+                                              decay=0.5)
         assert gradients["memory"]["fitness"] > 0
 
     def test_gradient_shrinks_low_support(self, guided):
         gradients = guided.estimate_gradients([{
-            "parent": {"memory": 1},
-            "child": {"memory": 2},
+            "parent": {
+                "memory": 1
+            },
+            "child": {
+                "memory": 2
+            },
             "delta_fitness": 0.5,
             "improved": True,
         }])
@@ -531,11 +560,16 @@ class TestSelectionAndGradients:
 
     def test_gradient_adds_weighted_exploration_component(self, guided):
         parent = {
-            "algorithm": 0, "engine": 0, "memory": 0, "dispatch": 0,
-            "mechanism": "standard_triton", "hardware_score": 1.0,
+            "algorithm": 0,
+            "engine": 0,
+            "memory": 0,
+            "dispatch": 0,
+            "mechanism": "standard_triton",
+            "hardware_score": 1.0,
         }
-        gradients = guided.estimate_gradients(
-            [], parent=parent, elites=[parent])
+        gradients = guided.estimate_gradients([],
+                                              parent=parent,
+                                              elites=[parent])
         assert gradients["algorithm"]["fitness_normalized"] == 0.0
         assert gradients["algorithm"]["improvement_rate"] == 0.0
         assert gradients["algorithm"]["exploration"] == pytest.approx(1.0)
@@ -543,9 +577,15 @@ class TestSelectionAndGradients:
 
     def test_exploration_gradient_can_select_uncovered_dimension(self, guided):
         parent = {
-            "id": 1, "algorithm": 1, "engine": 1, "memory": 1,
-            "dispatch": 1, "mechanism": "standard_triton",
-            "hardware_score": 1.0, "correct": 1, "safe": 1,
+            "id": 1,
+            "algorithm": 1,
+            "engine": 1,
+            "memory": 1,
+            "dispatch": 1,
+            "mechanism": "standard_triton",
+            "hardware_score": 1.0,
+            "correct": 1,
+            "safe": 1,
         }
         # Keep every ordinal cell occupied except two cells directly above the
         # parent on dispatch. Equal-quality occupied cells have zero potential.
@@ -572,51 +612,87 @@ class TestSelectionAndGradients:
                         candidate_id += 1
         unrelated_transition = {
             "parent_json": {
-                "algorithm": 0, "engine": 0, "memory": 0, "dispatch": 0,
+                "algorithm": 0,
+                "engine": 0,
+                "memory": 0,
+                "dispatch": 0,
                 "mechanism": "standard_triton",
             },
             "child_json": {
-                "algorithm": 3, "engine": 0, "memory": 0, "dispatch": 0,
+                "algorithm": 3,
+                "engine": 0,
+                "memory": 0,
+                "dispatch": 0,
                 "mechanism": "standard_triton",
             },
             "delta_fitness": 100.0,
         }
-        target = guided.select_target(
-            parent, [unrelated_transition], elites, generation=2)
+        target = guided.select_target(parent, [unrelated_transition],
+                                      elites,
+                                      generation=2)
         assert target["dimension"] == "dispatch"
         assert target["direction"] == 1
         assert target["gradient"]["support"] == 0
         assert target["gradient"]["exploration"] == pytest.approx(1.0)
         assert target["gradient"]["combined"] == pytest.approx(0.2)
 
-    def test_parent_selection_is_reproducible_and_gradient_weighted(self, guided):
+    def test_parent_selection_is_reproducible_and_gradient_weighted(
+            self, guided):
         candidates = [
-            {"id": 1, "correct": 1, "safe": 1, "algorithm": 0,
-             "engine": 0, "memory": 0, "dispatch": 0,
-             "mechanism": "standard_triton", "simulation_score": 1.0,
-             "hardware_score": None},
-            {"id": 2, "correct": 1, "safe": 1, "algorithm": 1,
-             "engine": 0, "memory": 1, "dispatch": 1,
-             "mechanism": "compiler_managed", "simulation_score": 2.0,
-             "hardware_score": None},
+            {
+                "id": 1,
+                "correct": 1,
+                "safe": 1,
+                "algorithm": 0,
+                "engine": 0,
+                "memory": 0,
+                "dispatch": 0,
+                "mechanism": "standard_triton",
+                "simulation_score": 1.0,
+                "hardware_score": None
+            },
+            {
+                "id": 2,
+                "correct": 1,
+                "safe": 1,
+                "algorithm": 1,
+                "engine": 0,
+                "memory": 1,
+                "dispatch": 1,
+                "mechanism": "compiler_managed",
+                "simulation_score": 2.0,
+                "hardware_score": None
+            },
         ]
         transitions = [{
             "id": index,
             "created_at": f"2026-01-{index:02d}T00:00:00+00:00",
             "parent_json": {
-                "algorithm": 1, "engine": 0, "memory": 1, "dispatch": 1,
+                "algorithm": 1,
+                "engine": 0,
+                "memory": 1,
+                "dispatch": 1,
                 "mechanism": "compiler_managed",
             },
             "child_json": {
-                "algorithm": 1, "engine": 0, "memory": 2, "dispatch": 1,
+                "algorithm": 1,
+                "engine": 0,
+                "memory": 2,
+                "dispatch": 1,
                 "mechanism": "compiler_managed",
             },
             "delta_fitness": 1.0,
         } for index in range(1, 6)]
-        first, mode = guided.select_parent(
-            candidates, transitions, generation=7, run_id=3, archive_revision=9)
-        repeated, _ = guided.select_parent(
-            candidates, transitions, generation=7, run_id=3, archive_revision=9)
+        first, mode = guided.select_parent(candidates,
+                                           transitions,
+                                           generation=7,
+                                           run_id=3,
+                                           archive_revision=9)
+        repeated, _ = guided.select_parent(candidates,
+                                           transitions,
+                                           generation=7,
+                                           run_id=3,
+                                           archive_revision=9)
         assert mode == "gradient_weighted"
         assert first is not None and repeated is not None
         assert first["id"] == repeated["id"]
@@ -665,6 +741,7 @@ class TestSelectionAndGradients:
 
 
 class TestSqlArchive:
+
     def test_descriptor_evidence_is_persisted(self, guided, search_workspace):
         run_id = guided.initialize_search_run(
             workspace=search_workspace,
@@ -691,8 +768,7 @@ def kernel(x):
                    for item in evidence)
 
     def test_baseline_elite_is_required_before_mutation_budget(
-        self, guided, search_workspace
-    ):
+            self, guided, search_workspace):
         run_id = guided.initialize_search_run(
             workspace=search_workspace,
             session_id="kernelbench-l1_25_Swish",
@@ -702,14 +778,18 @@ def kernel(x):
         baseline_attempt = guided.ensure_active_attempt(run_id)
         assert baseline_attempt["kind"] == "baseline"
         assert baseline_attempt["generation"] == 0
-        baseline = guided.get_candidate(baseline_attempt["parent_candidate_id"])
+        baseline = guided.get_candidate(
+            baseline_attempt["parent_candidate_id"])
         assert baseline is not None
         guided.record_candidate(
             run_id=run_id,
             source=baseline["source_text"],
             descriptor=(
-                baseline["algorithm"], baseline["engine"], baseline["memory"],
-                baseline["dispatch"], baseline["mechanism"],
+                baseline["algorithm"],
+                baseline["engine"],
+                baseline["memory"],
+                baseline["dispatch"],
+                baseline["mechanism"],
             ),
             correct=True,
             safe=True,
@@ -722,8 +802,7 @@ def kernel(x):
         assert mutation_attempt["generation"] == 1
 
     def test_failed_baseline_is_terminal_and_cannot_finalize(
-        self, guided, search_workspace
-    ):
+            self, guided, search_workspace):
         run_id = guided.initialize_search_run(
             workspace=search_workspace,
             session_id="kernelbench-l1_25_Swish",
@@ -737,8 +816,11 @@ def kernel(x):
             run_id=run_id,
             source=baseline["source_text"],
             descriptor=(
-                baseline["algorithm"], baseline["engine"], baseline["memory"],
-                baseline["dispatch"], baseline["mechanism"],
+                baseline["algorithm"],
+                baseline["engine"],
+                baseline["memory"],
+                baseline["dispatch"],
+                baseline["mechanism"],
             ),
             correct=False,
             safe=True,
@@ -763,7 +845,8 @@ def kernel(x):
         assert first["id"] == second["id"]
         assert first["status"] == "active"
 
-    def test_checkout_materializes_parent_only_once(self, guided, search_workspace):
+    def test_checkout_materializes_parent_only_once(self, guided,
+                                                    search_workspace):
         run_id = guided.initialize_search_run(
             workspace=search_workspace,
             session_id="kernelbench-l1_25_Swish",
@@ -771,21 +854,22 @@ def kernel(x):
         )
         attempt = guided.ensure_active_attempt(run_id)
         assert attempt["phase"] == "checkout"
-        first = json.loads(guided._handle_checkout({
-            "session_id": "kernelbench-l1_25_Swish",
-        }))
+        first = json.loads(
+            guided._handle_checkout({
+                "session_id": "kernelbench-l1_25_Swish",
+            }))
         assert first["ok"] is True
         assert (search_workspace / "opt_25_Swish.py").read_text(
             encoding="utf-8") == "# baseline\n"
-        second = json.loads(guided._handle_checkout({
-            "session_id": "kernelbench-l1_25_Swish",
-        }))
+        second = json.loads(
+            guided._handle_checkout({
+                "session_id": "kernelbench-l1_25_Swish",
+            }))
         assert "error" in second
         assert "refusing to overwrite" in second["error"]
 
     def test_elite_promotion_uses_run_evaluation_domain(
-        self, guided, search_workspace
-    ):
+            self, guided, search_workspace):
         simulation_run = guided.initialize_search_run(
             workspace=search_workspace,
             session_id="kernelbench-l1_25_Swish",
@@ -800,7 +884,7 @@ def kernel(x):
             safe=True,
             simulation_score=1.5,
         )
-        hw_id = guided.record_candidate(
+        guided.record_candidate(
             run_id=simulation_run,
             source="# hw",
             descriptor=(0, 0, 1, 1, "standard_triton"),
@@ -808,9 +892,8 @@ def kernel(x):
             safe=True,
             hardware_score=1.2,
         )
-        elites = guided.get_cell_elites(
-            simulation_run, (0, 0, 1, 1, "standard_triton")
-        )
+        elites = guided.get_cell_elites(simulation_run,
+                                        (0, 0, 1, 1, "standard_triton"))
         assert elites["simulation_candidate_id"] == sim_id
         assert elites["hardware_candidate_id"] is None
         simulation_winner = guided.finalize_run(simulation_run)
@@ -845,15 +928,13 @@ def kernel(x):
             hardware_score=1.1,
         )
         hardware_elites = guided.get_cell_elites(
-            hardware_run, (0, 0, 1, 1, "standard_triton")
-        )
+            hardware_run, (0, 0, 1, 1, "standard_triton"))
         assert ignored_sim != promoted_hw
         assert hardware_elites["simulation_candidate_id"] is None
         assert hardware_elites["hardware_candidate_id"] == promoted_hw
 
     def test_finalize_materializes_hardware_confirmed_winner(
-        self, guided, search_workspace
-    ):
+            self, guided, search_workspace):
         run_id = guided.initialize_search_run(
             workspace=search_workspace,
             session_id="kernelbench-l1_25_Swish",
@@ -873,14 +954,13 @@ def kernel(x):
         )
         result = guided.finalize_run(run_id)
         assert result["candidate_id"] == candidate_id
-        assert (search_workspace / "opt_25_Swish.py").read_text(
-            encoding="utf-8") == source
+        assert (search_workspace /
+                "opt_25_Swish.py").read_text(encoding="utf-8") == source
         run = guided.get_run(run_id)
         assert run is not None and run["status"] == "completed"
 
     def test_pipeline_run_id_cannot_be_reused_by_another_workspace(
-        self, guided, search_workspace, tmp_path
-    ):
+            self, guided, search_workspace, tmp_path):
         first_id = guided.initialize_search_run(
             workspace=search_workspace,
             session_id="kernelbench-l1_25_Swish",
@@ -890,14 +970,17 @@ def kernel(x):
         other.mkdir(parents=True)
         (other / "1_Other.py").write_text("# other\n", encoding="utf-8")
         (other / ".pipeline_state.json").write_text(json.dumps({
-            "baseline": "1_Other.py",
-            "current_stage": "search",
+            "baseline":
+            "1_Other.py",
+            "current_stage":
+            "search",
             "guided_search": {
                 "enabled": True,
                 "run_id": first_id,
                 "budget": 20,
             },
-        }), encoding="utf-8")
+        }),
+                                                    encoding="utf-8")
         second_id = guided.initialize_search_run(
             workspace=other,
             session_id="kernelbench-l1_other",
@@ -910,17 +993,16 @@ def kernel(x):
 
 
 class TestHooks:
+
     def test_pre_verify_does_not_own_tool_budget_abandonment(
-        self, guided, search_workspace
-    ):
-        guided._on_pre_llm_call(
-            session_id="kernelbench-l1_25_Swish", user_message="start")
+            self, guided, search_workspace):
+        guided._on_pre_llm_call(session_id="kernelbench-l1_25_Swish",
+                                user_message="start")
         attempt = guided.get_active_attempt(1)
         assert attempt is not None
         for _ in range(guided._attempt_tool_budget()):
             guided.increment_attempt_counter(1, "tool_calls_used")
-        result = guided._on_pre_verify(
-            session_id="kernelbench-l1_25_Swish")
+        result = guided._on_pre_verify(session_id="kernelbench-l1_25_Swish")
         active = guided.get_active_attempt(1)
         assert active is not None and active["id"] == attempt["id"]
         assert result is not None
@@ -937,15 +1019,19 @@ class TestHooks:
         )
         assert first is not None and second is not None
         assert "GUIDED SEARCH" in first["context"]
-        first_attempt = first["context"].split("ATTEMPT: ", 1)[1].splitlines()[0]
-        second_attempt = second["context"].split("ATTEMPT: ", 1)[1].splitlines()[0]
+        first_attempt = first["context"].split("ATTEMPT: ",
+                                               1)[1].splitlines()[0]
+        second_attempt = second["context"].split("ATTEMPT: ",
+                                                 1)[1].splitlines()[0]
         assert first_attempt == second_attempt
 
     def test_llm_request_middleware_refreshes_phase_without_accumulation(
-        self, guided, search_workspace
-    ):
+            self, guided, search_workspace):
         clean_request = {
-            "messages": [{"role": "user", "content": "optimize"}],
+            "messages": [{
+                "role": "user",
+                "content": "optimize"
+            }],
         }
         first = guided._on_llm_execution(
             request=clean_request,
@@ -982,18 +1068,21 @@ class TestHooks:
             api_request_id="turn:api:2",
             api_call_count=2,
         )
-        status = json.loads(guided._handle_status({
-            "session_id": "kernelbench-l1_25_Swish",
-        }))
+        status = json.loads(
+            guided._handle_status({
+                "session_id": "kernelbench-l1_25_Swish",
+            }))
         assert status["active_attempt"]["llm_iterations_used"] == 2
 
     def test_llm_request_middleware_supports_responses_input_blocks(
-        self, guided, search_workspace
-    ):
+            self, guided, search_workspace):
         request = {
             "input": [{
                 "role": "user",
-                "content": [{"type": "input_text", "text": "optimize"}],
+                "content": [{
+                    "type": "input_text",
+                    "text": "optimize"
+                }],
             }],
         }
         result = guided._on_llm_execution(
@@ -1011,8 +1100,7 @@ class TestHooks:
         assert "GUIDED SEARCH" in blocks[-1]["text"]
 
     def test_llm_request_middleware_appends_user_context_after_tool_only_input(
-        self, guided, search_workspace
-    ):
+            self, guided, search_workspace):
         request = {
             "input": [{
                 "type": "function_call_output",
@@ -1045,44 +1133,42 @@ class TestHooks:
         assert result is None
 
     def test_unevaluated_submission_does_not_consume_budget(
-        self, guided, search_workspace
-    ):
-        guided._on_pre_llm_call(
-            session_id="kernelbench-l1_25_Swish", user_message="start")
+            self, guided, search_workspace):
+        guided._on_pre_llm_call(session_id="kernelbench-l1_25_Swish",
+                                user_message="start")
         guided._handle_checkout({"session_id": "kernelbench-l1_25_Swish"})
         candidate = search_workspace / "opt_25_Swish.py"
         candidate.write_text("# not evaluated\n", encoding="utf-8")
-        rejected = json.loads(guided._handle_submit({
-            "session_id": "kernelbench-l1_25_Swish",
-            "candidate_path": str(candidate),
-            "correct": True,
-        }))
+        rejected = json.loads(
+            guided._handle_submit({
+                "session_id": "kernelbench-l1_25_Swish",
+                "candidate_path": str(candidate),
+                "correct": True,
+            }))
         assert "error" in rejected
-        status = json.loads(guided._handle_status({
-            "session_id": "kernelbench-l1_25_Swish",
-        }))
+        status = json.loads(
+            guided._handle_status({
+                "session_id": "kernelbench-l1_25_Swish",
+            }))
         assert status["completed_attempts"] == 0
         assert status["active_attempt"] is not None
 
     def test_hardware_score_is_source_bound_and_derived_from_remote_output(
-        self, guided, search_workspace, tmp_path, monkeypatch
-    ):
+            self, guided, search_workspace, tmp_path, monkeypatch):
         monkeypatch.setenv("REMOTE_VERIFY_HOST", "npu")
         monkeypatch.setenv("REMOTE_VERIFY_USER", "user")
         monkeypatch.setenv("REMOTE_VERIFY_PASS", "pass")
-        guided._on_pre_llm_call(
-            session_id="kernelbench-l1_25_Swish", user_message="start")
+        guided._on_pre_llm_call(session_id="kernelbench-l1_25_Swish",
+                                user_message="start")
         guided._handle_checkout({"session_id": "kernelbench-l1_25_Swish"})
         candidate = search_workspace / "opt_25_Swish.py"
         artifact_dir = tmp_path / "artifact"
         artifact_dir.mkdir()
         (artifact_dir / candidate.name).write_text(
             candidate.read_text(encoding="utf-8"), encoding="utf-8")
-        bench = (
-            "bench:\n"
-            "  label  PyTorch / ACL  Optimized Triton\n"
-            "0 shape             4.0               2.0\n"
-        )
+        bench = ("bench:\n"
+                 "  label  PyTorch / ACL  Optimized Triton\n"
+                 "0 shape             4.0               2.0\n")
         guided._on_post_tool_call(
             tool_name="remote_verify",
             args={"local_dir": str(artifact_dir)},
@@ -1095,36 +1181,38 @@ class TestHooks:
             session_id="kernelbench-l1_25_Swish",
             tool_call_id="remote-1",
         )
-        submitted = json.loads(guided._handle_submit({
-            "session_id": "kernelbench-l1_25_Swish",
-            "candidate_path": str(candidate),
-            "correct": True,
-            "hardware": {
-                "candidate_ms": [1e-18],
-                "pytorch_acl_ms": [1e18],
-            },
-        }))
+        submitted = json.loads(
+            guided._handle_submit({
+                "session_id": "kernelbench-l1_25_Swish",
+                "candidate_path": str(candidate),
+                "correct": True,
+                "hardware": {
+                    "candidate_ms": [1e-18],
+                    "pytorch_acl_ms": [1e18],
+                },
+            }))
         assert submitted["hardware_score"] == pytest.approx(2.0)
 
         # The same evidence cannot authorize a changed source.
         candidate.write_text("# unrelated source\n", encoding="utf-8")
-        rejected = json.loads(guided._handle_submit({
-            "session_id": "kernelbench-l1_25_Swish",
-            "candidate_path": str(candidate),
-            "correct": True,
-            "hardware": {},
-        }))
+        rejected = json.loads(
+            guided._handle_submit({
+                "session_id": "kernelbench-l1_25_Swish",
+                "candidate_path": str(candidate),
+                "correct": True,
+                "hardware": {},
+            }))
         assert "error" in rejected
         assert "archived source" in rejected["error"]
 
     def test_simulation_score_comes_from_source_bound_trace_cycles(
-        self, guided, search_workspace, tmp_path
-    ):
-        guided._on_pre_llm_call(
-            session_id="kernelbench-l1_25_Swish", user_message="start")
-        checkout = json.loads(guided._handle_checkout({
-            "session_id": "kernelbench-l1_25_Swish",
-        }))
+            self, guided, search_workspace, tmp_path):
+        guided._on_pre_llm_call(session_id="kernelbench-l1_25_Swish",
+                                user_message="start")
+        checkout = json.loads(
+            guided._handle_checkout({
+                "session_id": "kernelbench-l1_25_Swish",
+            }))
         candidate = search_workspace / "opt_25_Swish.py"
 
         def record_trace(name, source, duration, tool_call_id):
@@ -1133,8 +1221,15 @@ class TestHooks:
             (artifact / candidate.name).write_text(source, encoding="utf-8")
             trace = artifact / "trace_core0.json"
             trace.write_text(json.dumps([
-                {"ph": "X", "ts": 0, "dur": duration, "pid": 1, "tid": 1},
-            ]), encoding="utf-8")
+                {
+                    "ph": "X",
+                    "ts": 0,
+                    "dur": duration,
+                    "pid": 1,
+                    "tid": 1
+                },
+            ]),
+                             encoding="utf-8")
             guided._on_post_tool_call(
                 tool_name="cannsim_local_run",
                 args={"local_dir": str(artifact)},
@@ -1154,24 +1249,30 @@ class TestHooks:
         assert checkout["ok"] is True
         record_trace("baseline", baseline_source, 100, "sim-base")
         record_trace("candidate", baseline_source, 50, "sim-candidate")
-        submitted = json.loads(guided._handle_submit({
-            "session_id": "kernelbench-l1_25_Swish",
-            "candidate_path": str(candidate),
-            "correct": True,
-            "simulation": {
-                "candidate": {"probe_contract": "equal-k"},
-                "baseline": {
-                    "probe_contract": "equal-k",
-                    "source_content_hash": baseline_hash,
+        submitted = json.loads(
+            guided._handle_submit({
+                "session_id": "kernelbench-l1_25_Swish",
+                "candidate_path": str(candidate),
+                "correct": True,
+                "simulation": {
+                    "candidate": {
+                        "probe_contract": "equal-k"
+                    },
+                    "baseline": {
+                        "probe_contract": "equal-k",
+                        "source_content_hash": baseline_hash,
+                    },
                 },
-            },
-        }))
+            }))
         assert submitted["simulation_score"] == pytest.approx(1.0)
 
 
 class TestRegistration:
+
     def test_register_uses_matching_availability_gate(self, guided):
+
         class Context:
+
             def __init__(self):
                 self.hooks = []
                 self.middleware = []
@@ -1188,22 +1289,24 @@ class TestRegistration:
 
         ctx = Context()
         guided.register(ctx)
-        assert {name for name, _ in ctx.hooks} >= {
-            "pre_tool_call",
-            "post_tool_call",
-            "post_llm_call",
-            "pre_verify",
-            "on_session_end",
-        }
+        assert {name
+                for name, _ in ctx.hooks} >= {
+                    "pre_tool_call",
+                    "post_tool_call",
+                    "post_llm_call",
+                    "pre_verify",
+                    "on_session_end",
+                }
         assert "pre_llm_call" not in {name for name, _ in ctx.hooks}
         assert ctx.middleware == [("llm_execution", guided._on_llm_execution)]
         assert ctx.tools
         for tool in ctx.tools:
             assert tool["check_fn"] is guided._guided_search_available
             assert tool["requires_env"] == []
-        submit = next(
-            tool for tool in ctx.tools
-            if tool["name"] == "guided_search_submit_candidate")
+        submit = next(tool for tool in ctx.tools
+                      if tool["name"] == "guided_search_submit_candidate")
         simulation = submit["schema"]["parameters"]["properties"]["simulation"]
-        assert "useful_work" not in simulation["properties"]["candidate"]["properties"]
-        assert "wall_cycles" not in simulation["properties"]["candidate"]["properties"]
+        assert "useful_work" not in simulation["properties"]["candidate"][
+            "properties"]
+        assert "wall_cycles" not in simulation["properties"]["candidate"][
+            "properties"]

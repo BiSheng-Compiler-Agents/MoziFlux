@@ -430,8 +430,7 @@ def _advance_stage(state: dict, workspace: Path) -> tuple[str, str]:
                 f"GUIDED SEARCH FAILED ({gate.get('status')}): "
                 f"{gate.get('failure_reason') or 'no authoritative elite was produced'}. "
                 "Advancement is blocked; start a new run after correcting the evaluator "
-                "or baseline failure."
-            )
+                "or baseline failure.")
         if gate.get("status") != "completed":
             required = ("a hardware-confirmed winner"
                         if gate.get("promotion_domain") == "hardware" else
@@ -568,7 +567,6 @@ def _advance_stage(state: dict, workspace: Path) -> tuple[str, str]:
 # Hook callbacks
 # ---------------------------------------------------------------------------
 
-
 _PATCH_FILE_RE = re.compile(
     r"^\*\*\*\s+(?:Update|Add|Delete)\s+File:\s*(.+?)\s*$", re.MULTILINE)
 
@@ -578,28 +576,28 @@ def _write_targets(tool_name: str, args: dict[str, Any]) -> list[str]:
         target = str(args.get("path", "")).strip()
         return [target] if target else []
     return [
-        match.strip() for match in _PATCH_FILE_RE.findall(str(args.get("patch", "")))
+        match.strip()
+        for match in _PATCH_FILE_RE.findall(str(args.get("patch", "")))
         if match.strip()
     ]
 
 
-def _write_block_reason(
-    target: str, workspace: Path, state: dict[str, Any]
-) -> str | None:
+def _write_block_reason(target: str, workspace: Path,
+                        state: dict[str, Any]) -> str | None:
     target_name = Path(target).name
     try:
         resolved_target = Path(target).expanduser().resolve()
-        target_in_workspace = (
-            resolved_target == workspace or workspace in resolved_target.parents)
+        target_in_workspace = (resolved_target == workspace
+                               or workspace in resolved_target.parents)
     except (OSError, RuntimeError):
         target_in_workspace = True
     if target_name == ".pipeline_state.json":
         return "BLOCKED: .pipeline_state.json is plugin-owned state."
     if (_current_stage(state) == "search" and _guided_enabled(state)
-            and target_in_workspace and target_name in _FINAL_DELIVERABLE_NAMES):
-        return (
-            f"BLOCKED: '{target_name}' is a FINALIZE-stage deliverable. "
-            "Complete guided SEARCH and materialize the winner first.")
+            and target_in_workspace
+            and target_name in _FINAL_DELIVERABLE_NAMES):
+        return (f"BLOCKED: '{target_name}' is a FINALIZE-stage deliverable. "
+                "Complete guided SEARCH and materialize the winner first.")
     if (_current_stage(state) in {"finalize", "verify", "record", "done"}
             and _guided_enabled(state) and target_name.startswith("opt_")
             and target_name.endswith(".py")):
@@ -610,13 +608,11 @@ def _write_block_reason(
         return f"BLOCKED: '{target}' is a project-level file and cannot be modified."
     if _path_is_baseline(target, workspace):
         baseline = _baseline_name(workspace)
-        return (
-            f"BLOCKED: '{target}' is the input kernel file ({baseline}). "
-            f"You must NOT modify it. Write to opt_{baseline} instead.")
+        return (f"BLOCKED: '{target}' is the input kernel file ({baseline}). "
+                f"You must NOT modify it. Write to opt_{baseline} instead.")
     if _path_is_reference(target, workspace):
-        return (
-            f"BLOCKED: '{target}' is a reference kernel file (base_*.py). "
-            "You must NOT read or modify it.")
+        return (f"BLOCKED: '{target}' is a reference kernel file (base_*.py). "
+                "You must NOT read or modify it.")
     return None
 
 
@@ -626,9 +622,7 @@ def _terminal_command_may_modify(command: str) -> bool:
             r"(?:^|[;&|]\s*)(?:rm|mv|cp|install|touch|truncate|chmod|chown|ln|"
             r"sed\s+-i|perl\s+-pi|git\s+(?:checkout|restore|clean)|patch)\b",
             command,
-        )
-        or re.search(r"(?:^|[^<>])>>?\s*\S+", command)
-    )
+        ) or re.search(r"(?:^|[^<>])>>?\s*\S+", command))
 
 
 def _on_pre_tool_call(
@@ -678,8 +672,8 @@ def _on_pre_tool_call(
             logger.warning("kernel-sandbox: %s", msg)
             return {"action": "block", "message": msg}
         if (_current_stage(state) == "search" and _guided_enabled(state)
-                and may_modify
-                and any(name in cmd for name in _FINAL_DELIVERABLE_NAMES)
+                and may_modify and any(name in cmd
+                                       for name in _FINAL_DELIVERABLE_NAMES)
                 and str(_guided_db_path().parent / "artifacts") not in cmd):
             msg = (
                 "BLOCKED: terminal command targets a FINALIZE-stage deliverable "
@@ -797,22 +791,26 @@ def _on_pre_llm_call(
     return {"context": ctx}
 
 
-def _inject_latest_user_context(
-    request: dict[str, Any], context: str, *, api_mode: str = ""
-) -> dict[str, Any]:
+def _inject_latest_user_context(request: dict[str, Any],
+                                context: str,
+                                *,
+                                api_mode: str = "") -> dict[str, Any]:
     """Append current sandbox stage to the request-local user message."""
-    message_key = (
-        "messages" if isinstance(request.get("messages"), list)
-        else "input" if isinstance(request.get("input"), list)
-        else None)
+    message_key = ("messages" if isinstance(request.get("messages"), list) else
+                   "input" if isinstance(request.get("input"), list) else None)
     if message_key is None:
         return request
     messages = list(request[message_key])
-    synthetic = (
-        {"role": "user", "content": [{"type": "input_text", "text": context}]}
-        if message_key == "input" or api_mode == "codex_responses"
-        else {"role": "user", "content": context}
-    )
+    synthetic = ({
+        "role": "user",
+        "content": [{
+            "type": "input_text",
+            "text": context
+        }]
+    } if message_key == "input" or api_mode == "codex_responses" else {
+        "role": "user",
+        "content": context
+    })
     messages.append(synthetic)
     effective = dict(request)
     effective[message_key] = messages
@@ -830,8 +828,9 @@ def _on_llm_execution(
     rendered = _on_pre_llm_call(session_id=session_id)
     if not rendered or not rendered.get("context"):
         return next_call(request)
-    effective = _inject_latest_user_context(
-        request, str(rendered["context"]), api_mode=api_mode)
+    effective = _inject_latest_user_context(request,
+                                            str(rendered["context"]),
+                                            api_mode=api_mode)
     if effective is request:
         return next_call(request)
     return next_call(effective)

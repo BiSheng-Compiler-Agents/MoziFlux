@@ -10,33 +10,30 @@ from typing import Any
 from .descriptors import describe_coordinate
 
 
-def render_attempt_prompt(
-    *, run: dict[str, Any], attempt: dict[str, Any], parent: dict[str, Any] | None = None
-) -> str:
+def render_attempt_prompt(*,
+                          run: dict[str, Any],
+                          attempt: dict[str, Any],
+                          parent: dict[str, Any] | None = None) -> str:
     target = json.loads(attempt.get("target_json") or "{}")
     parent_coordinate = target.get("parent_coordinate")
     hermes_home = Path(os.environ.get("HERMES_HOME", "~/.hermes")).expanduser()
-    artifact_dir = (
-        hermes_home / "guided-search" / "artifacts"
-        / str(run["id"]) / str(attempt["id"])
-    )
+    artifact_dir = (hermes_home / "guided-search" / "artifacts" /
+                    str(run["id"]) / str(attempt["id"]))
     promotion_domain = str(run.get("promotion_domain", "simulation"))
     promotion_rule = (
         "remote_verify is available: only physical-NPU results relative to "
         "PyTorch/ACL may replace elites. Cannsim is diagnostic only."
-        if promotion_domain == "hardware"
-        else "remote_verify is unavailable: valid equal-work cannsim results may "
-             "replace elites and select the final winner."
-    )
+        if promotion_domain == "hardware" else
+        "remote_verify is unavailable: valid equal-work cannsim results may "
+        "replace elites and select the final winner.")
     if attempt.get("kind") == "baseline":
         evaluator_action = (
             "Run remote_verify correctness and PyTorch/ACL-relative benchmarking "
             "for the unchanged baseline, then submit hardware evidence."
-            if promotion_domain == "hardware"
-            else "Run the unchanged baseline through the fixed-work cannsim probe, "
-                 "then submit source-bound simulation evidence using that same "
-                 "baseline source hash and probe contract."
-        )
+            if promotion_domain == "hardware" else
+            "Run the unchanged baseline through the fixed-work cannsim probe, "
+            "then submit source-bound simulation evidence using that same "
+            "baseline source hash and probe contract.")
         lines = [
             "[GUIDED SEARCH - BASELINE CALIBRATION]",
             f"RUN: {run['id']}",
@@ -57,10 +54,11 @@ def render_attempt_prompt(
             lines.append(f"LAST ERROR: {attempt['last_error']}")
         if parent:
             lines.append(
-                f"BASELINE SOURCE HASH: {parent.get('source_hash', 'unknown')}")
+                f"BASELINE SOURCE HASH: {parent.get('source_hash', 'unknown')}"
+            )
         return "\n".join(lines)
-    parent_semantics = (
-        describe_coordinate(parent_coordinate) if parent_coordinate else [])
+    parent_semantics = (describe_coordinate(parent_coordinate)
+                        if parent_coordinate else [])
     try:
         parent_evidence = json.loads(
             (parent or {}).get("descriptor_evidence_json") or "[]")[:10]

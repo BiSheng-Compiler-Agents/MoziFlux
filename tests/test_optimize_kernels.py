@@ -47,6 +47,7 @@ class TestStateManagement:
         assert saved["kernels"]["l1_25_Swish"]["model"] == MODEL
 
     def test_batch_agent_disables_background_memory_and_skill_reviews(self):
+
         class Agent:
             _memory_nudge_interval = 5
             _skill_nudge_interval = 10
@@ -58,7 +59,8 @@ class TestStateManagement:
 
     def test_kernel_agent_uses_project_files_not_global_skill_tools(self):
         assert KERNEL_AGENT_TOOLSETS == [
-            "terminal", "file", "todo", "triton_ascend"]
+            "terminal", "file", "todo", "triton_ascend"
+        ]
         assert "skills" not in KERNEL_AGENT_TOOLSETS
         assert "hermes-cli" not in KERNEL_AGENT_TOOLSETS
         assert "cronjob" not in KERNEL_AGENT_TOOLSETS

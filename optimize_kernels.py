@@ -80,6 +80,7 @@ def disable_batch_agent_background_reviews(agent) -> None:
     agent._memory_nudge_interval = 0
     agent._skill_nudge_interval = 0
 
+
 # Continuation prompt for re-entering a parked pipeline. The kernel-sandbox
 # pre_llm_call hook injects the authoritative stage instructions; this just
 # tells the agent to act on them.
@@ -394,8 +395,8 @@ def optimize_kernel(kernel_dir: Path, state: dict) -> dict:
             stage = progress[0]
             log.info(
                 "  %s turn %d → stage=%s guided_revision=%d attempts=%d "
-                "status=%s active=%d phase=%s tools=%d llm=%d",
-                name, turn, *progress)
+                "status=%s active=%d phase=%s tools=%d llm=%d", name, turn,
+                *progress)
 
             if stage == "done":
                 break

@@ -64,8 +64,8 @@ try:
         max_span_attributes=_max_span_attributes,
         max_span_attribute_length=None,
     ))
-    _otlp_endpoint = os.getenv(
-        "PHOENIX_OTLP_ENDPOINT", "http://localhost:4317")
+    _otlp_endpoint = os.getenv("PHOENIX_OTLP_ENDPOINT",
+                               "http://localhost:4317")
     _exporter = OTLPSpanExporter(endpoint=_otlp_endpoint, insecure=True)
     _provider.add_span_processor(BatchSpanProcessor(_exporter))
     trace.set_tracer_provider(_provider)
@@ -138,7 +138,8 @@ def _flatten(obj: Any, limit: Optional[int] = None) -> str:
     effective_limit = _MAX_PAYLOAD_CHARS if limit is None else max(0, limit)
     if effective_limit and len(value) > effective_limit:
         return value[:effective_limit] + (
-            f"\n[PHOENIX PAYLOAD TRUNCATED: {len(value) - effective_limit} chars omitted]")
+            f"\n[PHOENIX PAYLOAD TRUNCATED: {len(value) - effective_limit} chars omitted]"
+        )
     return value
 
 
@@ -193,8 +194,10 @@ def _request_messages(request: Any) -> List[Dict[str, Any]]:
         item_type = str(item.get("type") or "")
         if item_type == "function_call":
             messages.append({
-                "role": "assistant",
-                "content": "",
+                "role":
+                "assistant",
+                "content":
+                "",
                 "tool_calls": [{
                     "id": item.get("call_id") or item.get("id"),
                     "name": item.get("name"),
@@ -212,17 +215,18 @@ def _request_messages(request: Any) -> List[Dict[str, Any]]:
     return messages
 
 
-def _set_message_attributes(
-    span: Any, prefix: str, messages: List[Dict[str, Any]]
-) -> None:
+def _set_message_attributes(span: Any, prefix: str,
+                            messages: List[Dict[str, Any]]) -> None:
     for index, message in enumerate(messages):
         base = f"{prefix}.{index}.message"
         span.set_attribute(f"{base}.role", str(message.get("role") or "user"))
-        span.set_attribute(f"{base}.content", _message_content(message.get("content")))
+        span.set_attribute(f"{base}.content",
+                           _message_content(message.get("content")))
         if message.get("name") is not None:
             span.set_attribute(f"{base}.name", str(message["name"]))
         if message.get("tool_call_id") is not None:
-            span.set_attribute(f"{base}.tool_call_id", str(message["tool_call_id"]))
+            span.set_attribute(f"{base}.tool_call_id",
+                               str(message["tool_call_id"]))
         tool_calls = message.get("tool_calls") or []
         if not isinstance(tool_calls, list):
             continue
@@ -235,8 +239,8 @@ def _set_message_attributes(
             if tool_call.get("id") is not None:
                 span.set_attribute(f"{tool_base}.id", str(tool_call["id"]))
             if function.get("name") is not None:
-                span.set_attribute(
-                    f"{tool_base}.function.name", str(function["name"]))
+                span.set_attribute(f"{tool_base}.function.name",
+                                   str(function["name"]))
             if function.get("arguments") is not None:
                 span.set_attribute(
                     f"{tool_base}.function.arguments",
@@ -251,21 +255,23 @@ def _set_request_semantics(span: Any, request: Any) -> None:
     tools = body.get("tools")
     if isinstance(tools, list):
         for index, tool in enumerate(tools):
-            span.set_attribute(
-                f"llm.tools.{index}.tool.json_schema", _flatten(tool))
+            span.set_attribute(f"llm.tools.{index}.tool.json_schema",
+                               _flatten(tool))
     excluded = {"messages", "input", "instructions", "tools"}
-    invocation = {key: value for key, value in body.items() if key not in excluded}
+    invocation = {
+        key: value
+        for key, value in body.items() if key not in excluded
+    }
     span.set_attribute("llm.invocation_parameters", _flatten(invocation))
 
 
-def _assistant_messages(response: Any, assistant_message: Any) -> List[Dict[str, Any]]:
+def _assistant_messages(response: Any,
+                        assistant_message: Any) -> List[Dict[str, Any]]:
     message = assistant_message
-    if (not isinstance(message, dict) or not message) and isinstance(response, dict):
-        message = (
-            response.get("assistant_message")
-            or response.get("assistant")
-            or response.get("message")
-        )
+    if (not isinstance(message, dict) or not message) and isinstance(
+            response, dict):
+        message = (response.get("assistant_message")
+                   or response.get("assistant") or response.get("message"))
     if not isinstance(message, dict):
         return []
     normalized = dict(message)
@@ -294,7 +300,8 @@ def _set_common_attributes(span: Any, **values: Any) -> None:
         if value is not None:
             span.set_attribute(
                 key,
-                value if isinstance(value, (str, bool, int, float)) else _flatten(value),
+                value if isinstance(value, (str, bool, int,
+                                            float)) else _flatten(value),
             )
 
 
@@ -303,7 +310,8 @@ def _api_key(session_id: str, api_request_id: str,
     return session_id, api_request_id, int(api_call_count or 0)
 
 
-def _tool_key(session_id: str, tool_call_id: str,
+def _tool_key(session_id: str,
+              tool_call_id: str,
               tool_name: str = "") -> Tuple[str, str]:
     return session_id, tool_call_id or f"unidentified:{tool_name}"
 
@@ -334,7 +342,8 @@ def _ensure_session(session_id: str,
             }
             logger.debug(
                 "phoenix_tracer: created root span for session %s trace_id=%s",
-                session_id, format(root_span.get_span_context().trace_id, "032x"))
+                session_id,
+                format(root_span.get_span_context().trace_id, "032x"))
         return _sessions[session_id]
 
 
@@ -344,16 +353,10 @@ def _end_session(session_id: str,
     """Close all outstanding spans for a session and flush them."""
     with _STATE_LOCK:
         sess = _sessions.pop(session_id, None)
-        api_items = [
-            (key, _api_spans.pop(key))
-            for key in list(_api_spans)
-            if key[0] == session_id
-        ]
-        tool_items = [
-            (key, _tool_spans.pop(key))
-            for key in list(_tool_spans)
-            if key[0] == session_id
-        ]
+        api_items = [(key, _api_spans.pop(key)) for key in list(_api_spans)
+                     if key[0] == session_id]
+        tool_items = [(key, _tool_spans.pop(key)) for key in list(_tool_spans)
+                      if key[0] == session_id]
         for key in list(_effective_requests):
             if key[0] == session_id:
                 _effective_requests.pop(key, None)
@@ -419,8 +422,10 @@ def _on_pre_llm_call(
                 sess["turn_span"].set_attribute("turn.interrupted", True)
                 sess["turn_span"].end()
             turn_index = int(sess.get("turn_index", 0)) + 1
-            turn_id = str(extra.get("turn_id") or f"{session_id}:turn:{turn_index}")
-            turn_span = _tracer.start_span("hermes.turn", context=sess["root_ctx"])
+            turn_id = str(
+                extra.get("turn_id") or f"{session_id}:turn:{turn_index}")
+            turn_span = _tracer.start_span("hermes.turn",
+                                           context=sess["root_ctx"])
             _set_common_attributes(
                 turn_span,
                 **{
@@ -434,10 +439,11 @@ def _on_pre_llm_call(
                     "sender.id": sender_id,
                 },
             )
-            _set_payload(turn_span, "input", {
-                "user_message": user_message,
-                "conversation_history": conversation_history or [],
-            })
+            _set_payload(
+                turn_span, "input", {
+                    "user_message": user_message,
+                    "conversation_history": conversation_history or [],
+                })
             sess["turn_span"] = turn_span
             sess["turn_ctx"] = trace.set_span_in_context(turn_span)
             sess["turn_id"] = turn_id
@@ -464,10 +470,11 @@ def _on_post_llm_call(
             if not sess or sess["turn_span"] is None:
                 return
             turn_span = sess["turn_span"]
-            _set_payload(turn_span, "output", {
-                "assistant_response": assistant_response,
-                "conversation_history": conversation_history or [],
-            })
+            _set_payload(
+                turn_span, "output", {
+                    "assistant_response": assistant_response,
+                    "conversation_history": conversation_history or [],
+                })
             turn_span.set_attribute("turn.completed", True)
             turn_span.end()
             sess["turn_span"] = None
@@ -496,8 +503,8 @@ def _on_llm_execution(
     if span is not None:
         _set_payload(span, "input", {"effective_request": exact_request})
         _set_request_semantics(span, exact_request)
-        span.set_attribute(
-            "llm.request.capture_source", "llm_execution_post_middleware")
+        span.set_attribute("llm.request.capture_source",
+                           "llm_execution_post_middleware")
     try:
         return next_call(request)
     finally:
@@ -535,8 +542,8 @@ def _on_pre_api_request(
         key = _api_key(session_id, api_request_id, api_call_count)
         with _STATE_LOCK:
             effective_request = _effective_requests.get(key)
-        captured_request = (
-            effective_request if effective_request is not None else request)
+        captured_request = (effective_request
+                            if effective_request is not None else request)
         sess = _ensure_session(session_id, model=model, platform=platform)
         parent_ctx = sess.get("turn_ctx") or sess.get("root_ctx")
         span = _tracer.start_span(
@@ -546,35 +553,51 @@ def _on_pre_api_request(
         _set_common_attributes(
             span,
             **{
-                "openinference.span.kind": "LLM",
-                "session.id": session_id,
-                "task.id": task_id,
-                "turn.id": turn_id or sess.get("turn_id", ""),
-                "llm.api_request_id": api_request_id,
-                "llm.api_call_count": int(api_call_count or 0),
-                "llm.model_name": model,
-                "llm.provider": provider,
-                "llm.base_url": base_url,
-                "llm.api_mode": api_mode,
-                "llm.approx_input_tokens": int(approx_input_tokens or 0),
-                "llm.request_char_count": int(request_char_count or 0),
-                "llm.message_count": int(message_count or 0),
-                "llm.tool_count": int(tool_count or 0),
-                "llm.started_at": started_at,
-                "llm.middleware_trace": middleware_trace or [],
-                "llm.request.capture_source": (
-                    "llm_execution_post_middleware"
-                    if effective_request is not None
-                    else "pre_api_request_observer"),
+                "openinference.span.kind":
+                "LLM",
+                "session.id":
+                session_id,
+                "task.id":
+                task_id,
+                "turn.id":
+                turn_id or sess.get("turn_id", ""),
+                "llm.api_request_id":
+                api_request_id,
+                "llm.api_call_count":
+                int(api_call_count or 0),
+                "llm.model_name":
+                model,
+                "llm.provider":
+                provider,
+                "llm.base_url":
+                base_url,
+                "llm.api_mode":
+                api_mode,
+                "llm.approx_input_tokens":
+                int(approx_input_tokens or 0),
+                "llm.request_char_count":
+                int(request_char_count or 0),
+                "llm.message_count":
+                int(message_count or 0),
+                "llm.tool_count":
+                int(tool_count or 0),
+                "llm.started_at":
+                started_at,
+                "llm.middleware_trace":
+                middleware_trace or [],
+                "llm.request.capture_source":
+                ("llm_execution_post_middleware" if effective_request
+                 is not None else "pre_api_request_observer"),
             },
         )
-        _set_payload(span, "input", {
-            "effective_request": captured_request or {},
-            "observer_request": request or {},
-            "request_messages": request_messages or [],
-            "conversation_history": conversation_history or [],
-            "user_message": user_message,
-        })
+        _set_payload(
+            span, "input", {
+                "effective_request": captured_request or {},
+                "observer_request": request or {},
+                "request_messages": request_messages or [],
+                "conversation_history": conversation_history or [],
+                "user_message": user_message,
+            })
         span.set_attribute("llm.observer_request", _flatten(request or {}))
         _set_request_semantics(span, captured_request or {})
         with _STATE_LOCK:
@@ -630,12 +653,13 @@ def _on_post_api_request(
                 "llm.usage": usage or {},
             },
         )
-        _set_payload(span, "output", {
-            "response": response or {},
-            "assistant_message": assistant_message,
-            "usage": usage or {},
-            "finish_reason": finish_reason,
-        })
+        _set_payload(
+            span, "output", {
+                "response": response or {},
+                "assistant_message": assistant_message,
+                "usage": usage or {},
+                "finish_reason": finish_reason,
+            })
         _set_message_attributes(
             span,
             "llm.output_messages",
@@ -681,22 +705,34 @@ def _on_api_request_error(
         _set_common_attributes(
             span,
             **{
-                "openinference.span.kind": "LLM",
-                "session.id": session_id,
-                "llm.api_request_id": api_request_id,
-                "llm.api_call_count": int(api_call_count or 0),
-                "error.type": (error or {}).get("type")
-                if isinstance(error, dict) else type(error).__name__,
-                "error.message": (error or {}).get("message")
-                if isinstance(error, dict) else str(error or ""),
-                "error.status_code": status_code,
-                "error.retry_count": retry_count,
-                "error.max_retries": max_retries,
-                "error.retryable": retryable,
-                "error.reason": reason,
-                "llm.duration_seconds": float(api_duration or 0.0),
-                "llm.started_at": started_at,
-                "llm.ended_at": ended_at,
+                "openinference.span.kind":
+                "LLM",
+                "session.id":
+                session_id,
+                "llm.api_request_id":
+                api_request_id,
+                "llm.api_call_count":
+                int(api_call_count or 0),
+                "error.type": (error or {}).get("type") if isinstance(
+                    error, dict) else type(error).__name__,
+                "error.message": (error or {}).get("message") if isinstance(
+                    error, dict) else str(error or ""),
+                "error.status_code":
+                status_code,
+                "error.retry_count":
+                retry_count,
+                "error.max_retries":
+                max_retries,
+                "error.retryable":
+                retryable,
+                "error.reason":
+                reason,
+                "llm.duration_seconds":
+                float(api_duration or 0.0),
+                "llm.started_at":
+                started_at,
+                "llm.ended_at":
+                ended_at,
             },
         )
         _set_payload(span, "output", {"error": error or {}})
@@ -719,7 +755,8 @@ def _on_pre_tool_call(
     try:
         sess = _ensure_session(session_id)
         parent_ctx = sess.get("turn_ctx") or sess.get("root_ctx")
-        span = _tracer.start_span(f"hermes.tool.{tool_name}", context=parent_ctx)
+        span = _tracer.start_span(f"hermes.tool.{tool_name}",
+                                  context=parent_ctx)
         _set_common_attributes(
             span,
             **{
@@ -754,7 +791,8 @@ def _on_post_tool_call(
         return
     try:
         with _STATE_LOCK:
-            span = _tool_spans.pop(_tool_key(session_id, tool_call_id, tool_name), None)
+            span = _tool_spans.pop(
+                _tool_key(session_id, tool_call_id, tool_name), None)
             if span is None and not tool_call_id:
                 prefix = f"unidentified:{tool_name}:"
                 fallback = next(
@@ -796,20 +834,17 @@ def _on_post_tool_call(
                 parsed_result = None
         structured_error = bool(
             isinstance(parsed_result, dict)
-            and (
-                parsed_result.get("success") is False
-                or bool(parsed_result.get("error"))
-                or parsed_result.get("action") == "block"
-                or parsed_result.get("status") in {"error", "failed"}
-            )
-        )
+            and (parsed_result.get("success") is False
+                 or bool(parsed_result.get("error"))
+                 or parsed_result.get("action") == "block"
+                 or parsed_result.get("status") in {"error", "failed"}))
         if (extra.get("error_type")
                 or extra.get("status") in {"error", "failed"}
                 or structured_error):
-            message = (
-                str(parsed_result.get("error") or parsed_result.get("message") or "tool error")
-                if isinstance(parsed_result, dict) else str(extra.get("error_message") or "tool error")
-            )
+            message = (str(
+                parsed_result.get("error") or parsed_result.get("message")
+                or "tool error") if isinstance(parsed_result, dict) else str(
+                    extra.get("error_message") or "tool error"))
             _set_error_status(span, message)
         span.end()
     except Exception as exc:
@@ -897,4 +932,5 @@ def register(ctx) -> None:
     ctx.register_hook("on_session_finalize", _on_session_finalize)
     ctx.register_hook("on_session_reset", _on_session_reset)
     ctx.register_middleware("llm_execution", _on_llm_execution)
-    logger.info("phoenix_tracer: 11 hooks and exact-request middleware registered")
+    logger.info(
+        "phoenix_tracer: 11 hooks and exact-request middleware registered")

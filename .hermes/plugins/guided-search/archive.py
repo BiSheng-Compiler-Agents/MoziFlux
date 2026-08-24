@@ -22,8 +22,8 @@ _MECHANISMS = (
 
 
 def _gradient_inputs_for_parent(
-    parent: dict[str, Any], transitions: Iterable[dict[str, Any]]
-) -> list[dict[str, Any]]:
+        parent: dict[str, Any],
+        transitions: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     inputs = []
     for transition in transitions:
         parent_json = transition.get("parent_json")
@@ -31,9 +31,8 @@ def _gradient_inputs_for_parent(
         if not parent_json or not child_json:
             continue
         if any(
-            parent_json.get(dimension) != parent.get(dimension)
-            for dimension in (*_DIMENSIONS, "mechanism")
-        ):
+                parent_json.get(dimension) != parent.get(dimension)
+                for dimension in (*_DIMENSIONS, "mechanism")):
             continue
         inputs.append({
             "parent": parent_json,
@@ -62,7 +61,8 @@ def select_parent(
     if not eligible:
         return None, "seed"
     transitions = list(transitions)
-    weighted: list[tuple[dict[str, Any], float, dict[str, dict[str, float]]]] = []
+    weighted: list[tuple[dict[str, Any], float, dict[str, dict[str,
+                                                               float]]]] = []
     for candidate in eligible:
         gradients = estimate_gradients(
             _gradient_inputs_for_parent(candidate, transitions),
@@ -70,13 +70,12 @@ def select_parent(
             elites=eligible,
             gradient_weights=(0.4, 0.4, 0.2),
         )
-        magnitude = math.sqrt(sum(
-            float(data["combined"]) ** 2 for data in gradients.values()))
+        magnitude = math.sqrt(
+            sum(float(data["combined"])**2 for data in gradients.values()))
         weighted.append((candidate, 0.05 + magnitude, gradients))
     seed_material = (
-        f"{run_id}:{generation}:{archive_revision}:"
-        + ",".join(str(candidate["id"]) for candidate, _, _ in weighted)
-    )
+        f"{run_id}:{generation}:{archive_revision}:" +
+        ",".join(str(candidate["id"]) for candidate, _, _ in weighted))
     seed = int.from_bytes(
         hashlib.sha256(seed_material.encode("utf-8")).digest()[:8], "big")
     rng = random.Random(seed)
@@ -107,9 +106,7 @@ def select_target(
     """Choose an ordinal direction or categorical mechanism edge."""
     transitions = list(transitions)
     elites = list(elites)
-    gradients = (
-        parent.get("_selection_gradients")
-        if parent else None)
+    gradients = (parent.get("_selection_gradients") if parent else None)
     if not isinstance(gradients, dict):
         gradients = estimate_gradients(
             _gradient_inputs_for_parent(parent, transitions) if parent else [],
@@ -117,12 +114,11 @@ def select_target(
             elites=elites,
             gradient_weights=(0.4, 0.4, 0.2),
         )
-    supported = [
-        (dimension, data) for dimension, data in gradients.items()
-        if data["support"] > 0 or abs(data["exploration"]) > 0
-    ]
+    supported = [(dimension, data) for dimension, data in gradients.items()
+                 if data["support"] > 0 or abs(data["exploration"]) > 0]
     if supported:
-        dimension, data = max(supported, key=lambda item: abs(item[1]["combined"]))
+        dimension, data = max(supported,
+                              key=lambda item: abs(item[1]["combined"]))
         direction = 1 if data["combined"] >= 0 else -1
         confidence = data["confidence"]
     else:
@@ -134,8 +130,10 @@ def select_target(
     mechanism_target = None
     if parent:
         parent_coordinate = [
-            int(parent["algorithm"]), int(parent["engine"]),
-            int(parent["memory"]), int(parent["dispatch"]),
+            int(parent["algorithm"]),
+            int(parent["engine"]),
+            int(parent["memory"]),
+            int(parent["dispatch"]),
             str(parent["mechanism"]),
         ]
         current = int(parent[dimension])
@@ -157,9 +155,8 @@ def select_target(
             if edge_values:
                 mechanism_target = max(
                     edge_values,
-                    key=lambda mechanism: (
-                        sum(edge_values[mechanism]) / len(edge_values[mechanism])
-                    ),
+                    key=lambda mechanism: (sum(edge_values[mechanism]) / len(
+                        edge_values[mechanism])),
                 )
             else:
                 index = (_MECHANISMS.index(current_mechanism)
@@ -173,19 +170,25 @@ def select_target(
         mechanism_target,
     )
     return {
-        "dimension": dimension,
-        "direction": direction,
-        "confidence": confidence,
-        "mechanism_target": mechanism_target,
-        "parent_coordinate": parent_coordinate,
-        "gradient": gradients.get(dimension, {}),
-        "gradients": gradients,
-        "parent_gradient_magnitude": (
-            float(parent.get("_selection_gradient_magnitude", 0.0))
-            if parent else 0.0),
-        "parent_selection_probability": (
-            float(parent.get("_selection_probability", 1.0))
-            if parent else 1.0),
+        "dimension":
+        dimension,
+        "direction":
+        direction,
+        "confidence":
+        confidence,
+        "mechanism_target":
+        mechanism_target,
+        "parent_coordinate":
+        parent_coordinate,
+        "gradient":
+        gradients.get(dimension, {}),
+        "gradients":
+        gradients,
+        "parent_gradient_magnitude":
+        (float(parent.get("_selection_gradient_magnitude", 0.0))
+         if parent else 0.0),
+        "parent_selection_probability":
+        (float(parent.get("_selection_probability", 1.0)) if parent else 1.0),
         "gradient_weights": {
             "fitness": 0.4,
             "improvement_rate": 0.4,
