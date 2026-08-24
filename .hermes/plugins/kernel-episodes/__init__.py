@@ -77,6 +77,39 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     return dict(row)
 
 
+def _sqlite_unistr(value: str | None) -> str | None:
+    """Implement SQLite 3.50's unistr() for older CI SQLite builds."""
+    if value is None:
+        return None
+    result: list[str] = []
+    index = 0
+    escape_widths = {"u": 4, "U": 8, "+": 6}
+    while index < len(value):
+        if value[index] != "\\":
+            result.append(value[index])
+            index += 1
+            continue
+        if index + 1 >= len(value):
+            raise ValueError("trailing backslash in unistr input")
+        marker = value[index + 1]
+        if marker == "\\":
+            result.append("\\")
+            index += 2
+            continue
+        width = escape_widths.get(marker)
+        digits_start = index + 2
+        if width is None:
+            width = 4
+            digits_start = index + 1
+        digits = value[digits_start:digits_start + width]
+        if len(digits) != width or any(char not in "0123456789abcdefABCDEF"
+                                       for char in digits):
+            raise ValueError(f"invalid unistr escape near offset {index}")
+        result.append(chr(int(digits, 16)))
+        index = digits_start + width
+    return "".join(result)
+
+
 def _restore_database_from_dump(
     dump_path: str | None = None,
     db_path: str | None = None,
@@ -104,6 +137,10 @@ def _restore_database_from_dump(
 
     conn = sqlite3.connect(tmp)
     try:
+        # sqlite3 CLI 3.50+ emits unistr() in .dump output. GitHub's Python 3.11
+        # currently links an older SQLite, so register a compatible scalar
+        # function before replaying the portable SQL dump.
+        conn.create_function("unistr", 1, _sqlite_unistr, deterministic=True)
         with src.open("r", encoding="utf-8") as fh:
             conn.executescript(fh.read())
         conn.commit()

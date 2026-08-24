@@ -148,18 +148,18 @@ class TestPathProtection:
 
     def test_blocks_project_plugins_dir(self):
         assert _path_matches_protected(
-            "/opt/moziflux/.hermes/plugins/foo.py") is True
+            str(_PROJECT_DIR / ".hermes" / "plugins" / "foo.py")) is True
 
     def test_blocks_project_skills_dir(self):
         assert _path_matches_protected(
-            "/opt/moziflux/.hermes/skills/foo.md") is True
+            str(_PROJECT_DIR / ".hermes" / "skills" / "foo.md")) is True
 
     def test_blocks_optimize_kernels_py(self):
         assert _path_matches_protected(
-            "/opt/moziflux/optimize_kernels.py") is True
+            str(_PROJECT_DIR / "optimize_kernels.py")) is True
 
     def test_blocks_agents_md(self):
-        assert _path_matches_protected("/opt/moziflux/AGENTS.md") is True
+        assert _path_matches_protected(str(_PROJECT_DIR / "AGENTS.md")) is True
 
     def test_allows_outside_project(self):
         assert _path_matches_protected(
@@ -358,7 +358,9 @@ class TestPreToolCallHook:
     def test_blocks_write_to_plugins(self):
         result = _on_pre_tool_call(
             tool_name="write_file",
-            args={"path": "/opt/moziflux/.hermes/plugins/foo.py"},
+            args={
+                "path": str(_PROJECT_DIR / ".hermes" / "plugins" / "foo.py")
+            },
             session_id="kernelbench-l1_25_Swish",
         )
         assert result is not None
@@ -457,7 +459,7 @@ class TestPreToolCallHook:
     def test_blocks_dangerous_terminal(self):
         result = _on_pre_tool_call(
             tool_name="terminal",
-            args={"command": "rm -rf /opt/moziflux/.hermes/plugins/"},
+            args={"command": f"rm -rf {_PROJECT_DIR / '.hermes' / 'plugins'}"},
             session_id="kernelbench-l1_25_Swish",
         )
         assert result is not None
@@ -529,7 +531,7 @@ class TestPreToolCallHook:
         "printf replacement | tee {target}",
         "python -c \"from pathlib import Path; Path('{target}').write_text('x')\"",
         "git apply {target}",
-        "touch /opt/moziflux/AGENTS.md",
+        "touch {project_agents}",
         "printf replacement | tee {baseline}",
     ])
     def test_blocks_common_terminal_write_bypasses(self, tmp_workspace,
@@ -552,7 +554,10 @@ class TestPreToolCallHook:
                 tool_name="terminal",
                 args={
                     "command":
-                    command_template.format(target=target, baseline=baseline)
+                    command_template.format(target=target,
+                                            baseline=baseline,
+                                            project_agents=_PROJECT_DIR /
+                                            "AGENTS.md")
                 },
                 session_id=f"kernelbench-{tmp_workspace.name}",
             )
@@ -564,7 +569,9 @@ class TestPreToolCallHook:
     def test_non_sandbox_session_allows_anything(self):
         result = _on_pre_tool_call(
             tool_name="write_file",
-            args={"path": "/opt/moziflux/.hermes/plugins/foo.py"},
+            args={
+                "path": str(_PROJECT_DIR / ".hermes" / "plugins" / "foo.py")
+            },
             session_id="random-session",
         )
         assert result is None

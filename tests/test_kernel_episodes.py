@@ -33,6 +33,7 @@ _restore_database_from_dump = _kernel_episodes._restore_database_from_dump
 _sanitize_fts_query = _kernel_episodes._sanitize_fts_query
 _row_to_dict = _kernel_episodes._row_to_dict
 _db_path = _kernel_episodes._db_path
+_sqlite_unistr = _kernel_episodes._sqlite_unistr
 
 
 class TestSanitizeFtsQuery:
@@ -54,6 +55,13 @@ class TestSanitizeFtsQuery:
         result = _sanitize_fts_query("tl.dot fp16/fp32")
         # Should strip special FTS chars
         assert ":" not in result or "tl.dot" not in result
+
+
+class TestSqliteCompatibility:
+
+    def test_unistr_decodes_supported_sqlite_escapes(self):
+        assert _sqlite_unistr(r"line1\u000aline2") == "line1\nline2"
+        assert _sqlite_unistr(r"\0041\+01F600\\") == "A😀\\"
 
 
 class TestEpisodeCRUD:
