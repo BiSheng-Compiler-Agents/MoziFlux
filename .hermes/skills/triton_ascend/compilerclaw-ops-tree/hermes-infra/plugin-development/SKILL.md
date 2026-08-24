@@ -36,7 +36,7 @@ name: my-plugin          # must match directory name (hyphens OK)
 version: 1.0.0
 description: "What this plugin does"
 author: "Your Name"
-requires_env:            # env vars required before plugin loads (actively enforced)
+requires_env:            # installer/UI requirement metadata; see runtime note below
   - MY_API_KEY
 provides_tools:          # declarative list — parsed but NOT consumed at runtime
   - my_tool
@@ -52,7 +52,7 @@ provides_hooks:          # declarative list — parsed but NOT consumed at runti
 | `version` | string | Shown in `hermes plugin list` |
 | `description` | string | Shown in `hermes plugin list` |
 | `author` | string | Metadata only |
-| `requires_env` | list | **Actively enforced** — gates tool availability |
+| `requires_env` | list | Parsed requirement metadata used by install/UI surfaces; in the installed runtime it does **not** prevent plugin loading or independently hide a tool |
 | `provides_tools` | list | Parsed into manifest but **never read back** — reserved |
 | `provides_hooks` | list | Parsed into manifest but **never read back** — reserved |
 
@@ -68,6 +68,7 @@ Every plugin **must** have a top-level `register(ctx)` function:
 def register(ctx) -> None:
     ctx.register_hook("pre_tool_call", _on_pre_tool_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
+    ctx.register_middleware("llm_execution", _on_llm_execution)
     ctx.register_command("myplugin", handler=_handle_slash, description="...")
     # ctx.register_tool(...)  — see Tool Registration section
 ```
@@ -127,8 +128,8 @@ pre_tool_call             before every tool call — can block execution
 post_tool_call            after every tool call — inspect results
 transform_terminal_output modify terminal output before agent sees it
 transform_tool_result     modify any tool result before agent sees it
-pre_llm_call              before LLM API request
-post_llm_call             after LLM API response
+pre_llm_call              once per outer user turn, before the tool loop
+post_llm_call             once per outer user turn, after the tool loop
 pre_api_request           raw API request hook
 post_api_request          raw API response hook
 on_session_start          when a new session begins
@@ -137,6 +138,28 @@ on_session_finalize       final cleanup
 on_session_reset          on /reset
 subagent_stop             when a subagent stops
 ```
+
+For fresh context before every provider request, use execution middleware rather than
+`pre_llm_call`:
+
+```python
+def _on_llm_execution(request: dict, next_call, session_id: str = "",
+                      api_request_id: str = "", api_call_count: int = 0,
+                      api_mode: str = "", **_):
+    effective = inject_current_state_into_request_copy(request, session_id, api_mode)
+    return next_call(effective)
+
+def register(ctx) -> None:
+    ctx.register_middleware("llm_execution", _on_llm_execution)
+```
+
+`llm_execution` middleware runs inside the provider-request/retry loop and wraps the
+actual provider callback. Rewrite a request-local copy and call `next_call(effective)`
+exactly once. Execution middleware forms a true sequential chain, so multiple plugins'
+context survives; request middleware callbacks are currently collected from one common
+input and a later rewrite can replace an earlier plugin's rewrite. Keep context bounded
+and key accounting by `api_request_id` so transport retries are idempotent.
+`pre_api_request` is observer-only and cannot replace the request.
 
 ### pre_tool_call signature
 ```python
@@ -320,18 +343,21 @@ with open(env_path) as f:
             os.environ[k.strip()] = v.strip()
 ```
 
-### `requires_env` — keep it complete and in sync
+### `requires_env`, `check_fn`, and hooks — distinct runtime behavior
 
-**`requires_env` must be complete in BOTH `plugin.yaml` AND `ctx.register_tool()`.**
-Both lists must match and must include **every** env var the code actually reads
-via `os.environ.get()`. If a var is in code but not in `requires_env`, the plugin
-load check silently passes but the tool fails at runtime with a confusing error.
+In the installed Hermes runtime, these mechanisms are separate:
+
+- `plugin.yaml.requires_env` is parsed and used by plugin installation/UI reporting. It does not stop `PluginManager` from importing an enabled plugin or calling `register(ctx)`.
+- `ctx.register_tool(..., requires_env=[...])` records requirement metadata for toolset/UI reporting. Actual tool-schema exposure is controlled by the tool's zero-argument `check_fn`; Hermes caches `check_fn` results briefly and treats exceptions as unavailable.
+- `ctx.register_hook(...)` has no `check_fn`. Once an enabled plugin registers a hook, Hermes invokes it. A conditionally available hook must call a cheap availability predicate itself and return `None` when unavailable.
+
+For a genuinely required variable, list it in both manifest/tool metadata for accurate setup reporting and make the tool's named `check_fn` validate the real runtime prerequisite. Hook callbacks should reuse the same underlying uncached predicate rather than assuming tool exposure gates hook execution.
 
 Audit checklist when creating or reviewing a plugin:
 1. Grep `__init__.py` for all `os.environ.get("VAR_NAME"` calls
 2. Every **truly-required** VAR_NAME (no code default, plugin can't run without it)
    must appear in `plugin.yaml` → `requires_env` AND `register_tool()` → `requires_env=[...]`
-3. Both lists must match each other and match `check_fn`'s actual gate
+3. Keep manifest/tool metadata aligned for setup reporting, and make `check_fn` the authoritative tool-exposure gate
 4. Prefer "no default" (`""`) for truly required vars — don't silently fall through
 
 ### ⚠️ Optional env vars must NOT be in `requires_env` (set-but-empty reads as missing)
@@ -340,9 +366,9 @@ Only list a var in `requires_env` if the plugin genuinely cannot run without it.
 A var that has a code default (e.g. `PORT` defaulting to 22, `BASE_DIR`, `CONDA_ENV`)
 is **optional** — listing it in `requires_env` is a bug:
 
-- `requires_env` enforcement treats a SET-BUT-EMPTY value (`KEY=""` in `.env`) as
-  "missing" (`_missing_requires_env_names` uses `not get_env_value(name)`). A user
-  who deliberately blanks an optional var to take the default gets a load failure.
+- Installer requirement checks treat a SET-BUT-EMPTY value (`KEY=""` in `.env`) as
+  missing (`_missing_requires_env_names` uses `not get_env_value(name)`). A user
+  who deliberately blanks an optional var to take the default receives misleading setup warnings; the runtime `check_fn` must still handle blank values safely.
 - The rule: `requires_env` = only what `check_fn` actually gates on. If `check_fn`
   is `lambda: bool(_host() and _user() and _pass())`, then ONLY those three go in
   `requires_env` — in both `plugin.yaml` and `register_tool()`. Optional vars with
