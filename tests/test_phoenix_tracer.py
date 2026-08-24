@@ -74,7 +74,11 @@ def phoenix(monkeypatch):
     sdk_trace.TracerProvider = FakeProvider
     setattr(sdk_trace, "SpanLimits", lambda **kwargs: ("span_limits", kwargs))
     sdk_export = types.ModuleType("opentelemetry.sdk.trace.export")
-    sdk_export.BatchSpanProcessor = lambda exporter: ("processor", exporter)
+    setattr(
+        sdk_export,
+        "BatchSpanProcessor",
+        lambda exporter, **kwargs: ("processor", exporter, kwargs),
+    )
     grpc_export = types.ModuleType(
         "opentelemetry.exporter.otlp.proto.grpc.trace_exporter")
     grpc_export.OTLPSpanExporter = lambda **kwargs: ("exporter", kwargs)
@@ -105,8 +109,9 @@ def phoenix(monkeypatch):
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.delenv("PHOENIX_TRACE_MAX_CHARS", raising=False)
+    monkeypatch.delenv("PHOENIX_MAX_EXPORT_BATCH_SIZE", raising=False)
 
-    path = Path(".hermes/plugins/phoenix_tracer/__init__.py").resolve()
+    path = Path(".hermes/plugins/phoenix-tracer/__init__.py").resolve()
     spec = importlib.util.spec_from_file_location("phoenix_tracer_test", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -121,6 +126,7 @@ def phoenix(monkeypatch):
 
 def test_traces_every_provider_request_with_complete_payloads(phoenix):
     plugin, tracer = phoenix
+    assert plugin._provider.processors[0][2]["max_export_batch_size"] == 1
     long_input = "request-" + "x" * 10000
     long_output = "response-" + "y" * 10000
 
@@ -360,6 +366,33 @@ def test_traces_complete_tool_io_and_provider_errors(phoenix):
     assert error_span.attributes["error.type"] == "timeout"
     assert error_span.attributes["span.status"] == "ERROR"
     assert error_span.ended is True
+
+
+def test_duplicate_tool_start_interrupts_previous_span(phoenix):
+    plugin, tracer = phoenix
+    plugin._on_pre_llm_call(session_id="session-1", user_message="run")
+    for value in (1, 2):
+        plugin._on_pre_tool_call(
+            tool_name="terminal",
+            args={"value": value},
+            session_id="session-1",
+            tool_call_id="same-call",
+        )
+    spans = [
+        span for span in tracer.spans if span.name == "hermes.tool.terminal"
+    ]
+    assert len(spans) == 2
+    assert spans[0].ended is True
+    assert spans[0].attributes["span.interrupted"] is True
+    assert spans[1].ended is False
+    plugin._on_post_tool_call(
+        tool_name="terminal",
+        result={"success": True},
+        session_id="session-1",
+        tool_call_id="same-call",
+    )
+    assert spans[1].ended is True
+    assert plugin._tool_spans == {}
 
 
 def test_registers_request_tool_and_session_hooks(phoenix):

@@ -335,17 +335,15 @@ def _validate_results_txt(workspace: Path) -> tuple[bool, list[str]]:
 
     # Detect canonical format: must have both UNIT_TEST lines AND
     # " optimized " (with spaces) in TEST lines.
-    # Old-format results.txt (from previous agent runs) use different
-    # structure and should not be validated.
+    # Old or malformed results must fail closed. Treating an unrecognized file
+    # as valid lets a fabricated report bypass correctness and benchmark gates.
     has_unit_test = any(line.startswith("UNIT_TEST") for line in lines)
     has_canonical_test = any(
         line.startswith("TEST ") and " optimized " in line for line in lines)
     if not has_unit_test or not has_canonical_test:
-        logger.info(
-            "kernel-sandbox: results.txt for %s uses old format, skipping validation",
-            workspace.name,
-        )
-        return True, []
+        return False, [
+            "results.txt is not in the canonical UNIT_TEST/TEST format"
+        ]
 
     # Check UNIT_TEST result
     unit_test_lines = [ln for ln in lines if ln.startswith("UNIT_TEST")]
@@ -620,9 +618,12 @@ def _terminal_command_may_modify(command: str) -> bool:
     return bool(
         re.search(
             r"(?:^|[;&|]\s*)(?:rm|mv|cp|install|touch|truncate|chmod|chown|ln|"
-            r"sed\s+-i|perl\s+-pi|git\s+(?:checkout|restore|clean)|patch)\b",
+            r"tee|dd|rsync|unzip|sed\s+-i|perl\s+-pi|"
+            r"git\s+(?:checkout|restore|clean|apply)|patch)\b",
             command,
-        ) or re.search(r"(?:^|[^<>])>>?\s*\S+", command))
+        ) or re.search(
+            r"\b(?:write_text|write_bytes|unlink|rename|replace)\s*\(",
+            command) or re.search(r"(?:^|[^<>])>>?\s*\S+", command))
 
 
 def _on_pre_tool_call(
@@ -667,6 +668,28 @@ def _on_pre_tool_call(
         may_modify = _terminal_command_may_modify(cmd)
 
         state = _load_state(workspace)
+        if may_modify:
+            baseline = _baseline_name(workspace)
+            protected_markers = (
+                ".hermes/plugins",
+                ".hermes/skills",
+                "optimize_kernels.py",
+                "AGENTS.md",
+            )
+            if any(marker in cmd for marker in protected_markers):
+                msg = "BLOCKED: terminal command would modify protected project infrastructure."
+                logger.warning("kernel-sandbox: %s", msg)
+                return {"action": "block", "message": msg}
+            if baseline and re.search(
+                    rf"(?<!opt_){re.escape(baseline)}(?:$|[\s;&|])", cmd):
+                msg = "BLOCKED: terminal command would modify the baseline kernel."
+                logger.warning("kernel-sandbox: %s", msg)
+                return {"action": "block", "message": msg}
+            if re.search(r"(?:^|[/\s])base_[^/\s]*\.py\b", cmd):
+                msg = "BLOCKED: terminal command would modify a reference kernel."
+                logger.warning("kernel-sandbox: %s", msg)
+                return {"action": "block", "message": msg}
+
         if _guided_enabled(state) and ".pipeline_state.json" in cmd:
             msg = "BLOCKED: terminal command targets plugin-owned pipeline state."
             logger.warning("kernel-sandbox: %s", msg)
@@ -1093,7 +1116,7 @@ def register(ctx) -> None:
                     },
                     "key": {
                         "type": "string",
-                        "enum": ["recorded", "verify_failed"],
+                        "enum": ["verified", "recorded", "verify_failed"],
                         "description": "Flag to set (only with action=set).",
                     },
                     "value": {

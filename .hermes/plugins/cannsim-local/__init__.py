@@ -41,6 +41,7 @@ Important lessons (from remote plugin):
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import os
@@ -123,7 +124,7 @@ def _find_cannsim_bin(env: dict[str, str] | None = None) -> str:
 # ---------------------------------------------------------------------------
 # Triton patches for local simulation (no physical NPU needed)
 #
-# Two files need patching in the triton package:
+# Three compatibility points need patching in this triton package revision:
 #
 # 1. triton/tools/get_ascend_devices.py
 #    Add env_condition so is_compile_on_910_95=True when TRITON_ASCEND_ARCH is set.
@@ -131,33 +132,41 @@ def _find_cannsim_bin(env: dict[str, str] | None = None) -> str:
 # 2. triton/backends/ascend/compiler.py
 #    - Import get_ascend_arch_from_env from driver
 #    - Use it first: get_ascend_arch_from_env() or NPUUtils().get_arch()
+#
+# 3. triton/backends/ascend/runtime/utils.py
+#    In compile-only mode, derive the lazy runtime target properties from
+#    TRITON_ASCEND_ARCH instead of initializing a physical NPU while Triton's
+#    cache-key scanner imports the CV autotuner.
 # ---------------------------------------------------------------------------
 
 
 def _apply_local_patches(conda_env: str) -> tuple[bool, str]:
-    """Apply triton patches in-place, like the remote plugin does on SSH.
+    """Apply no-device Triton compatibility patches in-place.
 
-    Patches the two triton files directly in the conda env's site-packages.
+    Patches the relevant Triton files directly in the conda env's site-packages.
     Idempotent — skips if already applied.
     """
-    # Find triton package location
+    # Compilation runs in ``conda_env``. Resolve that environment first even
+    # when the Hermes host process also has Triton installed; patching the host
+    # package would leave the compiler environment unchanged.
     triton_dir = None
-    try:
-        import triton
-        triton_dir = os.path.dirname(triton.__file__)
-    except ImportError:
-        # Derive conda env lib path from CONDA_BIN env var
-        conda_bin = os.environ.get("CONDA_BIN", "")
-        if conda_bin:
-            conda_root = os.path.dirname(os.path.dirname(conda_bin))
-            conda_env_lib = os.path.join(conda_root, "envs", conda_env, "lib")
-            if os.path.isdir(conda_env_lib):
-                for ver_dir in os.listdir(conda_env_lib):
-                    candidate = os.path.join(conda_env_lib, ver_dir,
-                                             "site-packages", "triton")
-                    if os.path.isdir(candidate):
-                        triton_dir = candidate
-                        break
+    conda_bin = os.environ.get("CONDA_BIN", "")
+    if conda_bin:
+        conda_root = os.path.dirname(os.path.dirname(conda_bin))
+        conda_env_lib = os.path.join(conda_root, "envs", conda_env, "lib")
+        if os.path.isdir(conda_env_lib):
+            for ver_dir in sorted(os.listdir(conda_env_lib)):
+                candidate = os.path.join(conda_env_lib, ver_dir,
+                                         "site-packages", "triton")
+                if os.path.isdir(candidate):
+                    triton_dir = candidate
+                    break
+    if triton_dir is None:
+        try:
+            import triton
+            triton_dir = os.path.dirname(triton.__file__)
+        except (ImportError, SyntaxError):
+            pass
 
     if triton_dir is None:
         return False, "Could not find triton package location"
@@ -172,24 +181,26 @@ def _apply_local_patches(conda_env: str) -> tuple[bool, str]:
     else:
         with open(p1) as f:
             c1 = f.read()
-        if "env_condition" in c1:
+        env_patch = (
+            'env_condition = os.getenv("TRITON_ASCEND_ARCH", "").strip().lower() in (\n'
+            '    "ascend910_9589", "ascend910b", "ascend950", "ascend910_95"\n'
+            ')\n'
+            'is_compile_on_910_95 = pci_condition or npu_smi_condition or env_condition'
+        )
+        old_assignment = (
+            "is_compile_on_910_95 = pci_condition or npu_smi_condition")
+        if c1.count(env_patch) == 1 and old_assignment not in c1:
             log_parts.append("[PATCH] get_ascend_devices.py: already applied")
-        elif "is_compile_on_910_95 = pci_condition or npu_smi_condition" in c1:
-            c1 = c1.replace(
-                "is_compile_on_910_95 = pci_condition or npu_smi_condition",
-                "env_condition = os.getenv(\\\"TRITON_ASCEND_ARCH\\\", \\\"\\\").strip().lower() in (\\n"
-                "    \\\"ascend910_9589\\\", \\\"ascend910b\\\", \\\"ascend950\\\", \\\"ascend910_95\\\"\\n"
-                ")\\n"
-                "is_compile_on_910_95 = pci_condition or npu_smi_condition or env_condition",
-                1,
-            )
+        elif c1.count(old_assignment) == 1 and env_patch not in c1:
+            c1 = c1.replace(old_assignment, env_patch, 1)
+            ast.parse(c1, filename=p1)
             with open(p1, "w") as f:
                 f.write(c1)
             log_parts.append("[PATCH] get_ascend_devices.py: applied OK")
         else:
             log_parts.append(
-                "[PATCH] get_ascend_devices.py: OLD string not found — skipping"
-            )
+                "[ERROR] get_ascend_devices.py: expected exactly one unpatched "
+                "assignment or one complete patched assignment")
 
     # Patch 2: compiler.py — import + use get_ascend_arch_from_env
     p2 = os.path.join(triton_dir, "backends", "ascend", "compiler.py")
@@ -198,33 +209,103 @@ def _apply_local_patches(conda_env: str) -> tuple[bool, str]:
     else:
         with open(p2) as f:
             c2 = f.read()
-        if "get_ascend_arch_from_env" in c2:
+        old_import = "from triton.backends.ascend.driver import (\n    NPUUtils\n)"
+        new_import = "from triton.backends.ascend.driver import (\n    NPUUtils,\n    get_ascend_arch_from_env,\n)"
+        old_target = 'f"--target={NPUUtils().get_arch()}"'
+        new_target = 'f"--target={get_ascend_arch_from_env() or NPUUtils().get_arch()}"'
+        import_applied = c2.count(new_import) == 1 and old_import not in c2
+        target_applied = c2.count(new_target) == 1 and old_target not in c2
+        if import_applied and target_applied:
             log_parts.append("[PATCH] compiler.py: already applied")
         else:
-            old_import = "from triton.backends.ascend.driver import (\n    NPUUtils\n)"
-            new_import = "from triton.backends.ascend.driver import (\n    NPUUtils,\n    get_ascend_arch_from_env,\n)"
-            if old_import in c2:
+            valid = True
+            changed = False
+            if not import_applied and c2.count(old_import) == 1:
                 c2 = c2.replace(old_import, new_import, 1)
-                log_parts.append("[PATCH] compiler.py: import applied OK")
-            else:
+                changed = True
+            elif not import_applied:
                 log_parts.append(
-                    "[PATCH] compiler.py: import OLD string not found")
-
-            old_target = 'f"--target={NPUUtils().get_arch()}"'
-            new_target = 'f"--target={get_ascend_arch_from_env() or NPUUtils().get_arch()}"'
-            if old_target in c2:
+                    "[ERROR] compiler.py: expected exactly one driver import block"
+                )
+                valid = False
+            if not target_applied and c2.count(old_target) == 1:
                 c2 = c2.replace(old_target, new_target, 1)
-                log_parts.append("[PATCH] compiler.py: target applied OK")
-            else:
+                changed = True
+            elif not target_applied:
                 log_parts.append(
-                    "[PATCH] compiler.py: target OLD string not found")
+                    "[ERROR] compiler.py: expected exactly one BishengIR target expression"
+                )
+                valid = False
+            if valid and changed:
+                ast.parse(c2, filename=p2)
+                with open(p2, "w") as f:
+                    f.write(c2)
+                log_parts.append("[PATCH] compiler.py: applied OK")
 
-            with open(p2, "w") as f:
-                f.write(c2)
+    # Patch 3: runtime/utils.py — no physical-device query in compile-only mode
+    p3 = os.path.join(triton_dir, "backends", "ascend", "runtime", "utils.py")
+    if not os.path.isfile(p3):
+        log_parts.append("[PATCH] runtime/utils.py: file not found — skipping")
+    else:
+        with open(p3) as f:
+            c3 = f.read()
+        old_runtime = """    from triton.runtime.driver import driver
+
+    target = driver.active.get_current_target()
+"""
+        new_runtime = """    compile_only = os.getenv(\"TRITON_COMPILE_ONLY\", \"\").lower() in (\"1\", \"true\")
+    env_arch = os.getenv(\"TRITON_ASCEND_ARCH\", \"\").strip()
+    if compile_only and env_arch:
+        from triton.backends.compiler import GPUTarget
+
+        is_a5 = env_arch.startswith(\"Ascend910_95\") or env_arch.startswith(\"Ascend950\")
+        num_cube_core = 32
+        num_vector_core = num_cube_core * 2 if is_a5 else num_cube_core
+        _cached_params = {
+            'target': GPUTarget(\"npu\", env_arch, 32),
+            'device': 0,
+            'prop': {
+                'num_aicore': num_cube_core,
+                'num_vectorcore': num_vector_core,
+            },
+            'num_cube_core': num_cube_core,
+            'num_vector_core': num_vector_core,
+            'ub_size_in_kbytes': 256 if is_a5 else 192,
+            'rf_size_in_kbytes': 128 if is_a5 else None,
+        }
+        return _cached_params
+
+    from triton.runtime.driver import driver
+
+    target = driver.active.get_current_target()
+"""
+        runtime_applied = (c3.count(new_runtime) == 1 and old_runtime not in c3
+                           and "import os\n" in c3)
+        if runtime_applied:
+            log_parts.append("[PATCH] runtime/utils.py: already applied")
+        elif c3.count(old_runtime) == 1 and new_runtime not in c3:
+            if "import os\n" not in c3:
+                if c3.count("import torch\n") != 1:
+                    log_parts.append(
+                        "[ERROR] runtime/utils.py: expected exactly one torch import"
+                    )
+                    c3 = ""
+                else:
+                    c3 = c3.replace("import torch\n",
+                                    "import os\n\nimport torch\n", 1)
+            if c3:
+                c3 = c3.replace(old_runtime, new_runtime, 1)
+                ast.parse(c3, filename=p3)
+                with open(p3, "w") as f:
+                    f.write(c3)
+                log_parts.append("[PATCH] runtime/utils.py: applied OK")
+        else:
+            log_parts.append(
+                "[ERROR] runtime/utils.py: expected exactly one _init_npu_params "
+                "driver-target block or one complete compile-only replacement")
 
     log = "\n".join(log_parts)
-    all_ok = all("applied OK" in p or "already applied" in p or "skipping" in p
-                 for p in log_parts)
+    all_ok = not any(part.startswith("[ERROR]") for part in log_parts)
     return all_ok, log
 
 
@@ -278,7 +359,11 @@ def _find_instr_bin(cwd: str) -> str | None:
     present = [p for p in candidates if os.path.isfile(p)]
     if not present:
         return None
-    # Newest non-empty wins.
+    non_empty = [p for p in present if os.path.getsize(p) > 0]
+    if non_empty:
+        present = non_empty
+    # Newest non-empty wins; retain an empty path only when all candidates are
+    # empty so the caller can emit an accurate flush diagnostic.
     present.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     return present[0]
 
@@ -383,7 +468,7 @@ def _run_cannsim_record(
     timeout: int,
     completion_markers: tuple[str, ...] = ("all tasks are finished", ),
     poll_interval: float = 3.0,
-    instr_wait: float = 120.0,
+    instr_wait: float = 600.0,
     instr_quiet_window: float = 30.0,
 ) -> tuple[int, str, str]:
     """Run cannsim record, polling the binary's cannsim.log for completion markers.
@@ -679,6 +764,7 @@ def _cannsim_local_run(
     trace_json_size_bytes = 0
     trace_local_path = ""
     report_log = ""
+    report_error = ""
     exp_dir = ""
 
     if gen_report:
@@ -705,6 +791,7 @@ def _cannsim_local_run(
             logger.warning(
                 "cannsim-local: report source dir not found; skipping report")
             report_log = "report source dir not found"
+            report_error = report_log
         else:
             report_out_dir = os.path.join(exp_dir, "report")
             report_cmd = f"{cannsim_bin} report -e {exp_dir} -o {report_out_dir} -n 0"
@@ -715,6 +802,7 @@ def _cannsim_local_run(
             report_log = (rep_out + "\n" + rep_err).strip()
 
             if rc_rep != 0:
+                report_error = f"cannsim report failed (exit {rc_rep})"
                 logger.warning(
                     f"cannsim report returned non-zero: {rc_rep}\n{report_log[-1000:]}"
                 )
@@ -742,13 +830,15 @@ def _cannsim_local_run(
                         f"cannsim-local: trace available at {trace_path} "
                         f"({trace_json_size_bytes} bytes)")
                 else:
+                    report_error = "trace_core0.json not found after cannsim report"
                     logger.warning(
                         "cannsim-local: trace_core0.json not found after report"
                     )
 
-    return {
+    success = not gen_report or bool(trace_local_path)
+    result = {
         "success":
-        True,
+        success,
         "job_name":
         job_name,
         "job_dir":
@@ -775,6 +865,10 @@ def _cannsim_local_run(
         bool(return_trace_json
              and trace_json_size_bytes > len(trace_json_content)),
     }
+    if not success:
+        result[
+            "error"] = report_error or "cannsim report produced no usable trace"
+    return result
 
 
 # ---------------------------------------------------------------------------

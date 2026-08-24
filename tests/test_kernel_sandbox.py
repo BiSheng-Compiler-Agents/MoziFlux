@@ -214,6 +214,30 @@ class TestDeliverablesCheck:
         assert len(missing) == 5
 
 
+class TestResultsValidation:
+
+    def test_rejects_unrecognized_or_old_results_format(self, tmp_workspace):
+        (tmp_workspace / "results.txt").write_text(
+            "PASS\nPyTorch 1.0 ms Optimized 0.5 ms\n", encoding="utf-8")
+        valid, errors = _mod._validate_results_txt(tmp_workspace)
+        assert valid is False
+        assert "canonical" in errors[0]
+
+    def test_accepts_complete_canonical_results(self, tmp_workspace):
+        (tmp_workspace / "results.txt").write_text(
+            "UNIT_TEST PASS\n"
+            "TEST shape baseline1 PASS\n"
+            "TEST shape baseline2 PASS\n"
+            "TEST shape optimized PASS\n"
+            "label  PyTorch / ACL  Baseline Triton1  Optimized Triton\n"
+            "0 shape  1.0  0.9  0.8\n",
+            encoding="utf-8",
+        )
+        valid, errors = _mod._validate_results_txt(tmp_workspace)
+        assert valid is True
+        assert errors == []
+
+
 class TestStateMachine:
     """Test pipeline stage transitions."""
 
@@ -501,6 +525,42 @@ class TestPreToolCallHook:
         finally:
             os.environ["KERNEL_SANDBOX_ROOT"] = str(original_root)
 
+    @pytest.mark.parametrize("command_template", [
+        "printf replacement | tee {target}",
+        "python -c \"from pathlib import Path; Path('{target}').write_text('x')\"",
+        "git apply {target}",
+        "touch /opt/moziflux/AGENTS.md",
+        "printf replacement | tee {baseline}",
+    ])
+    def test_blocks_common_terminal_write_bypasses(self, tmp_workspace,
+                                                   command_template):
+        original_root = _sandbox_root()
+        os.environ["KERNEL_SANDBOX_ROOT"] = str(tmp_workspace.parent)
+        try:
+            _save_state(
+                tmp_workspace, {
+                    "baseline": "25_Swish.py",
+                    "current_stage": "verify",
+                    "guided_search": {
+                        "enabled": True,
+                        "run_id": 1
+                    },
+                })
+            target = tmp_workspace / "opt_25_Swish.py"
+            baseline = tmp_workspace / "25_Swish.py"
+            result = _on_pre_tool_call(
+                tool_name="terminal",
+                args={
+                    "command":
+                    command_template.format(target=target, baseline=baseline)
+                },
+                session_id=f"kernelbench-{tmp_workspace.name}",
+            )
+            assert result is not None
+            assert result["action"] == "block"
+        finally:
+            os.environ["KERNEL_SANDBOX_ROOT"] = str(original_root)
+
     def test_non_sandbox_session_allows_anything(self):
         result = _on_pre_tool_call(
             tool_name="write_file",
@@ -693,6 +753,10 @@ class TestRegistration:
         _mod.register(ctx)
         assert "pre_llm_call" not in {name for name, _ in ctx.hooks}
         assert ctx.middleware == [("llm_execution", _on_llm_execution)]
+        status_tool = next(tool for tool in ctx.tools
+                           if tool["name"] == "kernel_status")
+        key_schema = status_tool["schema"]["parameters"]["properties"]["key"]
+        assert "verified" in key_schema["enum"]
 
 
 class TestKernelStatusTool:

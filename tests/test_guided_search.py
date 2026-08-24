@@ -5,13 +5,21 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import os
+import sqlite3
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
 _PROJECT_DIR = Path(__file__).parent.parent.resolve()
 _PLUGIN_DIR = _PROJECT_DIR / ".hermes" / "plugins" / "guided-search"
+
+
+def _update_run(sql: str, params: tuple) -> None:
+    with sqlite3.connect(os.environ["GUIDED_SEARCH_DB_PATH"]) as conn:
+        conn.execute(sql, params)
 
 
 def _load_plugin():
@@ -725,6 +733,51 @@ class TestSelectionAndGradients:
         assert target["target_name"] == "explicit_tiling_or_local_buffer"
         assert "explicit tiling" in target["mutation_guidance"]
 
+    def test_prompt_exposes_complete_gradient_and_nonmandatory_hint(
+            self, guided):
+        parent = {
+            "id": 7,
+            "source_hash": "parent-hash",
+            "algorithm": 0,
+            "engine": 0,
+            "memory": 0,
+            "dispatch": 0,
+            "mechanism": "standard_triton",
+            "hardware_score": 1.0,
+            "correct": 1,
+            "safe": 1,
+            "descriptor_evidence_json": "[]",
+        }
+        selected, _ = guided.select_parent([parent], [],
+                                           generation=1,
+                                           run_id=3,
+                                           archive_revision=1)
+        target = guided.select_target(selected, [], [parent], generation=1)
+        target["selection_mode"] = "gradient_weighted"
+        attempt = {
+            "id": 9,
+            "generation": 1,
+            "phase": "editing",
+            "parent_candidate_id": 7,
+            "target_json": json.dumps(target),
+            "mutation_objective": "follow gradient evidence",
+        }
+        run = {
+            "id": 3,
+            "budget": 30,
+            "promotion_domain": "hardware",
+        }
+        rendered = guided.render_attempt_prompt(
+            run=run,
+            attempt=attempt,
+            parent=selected,
+        )
+        assert "PARENT GRADIENT SAMPLING" in rendered
+        assert "FULL SIGNED GRADIENT VECTOR" in rendered
+        for dimension in ("algorithm", "engine", "memory", "dispatch"):
+            assert f"- {dimension}:" in rendered
+        assert "not a mandatory target cell" in rendered
+
     def test_mechanism_target_is_descriptive_and_categorical(self, guided):
         parent = {
             "id": 1,
@@ -738,6 +791,31 @@ class TestSelectionAndGradients:
         assert target["mechanism_target"] == "compiler_managed"
         assert target["mechanism_target_label"] == "compiler-managed Triton"
         assert "BishengIR/NPUOptions" in target["mechanism_guidance"]
+
+    def test_mechanism_exploration_excludes_current_lane(self, guided):
+        parent = {
+            "id": 1,
+            "algorithm": 0,
+            "engine": 0,
+            "memory": 0,
+            "dispatch": 0,
+            "mechanism": "compiler_managed",
+        }
+        transitions = [{
+            "parent_json": parent,
+            "child_json": {
+                **parent, "mechanism": "compiler_managed"
+            },
+            "delta_fitness": 10.0,
+        }, {
+            "parent_json": parent,
+            "child_json": {
+                **parent, "mechanism": "manual_extension"
+            },
+            "delta_fitness": 1.0,
+        }]
+        target = guided.select_target(parent, transitions, generation=5)
+        assert target["mechanism_target"] == "manual_extension"
 
 
 class TestSqlArchive:
@@ -845,6 +923,53 @@ def kernel(x):
         assert first["id"] == second["id"]
         assert first["status"] == "active"
 
+    def test_concurrent_attempt_creation_returns_one_sticky_attempt(
+            self, guided, search_workspace):
+        run_id = guided.initialize_search_run(
+            workspace=search_workspace,
+            session_id="kernelbench-l1_25_Swish",
+            budget=2,
+        )
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            attempts = list(
+                pool.map(lambda _index: guided.ensure_active_attempt(run_id),
+                         range(16)))
+        assert len({attempt["id"] for attempt in attempts}) == 1
+        with sqlite3.connect(os.environ["GUIDED_SEARCH_DB_PATH"]) as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM attempts WHERE run_id=? AND status='active'",
+                (run_id, )).fetchone()[0]
+        assert count == 1
+
+    def test_tool_event_recording_is_idempotent(self, guided,
+                                                search_workspace):
+        run_id = guided.initialize_search_run(
+            workspace=search_workspace,
+            session_id="kernelbench-l1_25_Swish",
+            budget=1,
+        )
+        guided.ensure_active_attempt(run_id)
+        kwargs = {
+            "run_id": run_id,
+            "session_id": "kernelbench-l1_25_Swish",
+            "tool_call_id": "same-tool-call",
+            "tool_name": "remote_verify",
+            "source_content_hash": "source-hash",
+        }
+        assert guided.record_tool_event(**kwargs,
+                                        result={
+                                            "success": False,
+                                            "error": "first"
+                                        }) is True
+        assert guided.record_tool_event(**kwargs, result={"success":
+                                                          True}) is False
+        with sqlite3.connect(os.environ["GUIDED_SEARCH_DB_PATH"]) as conn:
+            rows = conn.execute(
+                "SELECT result_json FROM tool_events WHERE run_id=?",
+                (run_id, )).fetchall()
+        assert len(rows) == 1
+        assert json.loads(rows[0][0])["error"] == "first"
+
     def test_checkout_materializes_parent_only_once(self, guided,
                                                     search_workspace):
         run_id = guided.initialize_search_run(
@@ -883,6 +1008,7 @@ def kernel(x):
             correct=True,
             safe=True,
             simulation_score=1.5,
+            complete_attempt=False,
         )
         guided.record_candidate(
             run_id=simulation_run,
@@ -891,11 +1017,15 @@ def kernel(x):
             correct=True,
             safe=True,
             hardware_score=1.2,
+            complete_attempt=False,
         )
         elites = guided.get_cell_elites(simulation_run,
                                         (0, 0, 1, 1, "standard_triton"))
         assert elites["simulation_candidate_id"] == sim_id
         assert elites["hardware_candidate_id"] is None
+        _update_run(
+            "UPDATE search_runs SET status='ready_to_finalize', "
+            "completed_attempts=budget WHERE id=?", (simulation_run, ))
         simulation_winner = guided.finalize_run(simulation_run)
         assert simulation_winner["candidate_id"] == sim_id
 
@@ -916,7 +1046,11 @@ def kernel(x):
             correct=True,
             safe=True,
             simulation_score=9.0,
+            complete_attempt=False,
         )
+        _update_run(
+            "UPDATE search_runs SET status='ready_to_finalize', "
+            "completed_attempts=budget WHERE id=?", (hardware_run, ))
         with pytest.raises(RuntimeError, match="hardware-confirmed"):
             guided.finalize_run(hardware_run)
         promoted_hw = guided.record_candidate(
@@ -926,6 +1060,7 @@ def kernel(x):
             correct=True,
             safe=True,
             hardware_score=1.1,
+            complete_attempt=False,
         )
         hardware_elites = guided.get_cell_elites(
             hardware_run, (0, 0, 1, 1, "standard_triton"))
@@ -944,7 +1079,7 @@ def kernel(x):
         guided.ensure_active_attempt(run_id)
         source = (search_workspace / "25_Swish.py").read_text(encoding="utf-8")
         descriptor = guided.classify_candidate(source)
-        candidate_id = guided.record_candidate(
+        guided.record_candidate(
             run_id=run_id,
             source=source,
             descriptor=descriptor,
@@ -952,12 +1087,125 @@ def kernel(x):
             safe=True,
             hardware_score=1.25,
         )
+        guided.ensure_active_attempt(run_id)
+        winner_source = source + "\n# mutation winner\n"
+        candidate_id = guided.record_candidate(
+            run_id=run_id,
+            source=winner_source,
+            descriptor=guided.classify_candidate(winner_source),
+            correct=True,
+            safe=True,
+            hardware_score=1.3,
+        )
         result = guided.finalize_run(run_id)
         assert result["candidate_id"] == candidate_id
         assert (search_workspace /
-                "opt_25_Swish.py").read_text(encoding="utf-8") == source
+                "opt_25_Swish.py").read_text(encoding="utf-8") == winner_source
         run = guided.get_run(run_id)
         assert run is not None and run["status"] == "completed"
+
+    def test_state_rejects_new_candidate_without_active_attempt(
+            self, guided, search_workspace):
+        run_id = guided.initialize_search_run(
+            workspace=search_workspace,
+            session_id="kernelbench-l1_25_Swish",
+            budget=1,
+            promotion_domain="simulation",
+        )
+        with pytest.raises(RuntimeError, match="requires an active"):
+            guided.record_candidate(
+                run_id=run_id,
+                source="# unbound child",
+                descriptor=(0, 0, 0, 0, "standard_triton"),
+                correct=False,
+                safe=False,
+            )
+
+    def test_state_rejects_premature_and_active_finalization(
+            self, guided, search_workspace):
+        run_id = guided.initialize_search_run(
+            workspace=search_workspace,
+            session_id="kernelbench-l1_25_Swish",
+            budget=1,
+            promotion_domain="simulation",
+        )
+        with pytest.raises(RuntimeError, match="budget is exhausted"):
+            guided.finalize_run(run_id)
+        guided.ensure_active_attempt(run_id)
+        with pytest.raises(RuntimeError, match="attempt is active"):
+            guided.finalize_run(run_id)
+
+    def test_completed_run_rejects_archive_mutation(self, guided,
+                                                    search_workspace):
+        run_id = guided.initialize_search_run(
+            workspace=search_workspace,
+            session_id="kernelbench-l1_25_Swish",
+            budget=1,
+        )
+        _update_run("UPDATE search_runs SET status='completed' WHERE id=?",
+                    (run_id, ))
+        with pytest.raises(RuntimeError, match="does not accept candidates"):
+            guided.record_candidate(
+                run_id=run_id,
+                source="# late candidate",
+                descriptor=(0, 0, 0, 0, "standard_triton"),
+                correct=True,
+                safe=True,
+                simulation_score=1.0,
+                complete_attempt=False,
+            )
+
+    def test_evaluator_evidence_requires_semantic_success_or_failure(
+            self, guided, search_workspace):
+        run_id = guided.initialize_search_run(
+            workspace=search_workspace,
+            session_id="kernelbench-l1_25_Swish",
+            budget=1,
+            promotion_domain="hardware",
+        )
+        attempt = guided.ensure_active_attempt(run_id)
+        source_hash = "source-hash"
+        guided.record_tool_event(
+            run_id=run_id,
+            session_id="kernelbench-l1_25_Swish",
+            tool_call_id="contradictory",
+            tool_name="remote_verify",
+            source_content_hash=source_hash,
+            result={
+                "success": False,
+                "test_passed": True,
+                "bench_passed": True,
+            },
+        )
+        assert guided.successful_tool_evidence(
+            run_id,
+            {"remote_verify"},
+            source_content_hash=source_hash,
+            attempt_id=attempt["id"],
+        ) is None
+        assert guided.has_matching_evaluator_event(
+            run_id,
+            source_content_hash=source_hash,
+            attempt_id=attempt["id"],
+        ) is True
+
+        guided.record_tool_event(
+            run_id=run_id,
+            session_id="kernelbench-l1_25_Swish",
+            tool_call_id="successful",
+            tool_name="remote_verify",
+            source_content_hash="successful-source",
+            result={
+                "success": True,
+                "test_passed": True,
+                "bench_passed": True,
+            },
+        )
+        assert guided.has_matching_evaluator_event(
+            run_id,
+            source_content_hash="successful-source",
+            attempt_id=attempt["id"],
+        ) is False
 
     def test_pipeline_run_id_cannot_be_reused_by_another_workspace(
             self, guided, search_workspace, tmp_path):

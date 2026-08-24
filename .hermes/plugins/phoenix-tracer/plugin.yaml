@@ -1,4 +1,4 @@
-name: phoenix_tracer
+name: phoenix-tracer
 version: 1.1.0
 description: "Traces exact post-middleware LLM requests, visual message metadata, and tool calls to Arize Phoenix"
 author: "Shayan"

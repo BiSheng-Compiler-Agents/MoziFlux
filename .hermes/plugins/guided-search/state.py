@@ -673,10 +673,14 @@ def record_candidate(
     with connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         run_row = conn.execute(
-            "SELECT promotion_domain FROM search_runs WHERE id=?",
+            "SELECT promotion_domain, status FROM search_runs WHERE id=?",
             (run_id, )).fetchone()
         if run_row is None:
             raise KeyError(f"unknown guided-search run: {run_id}")
+        if run_row["status"] not in {"running", "ready_to_finalize"}:
+            raise RuntimeError(
+                f"run {run_id} does not accept candidates: {run_row['status']}"
+            )
         promotion_domain = str(run_row["promotion_domain"])
         attempt = conn.execute(
             "SELECT * FROM attempts WHERE run_id=? AND status='active'",
@@ -684,6 +688,13 @@ def record_candidate(
         parent_id = int(
             attempt["parent_candidate_id"]
         ) if attempt and attempt["parent_candidate_id"] else None
+        existing_candidate = conn.execute(
+            "SELECT id FROM candidates WHERE run_id=? AND source_hash=?",
+            (run_id, source_hash),
+        ).fetchone()
+        if complete_attempt and attempt is None and existing_candidate is None:
+            raise RuntimeError(
+                "a new candidate requires an active guided-search attempt")
         if attempt and attempt["kind"] == "baseline" and parent_id:
             baseline_parent = conn.execute(
                 "SELECT content_hash FROM candidates WHERE id=?",
@@ -1010,7 +1021,8 @@ def successful_tool_evidence(
         except json.JSONDecodeError:
             continue
         if row["tool_name"] == "remote_verify":
-            if (result.get("test_passed") is True
+            if (result.get("success") is True
+                    and result.get("test_passed") is True
                     and result.get("bench_passed") is not False):
                 return result
         else:
@@ -1028,21 +1040,26 @@ def successful_tool_evidence(
 def has_matching_evaluator_event(run_id: int, *, source_content_hash: str,
                                  attempt_id: int | None) -> bool:
     with connect() as conn:
-        if attempt_id is None:
-            row = conn.execute(
-                """SELECT 1 FROM tool_events WHERE run_id=? AND
-                   source_content_hash=? AND tool_name IN
-                   ('cannsim_local_run','cannsim_remote_run','remote_verify') LIMIT 1""",
-                (run_id, source_content_hash),
-            ).fetchone()
-        else:
-            row = conn.execute(
-                """SELECT 1 FROM tool_events WHERE run_id=? AND attempt_id=? AND
-                   source_content_hash=? AND tool_name IN
-                   ('cannsim_local_run','cannsim_remote_run','remote_verify') LIMIT 1""",
-                (run_id, attempt_id, source_content_hash),
-            ).fetchone()
-    return row is not None
+        sql = """SELECT tool_name, result_json FROM tool_events WHERE run_id=? AND
+                 source_content_hash=? AND tool_name IN
+                 ('cannsim_local_run','cannsim_remote_run','remote_verify')"""
+        params: tuple[Any, ...] = (run_id, source_content_hash)
+        if attempt_id is not None:
+            sql += " AND attempt_id=?"
+            params += (attempt_id, )
+        rows = conn.execute(sql + " ORDER BY id DESC", params).fetchall()
+    for row in rows:
+        try:
+            result = json.loads(row["result_json"])
+        except json.JSONDecodeError:
+            continue
+        if result.get("success") is False:
+            return True
+        if (row["tool_name"] == "remote_verify"
+                and (result.get("test_passed") is False
+                     or result.get("bench_passed") is False)):
+            return True
+    return False
 
 
 def finalize_run(run_id: int) -> dict[str, Any]:
@@ -1055,6 +1072,16 @@ def finalize_run(run_id: int) -> dict[str, Any]:
         if str(run["status"]).startswith("failed_"):
             raise RuntimeError(f"guided-search run failed ({run['status']}): "
                                f"{run['failure_reason'] or 'no valid elite'}")
+        active = conn.execute(
+            "SELECT 1 FROM attempts WHERE run_id=? AND status='active'",
+            (run_id, )).fetchone()
+        if active is not None:
+            raise RuntimeError(
+                "cannot finalize while a guided-search attempt is active")
+        if (run["status"] != "completed"
+                and int(run["completed_attempts"]) < int(run["budget"])):
+            raise RuntimeError(
+                "cannot finalize before the mutation budget is exhausted")
         hardware_domain = run["promotion_domain"] == "hardware"
         score_column = "hardware_score" if hardware_domain else "simulation_score"
         candidate_column = ("hardware_candidate_id"

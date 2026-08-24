@@ -67,14 +67,23 @@ try:
     _otlp_endpoint = os.getenv("PHOENIX_OTLP_ENDPOINT",
                                "http://localhost:4317")
     _exporter = OTLPSpanExporter(endpoint=_otlp_endpoint, insecure=True)
-    _provider.add_span_processor(BatchSpanProcessor(_exporter))
+    try:
+        _max_export_batch_size = max(
+            1, int(os.getenv("PHOENIX_MAX_EXPORT_BATCH_SIZE", "1")))
+    except ValueError:
+        _max_export_batch_size = 1
+    _provider.add_span_processor(
+        BatchSpanProcessor(_exporter,
+                           max_export_batch_size=_max_export_batch_size))
     trace.set_tracer_provider(_provider)
     _tracer = trace.get_tracer("hermes.phoenix_tracer")
     _OTEL_AVAILABLE = True
     logger.info(
-        "phoenix_tracer: OTel provider initialised → %s (max_span_attributes=%d)",
+        "phoenix_tracer: OTel provider initialised → %s "
+        "(max_span_attributes=%d, max_export_batch_size=%d)",
         _otlp_endpoint,
         _max_span_attributes,
+        _max_export_batch_size,
     )
 except Exception as _e:
     _OTEL_AVAILABLE = False
@@ -773,7 +782,12 @@ def _on_pre_tool_call(
         _set_payload(span, "input", args or {})
         correlation = tool_call_id or f"unidentified:{tool_name}:{id(span)}"
         with _STATE_LOCK:
-            _tool_spans[(session_id, correlation)] = span
+            key = (session_id, correlation)
+            previous = _tool_spans.pop(key, None)
+            if previous is not None:
+                previous.set_attribute("span.interrupted", True)
+                previous.end()
+            _tool_spans[key] = span
     except Exception as exc:
         logger.debug("phoenix_tracer pre_tool_call: %s", exc)
 

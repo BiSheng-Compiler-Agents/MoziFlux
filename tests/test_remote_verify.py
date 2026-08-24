@@ -9,17 +9,12 @@ import importlib.util
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 _PROJECT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(_PROJECT_DIR))
 
 os.environ.setdefault("HERMES_HOME", "/opt/data")
-os.environ.setdefault("REMOTE_VERIFY_HOST", "192.168.1.10")
-os.environ.setdefault("REMOTE_VERIFY_USER", "testuser")
-os.environ.setdefault("REMOTE_VERIFY_PASS", "testpass")
-os.environ.setdefault("REMOTE_VERIFY_PORT", "22")
-os.environ.setdefault("REMOTE_VERIFY_BASE_DIR", "~/kernel_verify")
-os.environ.setdefault("REMOTE_VERIFY_CONDA_ENV", "compilerclaw")
-
 _spec = importlib.util.spec_from_file_location(
     "remote_verify",
     str(_PROJECT_DIR / ".hermes" / "plugins" / "remote-verify" /
@@ -29,17 +24,27 @@ _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 
 _remote_verify = _mod._remote_verify
-_on_pre_tool_call = _mod._on_pre_tool_call
+_ssh_exec = _mod._ssh_exec
 _remote_host = _mod._remote_host
 _remote_user = _mod._remote_user
 _remote_pass = _mod._remote_pass
+
+
+@pytest.fixture(autouse=True)
+def _isolated_remote_environment(monkeypatch):
+    monkeypatch.setenv("REMOTE_VERIFY_HOST", "192.0.2.1")
+    monkeypatch.setenv("REMOTE_VERIFY_USER", "testuser")
+    monkeypatch.setenv("REMOTE_VERIFY_PASS", "testpass")
+    monkeypatch.setenv("REMOTE_VERIFY_PORT", "22")
+    monkeypatch.setenv("REMOTE_VERIFY_BASE_DIR", "~/kernel_verify")
+    monkeypatch.setenv("REMOTE_VERIFY_CONDA_ENV", "compilerclaw")
 
 
 class TestEnvHelpers:
     """Test environment variable resolution."""
 
     def test_remote_host(self):
-        assert _remote_host() == "192.168.1.10"
+        assert _remote_host() == "192.0.2.1"
 
     def test_remote_user(self):
         assert _remote_user() == "testuser"
@@ -60,6 +65,40 @@ class TestRemoteVerifyInputValidation:
         result = _remote_verify(str(tmp_path))
         assert result["success"] is False
         assert "profile_kernels.py not found" in result["error"]
+
+
+class TestSshExec:
+
+    def _ssh_with_channel(self, channel):
+        ssh = MagicMock()
+        stdout = MagicMock()
+        stderr = MagicMock()
+        stdout.channel = channel
+        ssh.exec_command.return_value = (MagicMock(), stdout, stderr)
+        return ssh
+
+    def test_wall_clock_timeout_closes_dead_channel(self, monkeypatch):
+        channel = MagicMock()
+        channel.exit_status_ready.return_value = False
+        channel.get_transport.return_value.is_active.return_value = True
+        ssh = self._ssh_with_channel(channel)
+        clock = iter((0.0, 2.0))
+        monkeypatch.setattr(_mod.time, "time", lambda: next(clock))
+        monkeypatch.setattr(_mod.time, "sleep", lambda _seconds: None)
+        with pytest.raises(TimeoutError, match="exceeded 1s"):
+            _ssh_exec(ssh, "long command", timeout=1)
+        channel.close.assert_called_once()
+
+    def test_dead_transport_fails_without_waiting_for_exit_status(
+            self, monkeypatch):
+        channel = MagicMock()
+        channel.exit_status_ready.return_value = False
+        channel.get_transport.return_value.is_active.return_value = False
+        ssh = self._ssh_with_channel(channel)
+        monkeypatch.setattr(_mod.time, "sleep", lambda _seconds: None)
+        with pytest.raises(ConnectionError, match="transport died"):
+            _ssh_exec(ssh, "broken command", timeout=10)
+        channel.recv_exit_status.assert_not_called()
 
 
 class TestRemoteVerifyMockedSSH:
@@ -180,40 +219,3 @@ class TestRemoteVerifyMockedSSH:
             result = _remote_verify(str(tmp_path))
             assert result["success"] is False
             assert "paramiko not installed" in result["error"]
-
-
-class TestPreToolCallHook:
-    """Test pre_tool_call hook for sandbox enforcement."""
-
-    def test_blocks_write_to_plugins(self):
-        result = _on_pre_tool_call(
-            tool_name="write_file",
-            args={"path": "/opt/moziflux/.hermes/plugins/foo.py"},
-            session_id="kernelbench-l1_25_Swish",
-        )
-        assert result is not None
-        assert result["action"] == "block"
-
-    def test_blocks_dangerous_terminal(self):
-        result = _on_pre_tool_call(
-            tool_name="terminal",
-            args={"command": "rm -rf /opt/moziflux/.hermes/plugins/"},
-            session_id="kernelbench-l1_25_Swish",
-        )
-        assert result is not None
-
-    def test_allows_safe_operations(self):
-        result = _on_pre_tool_call(
-            tool_name="write_file",
-            args={"path": "/tmp/test.py"},
-            session_id="kernelbench-l1_25_Swish",
-        )
-        assert result is None
-
-    def test_non_sandbox_session_allows_anything(self):
-        result = _on_pre_tool_call(
-            tool_name="write_file",
-            args={"path": "/opt/moziflux/.hermes/plugins/foo.py"},
-            session_id="random-session",
-        )
-        assert result is None

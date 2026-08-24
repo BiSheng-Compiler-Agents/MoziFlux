@@ -150,7 +150,9 @@ def select_target(
                 child_mechanism = child_json.get("mechanism")
                 delta = transition.get("delta_fitness")
                 if (parent_json.get("mechanism") == current_mechanism
-                        and child_mechanism and delta is not None):
+                        and child_mechanism
+                        and child_mechanism != current_mechanism
+                        and delta is not None):
                     edge_values[str(child_mechanism)].append(float(delta))
             if edge_values:
                 mechanism_target = max(
