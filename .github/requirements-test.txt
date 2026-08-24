@@ -1,0 +1,4 @@
+paramiko==5.0.0
+pytest==8.3.2
+PyYAML==6.0.3
+triton-ascend==3.2.2
