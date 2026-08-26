@@ -89,6 +89,50 @@ class TestBuildEnvWithCann:
         assert "get_ascend_devices.py: applied OK" in log
         assert "env_condition" in devices.read_text(encoding="utf-8")
 
+    def test_patch_application_is_idempotent(self, tmp_path, monkeypatch):
+        conda_root = tmp_path / "conda"
+        conda_bin = conda_root / "bin" / "conda"
+        conda_bin.parent.mkdir(parents=True)
+        conda_bin.write_text("", encoding="utf-8")
+        triton_dir = (conda_root / "envs" / "target" / "lib" / "python3.11" /
+                      "site-packages" / "triton")
+        tools = triton_dir / "tools"
+        runtime = triton_dir / "backends" / "ascend" / "runtime"
+        tools.mkdir(parents=True)
+        runtime.mkdir(parents=True)
+        devices = tools / "get_ascend_devices.py"
+        devices.write_text(
+            "import os\n"
+            "pci_condition = False\n"
+            "npu_smi_condition = False\n"
+            "is_compile_on_910_95 = pci_condition or npu_smi_condition\n",
+            encoding="utf-8",
+        )
+        runtime_utils = runtime / "utils.py"
+        runtime_utils.write_text(
+            "import torch\n\n"
+            "def _init_npu_params():\n"
+            "    from triton.runtime.driver import driver\n\n"
+            "    target = driver.active.get_current_target()\n"
+            "    return target\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("CONDA_BIN", str(conda_bin))
+
+        first_ok, first_log = _apply_local_patches("target")
+        assert first_ok is True
+        assert "get_ascend_devices.py: applied OK" in first_log
+        assert "runtime/utils.py: applied OK" in first_log
+        first_devices = devices.read_text(encoding="utf-8")
+        first_runtime = runtime_utils.read_text(encoding="utf-8")
+
+        second_ok, second_log = _apply_local_patches("target")
+        assert second_ok is True
+        assert "get_ascend_devices.py: already applied" in second_log
+        assert "runtime/utils.py: already applied" in second_log
+        assert devices.read_text(encoding="utf-8") == first_devices
+        assert runtime_utils.read_text(encoding="utf-8") == first_runtime
+
 
 class TestInstrBinSafety:
 

@@ -189,7 +189,7 @@ def _apply_local_patches(conda_env: str) -> tuple[bool, str]:
         )
         old_assignment = (
             "is_compile_on_910_95 = pci_condition or npu_smi_condition")
-        if c1.count(env_patch) == 1 and old_assignment not in c1:
+        if c1.count(env_patch) == 1:
             log_parts.append("[PATCH] get_ascend_devices.py: already applied")
         elif c1.count(old_assignment) == 1 and env_patch not in c1:
             c1 = c1.replace(old_assignment, env_patch, 1)
@@ -279,8 +279,7 @@ def _apply_local_patches(conda_env: str) -> tuple[bool, str]:
 
     target = driver.active.get_current_target()
 """
-        runtime_applied = (c3.count(new_runtime) == 1 and old_runtime not in c3
-                           and "import os\n" in c3)
+        runtime_applied = (c3.count(new_runtime) == 1 and "import os\n" in c3)
         if runtime_applied:
             log_parts.append("[PATCH] runtime/utils.py: already applied")
         elif c3.count(old_runtime) == 1 and new_runtime not in c3:
