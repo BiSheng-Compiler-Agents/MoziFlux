@@ -1,0 +1,22 @@
+TEST PASS provider=Baseline Triton1 label=tiny max_abs=1.19209e-07
+TEST PASS provider=Baseline Triton2 label=tiny max_abs=1.19209e-07
+TEST PASS provider=Optimized Triton label=tiny max_abs=1.19209e-07
+TEST PASS provider=Baseline Triton1 label=irregular max_abs=1.37836e-07
+TEST PASS provider=Baseline Triton2 label=irregular max_abs=8.9407e-08
+TEST PASS provider=Optimized Triton label=irregular max_abs=8.9407e-08
+TEST PASS provider=Baseline Triton1 label=default max_abs=2.08616e-07
+TEST PASS provider=Baseline Triton2 label=default max_abs=1.78814e-07
+TEST PASS provider=Optimized Triton label=default max_abs=1.78814e-07
+TEST PASS provider=Optimized_Triton_forced_persistent label=persistent_unit max_abs=1.19209e-07
+UNIT_TEST PASS
+
+/home/s00929845/miniconda3/envs/compilerclaw/lib/python3.11/site-packages/torch/nn/functional.py:2400: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  return torch._C._nn.mish(input)
+conv3d_mish_tanh:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0       tiny       0.146255          0.144988          0.136237          0.138770
+1  irregular       0.159240          0.160164          0.151961          0.154202
+2    default      55.902035         60.298351         56.362362         57.106045
+
+/home/s00929845/miniconda3/envs/compilerclaw/lib/python3.11/site-packages/torch/nn/functional.py:2400: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  return torch._C._nn.mish(input)

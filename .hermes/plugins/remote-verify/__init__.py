@@ -21,8 +21,8 @@ Required environment variables:
   REMOTE_VERIFY_BASE_DIR — base dir on remote (default: ~/kernel_verify)
   REMOTE_VERIFY_CONDA_ENV — conda env name (default: compilerclaw)
 
-The pre_tool_call hook blocks writes to project files outside the workspace
-for kernelbench sessions to maintain sandbox boundaries.
+Workspace write protection is owned by the kernel-sandbox plugin; this plugin
+only registers the remote verification tool.
 """
 
 from __future__ import annotations

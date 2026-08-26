@@ -187,6 +187,10 @@ w = tl.softmax(tl.where(x > 0, x, 0.0).to(tl.float32))
 tl.store(y_ptr + offsets, w.to(tl.float16), mask=mask)
 ```
 
+### Rule 4b: Post-Linear Contiguous Epilogues
+
+For `nn.Linear`/GEMM followed by pure elementwise post-ops, check whether the GEMM output is contiguous. If yes, flatten the epilogue to one 1D contiguous kernel with a large block (e.g. 4096 elements) instead of launching `(rows, col_blocks)`; keep a persistent fallback only when `cdiv(n_elements, BLOCK_SIZE) > 65535`. For scalar divide epilogues, compute the reciprocal once on the host and use vector multiply (`x * scale`) instead of `x / divisor`. When cannsim traces use different block sizes, report normalized elements/cycle or cycles/element, not only absolute wall cycles. See `references/post-linear-contiguous-epilogue-tiling.md`.
+
 ### Rule 5: Precision Rules
 
 ```python
@@ -252,6 +256,13 @@ MUST use the **smallest** BLOCK in the configs.
 
 **Sub-kernel trace is identical for direct vs persistent** at grid=1 — the
 benefit is purely at full-shape FFTS dispatch level.
+
+**ACL fallback can beat persistent for standard epilogues.** When a UB-safe
+Triton tiling for a standard operation chain (e.g. clamp/softmax/pool) exceeds
+the 65,535 grid cap, benchmark a CANN/ACL fallback before writing a persistent
+loop. Persistent dispatch fixes legality, but CANN's native implementation can
+be faster at target scale; cannsim sub-kernel traces will not show this full-shape
+dispatch/implementation win.
 
 **`BLOCK_SIZE` conflict with `@triton.autotune`:** When calling an autotuned
 kernel, NEVER pass `BLOCK_SIZE=<int>` as a keyword argument. This raises
@@ -335,6 +346,22 @@ Do NOT reassign its return. Call `al.compile_hint` BEFORE `al.multibuffer` on th
 When using `tl.dot(a, b, acc)` in-place accumulation, prefer it over `al.multibuffer` —
 larger gain, eliminates UB overflow risk.
 
+### Max reductions and staged masks
+
+- For row-wise max/online-softmax paths, A/B explicit NaN semantics:
+  `tl.max(x, axis, propagate_nan=True)` and
+  `tl.maximum(a, b, propagate_nan=tl.PropagateNan.ALL)`. On Ascend these
+  semantics can select a different reduction lowering; require correctness and
+  same-run hardware evidence rather than treating the flags as performance-neutral.
+- If a causal or structural predicate is rebuilt as broadcasted row/column
+  indices in every loop iteration, benchmark a cached host mask and contiguous
+  mask-tile load. Include mask creation in end-to-end measurements, even when a
+  filtered device-kernel profile excludes it.
+- Do not pass a GM mask pointer directly into an outlined SIMD helper when the
+  helper's argument is inferred as UB. Load the complete tile in the caller and
+  pass the UB-resident tensor through the outlined helper graph; otherwise
+  BiSheng may fail with a GM/UB `memref` operand-type mismatch.
+
 ---
 
 ## Compounding Effects — Matmul Optimizations Are Multiple
@@ -412,6 +439,7 @@ See `references/two_phase_reduction_threshold.md` for full data.
 - Sacrifice precision for performance / hardcode that breaks generalization
 - Reduce directly in FP16 / matrix multiplication with BLOCK not multiple of 16
 - BLOCK_SIZE exceeding UB (192KB) / non-contiguous memory access
+- Assuming `mask=` alone makes padded lanes safe when pointer arithmetic has already produced invalid addresses; remap padded offsets first (e.g. `safe_hw = tl.where(offs_hw < H * W, offs_hw, 0)`) before deriving `h/w` or strided pointers
 - Use `tensor.item()` in hot path (triggers CPU-NPU synchronization)
 - Use if branches inside loops to modify variables (Triton compiles to masked operations, catastrophic performance degradation)
 - Calculate UB only for data buffer in 2D tiling (must include offset/mask/index arrays)
@@ -450,18 +478,55 @@ See `references/two_phase_reduction_threshold.md` for full data.
 ## Reference files
 
 ### Local references
+- `../prefetching/references/stage2-performance-model.md` — FlashAttention Cube/Vector scheduling, outlined row-softmax lowering, explicit max semantics, cached causal-mask attribution, and GM-to-UB helper-boundary rules
 - `references/kernel-status-flag-timing.md` — When to set kernel_status flags (verified/recorded) without them being reset by pipeline advances
 - `references/trace_comparison_methodology.md` — Sub-kernel trace comparison methodology
 - `references/two_phase_reduction_threshold.md` — Two-phase reduction tile-count sweet spot
 - `references/grid-autotune-mismatch.md` — Grid/autotune BLOCK size mismatch pitfalls
+- `references/grid-cap-acl-fallback.md` — Hybrid dispatch when small Triton epilogues are useful but full/default shapes exceed Ascend grid cap and ACL standard operators are faster/safer
+- `references/large-aligned-gemm-acl-dispatch.md` — Large aligned GEMM production ACL dispatch with tested Triton fallback; keep cannsim fallback claims separate from hardware production latency.
+- `references/matmul-pair-maxpool-sum-acl-fallback.md` — Linear + adjacent-pair MaxPool1d + row-sum + scale: ACL production dispatch with Cube-based pair-max partial-sum Triton fallback; includes normalized cannsim reporting when baseline microprobes must be shrunk.
+- `references/convtranspose-pool-reduction-hybrid.md` — ConvTranspose + channel-min/height-sum/GELU/bias hybrid dispatch when nested Triton reductions trigger BiSheng collapse failures; includes tiny epilogue and profiling guidance
+- `references/convtranspose3d-layernorm-pool-acl-hybrid.md` — ConvTranspose3d + LayerNorm + AvgPool3d + GELU hybrid dispatch: keep tiny Triton path, route medium/default standard post ops to ACL, and use one-row cannsim micro-probes when full row blocks are too slow.
+- `references/convtranspose3d-batchnorm-avgpool-acl-dispatch.md` — ConvTranspose3d + BatchNorm3d + repeated AvgPool3d: prefer ACL production pooling when hardware wins, keep row-blocked Triton direct/persistent fallbacks tested, and report cannsim by normalized cycles/output.
+- `references/convtranspose3d-maxpool-sum-acl-dispatch.md` — ConvTranspose3d + two MaxPool3d stages + channel sum: use ACL production dispatch when hardware beats custom atomic fallback, keep force-tested Triton direct/persistent fallback, and normalize cannsim cycles per channel-output.
+- `references/convtranspose3d-swish-groupnorm-hardswish-acl.md` — ConvTranspose3d + Swish + GroupNorm + HardSwish: route standard post chain to ACL/PyTorch, use algebraic HardSwish if native op fails, keep direct+persistent Triton fallback tested but disabled unless hardware wins. + channel sum: use ACL production dispatch when hardware beats custom atomic fallback, keep force-tested Triton direct/persistent fallback, and normalize cannsim cycles per channel-output.
+- `references/convtranspose3d-swish-groupnorm-hardswish-acl.md` — ConvTranspose3d + Swish + GroupNorm + HardSwish: route standard post chain to ACL/PyTorch, use algebraic HardSwish if native op fails, keep direct+persistent Triton fallback tested but disabled unless hardware wins.
+- `references/convtranspose3d-softmax-sigmoid-acl-dispatch.md` — ConvTranspose3d + softmax(dim=1) + sigmoid hybrid dispatch: single-pass tiny Triton epilogue, ACL fallback when `N*D*H*W` exceeds grid cap, and comparison-provider pre-skips.
+- `references/convtranspose3d-relu-groupnorm-acl-dispatch.md` — ConvTranspose3d + ReLU + GroupNorm: prefer ACL/native post chain over custom two-pass Triton group reduction; optional ReLU fallback must have direct+persistent dispatch.
+- `references/convtranspose-channel-plane-tanh-epilogue.md` — ConvTranspose2d + per-channel bias/subtract + tanh epilogue: keep ConvTranspose on ACL, retile NCHW epilogue by `(N,C)` plane to remove scalar div/mod, use direct+persistent grid-cap dispatch, and promote large offsets to int64.
+- `references/groupnorm-multigroup-ub-tiling.md`
+- `references/conv3d-acl-channel-segment-epilogue.md` — Conv3d + per-channel pointwise epilogues: keep Conv3d on ACL, tile contiguous NCDHW by `(N,C)` plane to scalarize channel parameters, and unit-test direct/persistent plus generic-C dispatch.
+- `references/conv3d-activation-bias-channel-epilogue.md` — Conv3d + ReLU/LeakyReLU/GELU/Sigmoid + per-channel BiasAdd: channel-segment epilogue, exact LeakyReLU-after-ReLU no-op, direct+persistent grid-cap dispatch, and forced-persistent profiling requirements.
+- `references/conv3d-activation-softmax-mean-acl-dispatch.md` — Conv3d + activation + softmax/mean
+- `references/standard_conv_activation_pool_acl_dispatch.md` — Decision rule for Conv2d + standard activation/pool chains: when cannsim shows scalar/spill-bound custom epilogues, test ACL host dispatch before deeper Triton fusion.
+- `references/conv2d-gelu-gap-acl-dispatch.md` — Conv2d + exact GELU + GlobalAvgPool: remove the custom Triton epilogue launch, route to `F.gelu(...).mean((-2,-1))`, and keep baseline columns parser-visible with neutral skips when exact baseline timing is unsafe.
+- `references/conv2d-avgpool-sigmoid-sum-acl-dispatch.md` — Conv2d + AvgPool2d + Sigmoid + Sum: remove scalar/MTE-heavy custom pooling/reduction epilogues, route standard chain to ACL, and keep Baseline Triton2 parser-visible when sandbox forbids reading `base_*.py`.
+- `references/conv-mish-tanh-epilogue.md` — Conv + Mish + Tanh epilogue pattern: keep ACL convolution, use one-exp stable `tanh(softplus(x))`, `tl.math.tanh`, direct+persistent dispatch, and forced-persistent unit testing.
+- `references/relu-hardswish-algebraic-epilogue.md` — ReLU + HardSwish exact algebraic rewrite: replace separate `tl.maximum` ReLU with a piecewise `tl.where` form to reduce RVEC/PUSHQ work; benchmark small-shape fallback if needed.
+- `references/leakyrelu-branch-select-epilogue.md` — Divide/scale + LeakyReLU pointwise epilogues: prefer `tl.where(y >= 0, y, y * slope)` over `tl.minimum` algebra when cannsim shows RVEC/PUSHQ inflation, and force-test persistent fallback.
+- `references/conv-mish-batchnorm-tile-dispatch.md` — Conv2d + Mish + BatchNorm pattern: keep Conv/BN on ACL, use large-tile direct Mish dispatch with persistent fallback, normalize cannsim cycles when BLOCK changes, and force-test persistent fallback.
+- `references/conv2d-batchnorm-scaling-affine-fold.md` — Conv2d + BatchNorm2d + scalar scale: fold scale into BN affine parameters, cache no-grad affine/eval folds safely, and benchmark cached paths under `torch.no_grad()`.
+
+- `references/gemm-swish-groupnorm-acl-dispatch.md` — GEMM + Swish/bias + GroupNorm ACL production dispatch with legal Triton fallback/chunking; separate cannsim fallback traces from hardware dispatch results.
+- `references/gemm-bias-relu-contiguous-weight.md` — GEMM + bias/activation pattern: transpose PyTorch `[N,K]` weights to contiguous `[K,N]`, use in-place `tl.dot(a,b,acc)`, and normalize cannsim cycles when `BLOCK_N` changes.
+- `references/post-linear-contiguous-epilogue-tiling.md` — GEMM/Linear followed by pure elementwise epilogue: flatten contiguous output, reduce epilogue program count, use direct+persistent grid-cap dispatch, and compare cannsim traces by normalized elements/cycle when block sizes differ.
+- `references/constant-singleton-softmax-fill.md` — Constant `(B,1)` softmax output: fill-ones direct/persistent dispatch, forced persistent unit testing, and normalized cannsim elements/cycle reporting.
+- `references/algebraic-dead-gemm-zero-output.md` — Algebraically eliminate dead GEMM/reduction/activation chains that become exact zero (e.g. `GELU(max - max)`), with direct+persistent zero-fill dispatch and sandbox-safe Baseline Triton2 profiling.
+- `references/post-linear-groupnorm-acl-dispatch.md` — Linear/GEMM followed by GroupNorm + activation/scale: prefer ACL/CANN production dispatch when custom Triton uses narrow per-group GEMM tiles; keep/test a chunked Triton epilogue fallback and normalize cannsim cycles per group.
+- `references/post-linear-swish-direct-sigmoid.md` — Linear/GEMM + Swish/SILU + scale epilogues: test fp32 direct sigmoid against branch-stable sigmoid, keep shape-aware block sizes, and force-test persistent fallback.
+- `references/exact-sigmoid-epilogue-tiling.md` — Exact sigmoid/residual epilogues: normalize cannsim by elements when changing block size, A/B exp2 rewrites, and force-test grid-cap persistent fallback.
 - `references/pushq_vf_bottleneck_matmul.md` — PUSHQ/VF bottleneck patterns in matmul
 - `references/row_scale_diagonal_matmul.md` — Row-scale diagonal matmul patterns
+- `references/small-gemm-activation-reduction-dot-split.md` — Small dense linear + activation + hidden-sum + global-reduction pattern: replace vector broadcast GEMM with row-tiled `tl.dot`, then reduce row sums.
+- `references/gemm-sigmoid-sum-logits-epilogue.md` — Large GEMM + sigmoid + hidden-sum pattern: compute logits with Cube `tl.dot`, then run a vector bias/sigmoid/row-sum epilogue when direct post-dot fusion hits compiler broadcast issues.
 
 ### Shared references (in `../../shared/references/`)
 
 Agents MUST read the relevant shared reference file(s) with `read_file` before coding or reviewing patterns that depend on them; mentions in this SKILL.md are only an index, not the full procedure.
 
 - **`optimization-patterns.md`** — Read before applying non-trivial performance patterns. Contains all core rules, reference kernel implementations (GEMM with diagonal scheduling + `al.parallel`, LayerNorm, Online Softmax, Flash Attention), pitfalls G1-G7 (Python-style slices, return/break in loops, integer comparison in `tl.where`, multi-dim grid, Cube never activated, FP16 overflow, `.item()` sync), and detailed case studies. The patterns in this skill are a subset; consult this doc for full details.
+- **`references/gemm-scale-batchnorm-cached-transpose.md`** — GEMM+scale+BatchNorm cached `[K,N]` weight transpose pattern for `nn.Linear` kernels whose baseline reads PyTorch `[N,K]` weights with strided N access.
 - **`triton-api-reference.md`** — Read when using or changing any non-basic Triton-Ascend API: `al.*`, `bl.*`, `NPUOptions`, `tl.dot` options, synchronization, buffer management, custom ops, or compiler flags. Section 4: AL extension (`al.compile_hint`, `al.multibuffer`, `al.cast`, `al.sync_block_set/wait`, `al.parallel`, `al.extract_slice`, `al.insert_slice`, etc.). Section 5: BL extension. Section 7: NPUOptions.
 - **`tiling-strategies.md`** — Read before changing `BLOCK_*`, grid shape, swizzle/grouping, persistent-grid loops, reductions, or any schedule that affects UB/L1 usage. Includes inter-core patterns, intra-core UB budget calculation with alignment, operator case studies (LayerNorm, Softmax, MatMul), diagonal scheduling, and common errors (UB overflow, alignment, load imbalance, precision loss).
 - **`ascend-terminology.md`** — Read when interpreting cannsim traces or hardware terms: AI Core (Cube + Vector), GM/UB/L1, UB constraints, alignment rules, HIVM IR mapping table, pipeline stages.

@@ -1,0 +1,24 @@
+CANNSIM TRACE SUMMARY
+Baseline Triton1 pool microprobe: wall_cycles=29597 hardware_latency_us=11.839 normalized_cycles_per_channel_output=1849.8
+Optimized Triton fused fallback microprobe: wall_cycles=28219 hardware_latency_us=11.288 normalized_cycles_per_channel_output=220.5
+Baseline Triton2: SKIP_UNAVAILABLE sandboxed_base_file_not_read
+
+REMOTE VERIFY TEST
+TEST Baseline Triton1 tiny_direct: PASS max_abs=0
+TEST Baseline Triton2 tiny_direct: SKIP_UNAVAILABLE sandboxed_base_file_not_read max_abs=inf
+TEST Optimized Triton tiny_direct: PASS max_abs=0
+TEST Baseline Triton1 irregular_direct: PASS max_abs=0
+TEST Baseline Triton2 irregular_direct: SKIP_UNAVAILABLE sandboxed_base_file_not_read max_abs=inf
+TEST Optimized Triton irregular_direct: PASS max_abs=0
+TEST Baseline Triton1 default_direct: PASS max_abs=0
+TEST Baseline Triton2 default_direct: SKIP_UNAVAILABLE sandboxed_base_file_not_read max_abs=inf
+TEST Optimized Triton default_direct: PASS max_abs=0
+TEST Optimized Triton forced_direct_fallback: PASS max_abs=9.53674e-07
+TEST Optimized Triton forced_persistent_fallback: PASS max_abs=1.90735e-06
+UNIT_TEST PASS
+
+REMOTE VERIFY BENCH (ms)
+label PyTorch / ACL Baseline Triton1 Baseline Triton2 Optimized Triton
+tiny_direct 0.915956 4.066240 inf 0.908945
+irregular_direct 2.711759 12.766814 inf 2.709504
+default_direct 113.671989 inf inf 113.599976

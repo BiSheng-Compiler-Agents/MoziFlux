@@ -1,0 +1,6 @@
+TEST Baseline Triton2 small_b1: SKIP_UNAVAILABLE sandbox_no_base_read max_abs=inf
+TEST Baseline Triton2 medium_b128: SKIP_UNAVAILABLE sandbox_no_base_read max_abs=inf
+TEST Baseline Triton2 target_b1024: SKIP_UNAVAILABLE sandbox_no_base_read max_abs=inf
+CANNSIM Baseline epilogue: wall_cycles=3989 elements=1024 cycles_per_element=3.8955 hw_latency_ns=1595.6
+CANNSIM Optimized epilogue: wall_cycles=4986 elements=4096 cycles_per_element=1.2173 hw_latency_ns=1994.4 normalized_speedup=3.20x
+UNIT_TEST CANNSIM PASS

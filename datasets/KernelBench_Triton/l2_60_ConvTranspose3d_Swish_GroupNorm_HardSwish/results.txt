@@ -1,0 +1,50 @@
+TEST Baseline Triton1 tiny_triton_path: PASS max_abs=1.43051e-06
+TEST Baseline Triton2 tiny_triton_path: SKIP_UNAVAILABLE base_file_read_prohibited max_abs=inf
+TEST Optimized Triton tiny_triton_path: PASS max_abs=0
+TEST Baseline Triton1 medium_acl_path: PASS max_abs=1.90735e-06
+TEST Baseline Triton2 medium_acl_path: SKIP_UNAVAILABLE base_file_read_prohibited max_abs=inf
+TEST Optimized Triton medium_acl_path: PASS max_abs=0
+TEST Baseline Triton1 default_required: SKIP_PRESKIP grid_toxic_or_slow max_abs=inf
+TEST Baseline Triton2 default_required: SKIP_UNAVAILABLE base_file_read_prohibited max_abs=inf
+TEST Optimized Triton default_required: PASS max_abs=0
+TEST Optimized Triton forced_triton_direct: PASS max_abs=1.43051e-06
+TEST Optimized Triton forced_triton_persistent: PASS max_abs=1.43051e-06
+UNIT_TEST PASS
+BENCHMARK_START
+INFO bench_unavailable Baseline Triton2 tiny_triton_path base_file_read_prohibited
+INFO bench_unavailable Baseline Triton2 medium_acl_path base_file_read_prohibited
+INFO bench_preskipped Baseline Triton1 default_required avoid_grid_context_poisoning
+INFO bench_unavailable Baseline Triton2 default_required base_file_read_prohibited
+l2_60_convtranspose3d_swish_groupnorm_hardswish:
+              label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0  tiny_triton_path       0.371594          0.592973               inf          0.372314
+1   medium_acl_path       1.992639          3.963478               inf          2.004239
+2  default_required     166.034973               inf               inf        165.882019
+
+/home/s00929845/kernel_verify/l2_60_ConvTranspose3d_Swish_GroupNorm_HardSwish_1782780840/60_ConvTranspose3d_Swish_GroupNorm_HardSwish.py:245: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out = torch.empty_like(y)
+TEST Baseline Triton1 tiny_triton_path: PASS max_abs=1.43051e-06
+TEST Baseline Triton2 tiny_triton_path: SKIP_UNAVAILABLE base_file_read_prohibited max_abs=inf
+TEST Optimized Triton tiny_triton_path: PASS max_abs=0
+TEST Baseline Triton1 medium_acl_path: PASS max_abs=1.90735e-06
+TEST Baseline Triton2 medium_acl_path: SKIP_UNAVAILABLE base_file_read_prohibited max_abs=inf
+TEST Optimized Triton medium_acl_path: PASS max_abs=0
+TEST Baseline Triton1 default_required: SKIP_PRESKIP grid_toxic_or_slow max_abs=inf
+TEST Baseline Triton2 default_required: SKIP_UNAVAILABLE base_file_read_prohibited max_abs=inf
+TEST Optimized Triton default_required: PASS max_abs=0
+TEST Optimized Triton forced_triton_direct: PASS max_abs=1.43051e-06
+TEST Optimized Triton forced_triton_persistent: PASS max_abs=1.43051e-06
+UNIT_TEST PASS
+BENCHMARK_START
+INFO bench_unavailable Baseline Triton2 tiny_triton_path base_file_read_prohibited
+INFO bench_unavailable Baseline Triton2 medium_acl_path base_file_read_prohibited
+INFO bench_preskipped Baseline Triton1 default_required avoid_grid_context_poisoning
+INFO bench_unavailable Baseline Triton2 default_required base_file_read_prohibited
+l2_60_convtranspose3d_swish_groupnorm_hardswish:
+              label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0  tiny_triton_path       0.372386          0.593910               inf          0.372092
+1   medium_acl_path       2.001159          3.979143               inf          2.004320
+2  default_required     165.549393               inf               inf        166.084030
+
+/home/s00929845/kernel_verify/l2_60_ConvTranspose3d_Swish_GroupNorm_HardSwish_1782780840/60_ConvTranspose3d_Swish_GroupNorm_HardSwish.py:245: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out = torch.empty_like(y)

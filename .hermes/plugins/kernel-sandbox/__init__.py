@@ -29,9 +29,11 @@ Tools registered:
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 import re
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -65,6 +67,14 @@ _DELIVERABLES = [
     ("review.md", "review.md"),
     ("results.txt", "results.txt"),
 ]
+
+_FINAL_DELIVERABLE_NAMES = {
+    "profile_kernels.py",
+    "Optimizations.md",
+    "performance_report.md",
+    "review.md",
+    "results.txt",
+}
 
 
 def _path_matches_protected(path_str: str) -> bool:
@@ -145,6 +155,80 @@ def _remote_verify_available() -> bool:
         os.environ.get("REMOTE_VERIFY_HOST")
         and os.environ.get("REMOTE_VERIFY_USER")
         and os.environ.get("REMOTE_VERIFY_PASS"))
+
+
+def _guided_enabled(state: dict) -> bool:
+    guided = state.get("guided_search")
+    return bool(isinstance(guided, dict) and guided.get("enabled"))
+
+
+def _guided_db_path() -> Path:
+    explicit = os.environ.get("GUIDED_SEARCH_DB_PATH", "").strip()
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    home = Path(os.environ.get("HERMES_HOME", "~/.hermes")).expanduser()
+    return (home / "guided-search" / "guided_search.sqlite3").resolve()
+
+
+def _guided_run_gate(state: dict) -> dict:
+    """Read the authoritative guided-search completion gate from SQLite."""
+    guided = state.get("guided_search") or {}
+    run_id = guided.get("run_id")
+    if not run_id:
+        return {
+            "available": False,
+            "status": "initializing",
+            "error": "guided-search run_id is not initialized",
+        }
+    path = _guided_db_path()
+    if not path.is_file():
+        return {
+            "available": False,
+            "status": "unavailable",
+            "error": f"guided-search database not found: {path}",
+        }
+    try:
+        with sqlite3.connect(path, timeout=5.0) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """SELECT status, failure_reason, promotion_domain, winner_candidate_id,
+                          winner_source_hash
+                   FROM search_runs WHERE id=?""",
+                (int(run_id), ),
+            ).fetchone()
+        if row is None:
+            return {
+                "available": False,
+                "status": "unavailable",
+                "error": f"guided-search run {run_id} not found",
+            }
+        return {"available": True, **dict(row)}
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        return {"available": False, "status": "unavailable", "error": str(exc)}
+
+
+def _optimized_source_hash(workspace: Path) -> str | None:
+    baseline = _baseline_name(workspace)
+    if baseline:
+        canonical = workspace / f"opt_{baseline}"
+        if canonical.is_file():
+            return hashlib.sha256(canonical.read_bytes()).hexdigest()
+    candidates = sorted(workspace.glob("opt_*.py"))
+    if len(candidates) != 1:
+        return None
+    return hashlib.sha256(candidates[0].read_bytes()).hexdigest()
+
+
+def _guided_stale_deliverables(state: dict, workspace: Path) -> list[str]:
+    guided = state.get("guided_search") or {}
+    previous = guided.get("pre_search_deliverable_hashes") or {}
+    stale = []
+    for name, old_hash in previous.items():
+        path = workspace / name
+        if path.is_file() and hashlib.sha256(
+                path.read_bytes()).hexdigest() == old_hash:
+            stale.append(name)
+    return stale
 
 
 def _project_dir() -> Path:
@@ -251,17 +335,15 @@ def _validate_results_txt(workspace: Path) -> tuple[bool, list[str]]:
 
     # Detect canonical format: must have both UNIT_TEST lines AND
     # " optimized " (with spaces) in TEST lines.
-    # Old-format results.txt (from previous agent runs) use different
-    # structure and should not be validated.
+    # Old or malformed results must fail closed. Treating an unrecognized file
+    # as valid lets a fabricated report bypass correctness and benchmark gates.
     has_unit_test = any(line.startswith("UNIT_TEST") for line in lines)
     has_canonical_test = any(
         line.startswith("TEST ") and " optimized " in line for line in lines)
     if not has_unit_test or not has_canonical_test:
-        logger.info(
-            "kernel-sandbox: results.txt for %s uses old format, skipping validation",
-            workspace.name,
-        )
-        return True, []
+        return False, [
+            "results.txt is not in the canonical UNIT_TEST/TEST format"
+        ]
 
     # Check UNIT_TEST result
     unit_test_lines = [ln for ln in lines if ln.startswith("UNIT_TEST")]
@@ -335,16 +417,83 @@ def _advance_stage(state: dict, workspace: Path) -> tuple[str, str]:
     stage = _current_stage(state)
     rv_avail = _remote_verify_available()
 
+    if stage == "search":
+        gate = _guided_run_gate(state)
+        if not gate.get("available"):
+            return "search", (
+                "GUIDED SEARCH is enabled but unavailable; advancement is blocked: "
+                f"{gate.get('error', 'unknown error')}")
+        if str(gate.get("status", "")).startswith("failed_"):
+            return "search", (
+                f"GUIDED SEARCH FAILED ({gate.get('status')}): "
+                f"{gate.get('failure_reason') or 'no authoritative elite was produced'}. "
+                "Advancement is blocked; start a new run after correcting the evaluator "
+                "or baseline failure.")
+        if gate.get("status") != "completed":
+            required = ("a hardware-confirmed winner"
+                        if gate.get("promotion_domain") == "hardware" else
+                        "a cannsim-confirmed winner")
+            return "search", (
+                "GUIDED SEARCH is still active. Complete the sticky candidate "
+                f"attempts and select {required} before advancing.")
+        winner_hash = gate.get("winner_source_hash")
+        actual_hash = _optimized_source_hash(workspace)
+        if not winner_hash or actual_hash != winner_hash:
+            return "search", (
+                "GUIDED SEARCH winner hash does not match the materialized opt_*.py; "
+                "advancement is blocked.")
+        state["current_stage"] = "finalize"
+        state["stages_completed"] = state.get("stages_completed",
+                                              []) + ["search"]
+        state.setdefault("guided_search", {}).update({
+            "status":
+            "completed",
+            "winner_candidate_id":
+            gate.get("winner_candidate_id"),
+            "winner_source_hash":
+            winner_hash,
+        })
+        _save_state(workspace, state)
+        return "finalize", (
+            "GUIDED SEARCH COMPLETE. Stage advanced to FINALIZE. The winner is "
+            "hash-locked; produce profile_kernels.py, Optimizations.md, "
+            "performance_report.md, and review.md for that winner.")
+
+    if _guided_enabled(state) and stage in {"verify", "record", "done"}:
+        winner_hash = (state.get("guided_search")
+                       or {}).get("winner_source_hash")
+        if not winner_hash or _optimized_source_hash(workspace) != winner_hash:
+            state.pop("verified", None)
+            state.pop("recorded", None)
+            _save_state(workspace, state)
+            return stage, (
+                f"{stage.upper()} blocked: opt_*.py no longer matches the "
+                "guided-search winner hash. Restore the selected winner before "
+                "continuing.")
+
     # Only require results.txt when leaving verify (not entering it)
     require_results = stage == "verify"
     complete, missing = _check_deliverables(workspace,
                                             require_results=require_results)
 
-    if stage == "optimize":
+    if stage == "finalize":
+        winner_hash = (state.get("guided_search")
+                       or {}).get("winner_source_hash")
+        if not winner_hash or _optimized_source_hash(workspace) != winner_hash:
+            return "finalize", (
+                "FINALIZE blocked: opt_*.py no longer matches the guided-search winner hash."
+            )
+        stale = _guided_stale_deliverables(state, workspace)
+        if stale:
+            return "finalize", (
+                "FINALIZE incomplete: rewrite stale pre-search deliverables for the "
+                f"selected winner: {', '.join(stale)}")
+
+    if stage in ("optimize", "finalize"):
         if complete:
             state["current_stage"] = "verify"
             state["stages_completed"] = state.get("stages_completed",
-                                                  []) + ["optimize"]
+                                                  []) + [stage]
             _save_state(workspace, state)
             if rv_avail:
                 verify_instr = (
@@ -374,13 +523,14 @@ def _advance_stage(state: dict, workspace: Path) -> tuple[str, str]:
                 "VERIFICATION PASSED. Stage advanced to RECORD.\n"
                 "Use episode_write to record this optimization attempt.")
         elif state.get("verify_failed"):
-            state["current_stage"] = "optimize"
+            retry_stage = "finalize" if _guided_enabled(state) else "optimize"
+            state["current_stage"] = retry_stage
             state["stages_completed"] = state.get("stages_completed",
                                                   []) + ["verify_fail"]
             _save_state(workspace, state)
-            return "optimize", (
+            return retry_stage, (
                 f"VERIFICATION FAILED: {state.get('verify_error', 'unknown')}. "
-                f"Re-enter OPTIMIZE stage. Fix the issues and re-produce deliverables."
+                f"Re-enter {retry_stage.upper()} stage. Fix the issues and re-produce deliverables."
             )
         else:
             if rv_avail:
@@ -415,6 +565,66 @@ def _advance_stage(state: dict, workspace: Path) -> tuple[str, str]:
 # Hook callbacks
 # ---------------------------------------------------------------------------
 
+_PATCH_FILE_RE = re.compile(
+    r"^\*\*\*\s+(?:Update|Add|Delete)\s+File:\s*(.+?)\s*$", re.MULTILINE)
+
+
+def _write_targets(tool_name: str, args: dict[str, Any]) -> list[str]:
+    if tool_name == "write_file" or args.get("mode", "replace") != "patch":
+        target = str(args.get("path", "")).strip()
+        return [target] if target else []
+    return [
+        match.strip()
+        for match in _PATCH_FILE_RE.findall(str(args.get("patch", "")))
+        if match.strip()
+    ]
+
+
+def _write_block_reason(target: str, workspace: Path,
+                        state: dict[str, Any]) -> str | None:
+    target_name = Path(target).name
+    try:
+        resolved_target = Path(target).expanduser().resolve()
+        target_in_workspace = (resolved_target == workspace
+                               or workspace in resolved_target.parents)
+    except (OSError, RuntimeError):
+        target_in_workspace = True
+    if target_name == ".pipeline_state.json":
+        return "BLOCKED: .pipeline_state.json is plugin-owned state."
+    if (_current_stage(state) == "search" and _guided_enabled(state)
+            and target_in_workspace
+            and target_name in _FINAL_DELIVERABLE_NAMES):
+        return (f"BLOCKED: '{target_name}' is a FINALIZE-stage deliverable. "
+                "Complete guided SEARCH and materialize the winner first.")
+    if (_current_stage(state) in {"finalize", "verify", "record", "done"}
+            and _guided_enabled(state) and target_name.startswith("opt_")
+            and target_name.endswith(".py")):
+        return (
+            f"BLOCKED: '{target_name}' is the hash-locked guided-search winner. "
+            "Return to SEARCH explicitly if the kernel itself must change.")
+    if _path_matches_protected(target):
+        return f"BLOCKED: '{target}' is a project-level file and cannot be modified."
+    if _path_is_baseline(target, workspace):
+        baseline = _baseline_name(workspace)
+        return (f"BLOCKED: '{target}' is the input kernel file ({baseline}). "
+                f"You must NOT modify it. Write to opt_{baseline} instead.")
+    if _path_is_reference(target, workspace):
+        return (f"BLOCKED: '{target}' is a reference kernel file (base_*.py). "
+                "You must NOT read or modify it.")
+    return None
+
+
+def _terminal_command_may_modify(command: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:^|[;&|]\s*)(?:rm|mv|cp|install|touch|truncate|chmod|chown|ln|"
+            r"tee|dd|rsync|unzip|sed\s+-i|perl\s+-pi|"
+            r"git\s+(?:checkout|restore|clean|apply)|patch)\b",
+            command,
+        ) or re.search(
+            r"\b(?:write_text|write_bytes|unlink|rename|replace)\s*\(",
+            command) or re.search(r"(?:^|[^<>])>>?\s*\S+", command))
+
 
 def _on_pre_tool_call(
     tool_name: str = "",
@@ -432,27 +642,17 @@ def _on_pre_tool_call(
         return None
 
     if tool_name in ("write_file", "patch"):
-        target = args.get("path", "")
-
-        if _path_matches_protected(target):
-            msg = f"BLOCKED: '{target}' is a project-level file and cannot be modified."
+        targets = _write_targets(tool_name, args)
+        if not targets:
+            msg = "BLOCKED: unable to determine the write target."
             logger.warning("kernel-sandbox: %s", msg)
             return {"action": "block", "message": msg}
-
-        if _path_is_baseline(target, workspace):
-            baseline = _baseline_name(workspace)
-            msg = (
-                f"BLOCKED: '{target}' is the input kernel file ({baseline}). "
-                f"You must NOT modify it. Write to opt_{baseline} instead.")
-            logger.warning("kernel-sandbox: %s", msg)
-            return {"action": "block", "message": msg}
-
-        if _path_is_reference(target, workspace):
-            msg = (
-                f"BLOCKED: '{target}' is a reference kernel file (base_*.py). "
-                f"You must NOT read or modify it.")
-            logger.warning("kernel-sandbox: %s", msg)
-            return {"action": "block", "message": msg}
+        state = _load_state(workspace)
+        for target in targets:
+            msg = _write_block_reason(target, workspace, state)
+            if msg:
+                logger.warning("kernel-sandbox: %s", msg)
+                return {"action": "block", "message": msg}
 
     if tool_name == "read_file":
         target = args.get("path", "")
@@ -465,6 +665,52 @@ def _on_pre_tool_call(
 
     if tool_name == "terminal":
         cmd = args.get("command", "")
+        may_modify = _terminal_command_may_modify(cmd)
+
+        state = _load_state(workspace)
+        if may_modify:
+            baseline = _baseline_name(workspace)
+            protected_markers = (
+                ".hermes/plugins",
+                ".hermes/skills",
+                "optimize_kernels.py",
+                "AGENTS.md",
+            )
+            if any(marker in cmd for marker in protected_markers):
+                msg = "BLOCKED: terminal command would modify protected project infrastructure."
+                logger.warning("kernel-sandbox: %s", msg)
+                return {"action": "block", "message": msg}
+            if baseline and re.search(
+                    rf"(?<!opt_){re.escape(baseline)}(?:$|[\s;&|])", cmd):
+                msg = "BLOCKED: terminal command would modify the baseline kernel."
+                logger.warning("kernel-sandbox: %s", msg)
+                return {"action": "block", "message": msg}
+            if re.search(r"(?:^|[/\s])base_[^/\s]*\.py\b", cmd):
+                msg = "BLOCKED: terminal command would modify a reference kernel."
+                logger.warning("kernel-sandbox: %s", msg)
+                return {"action": "block", "message": msg}
+
+        if _guided_enabled(state) and ".pipeline_state.json" in cmd:
+            msg = "BLOCKED: terminal command targets plugin-owned pipeline state."
+            logger.warning("kernel-sandbox: %s", msg)
+            return {"action": "block", "message": msg}
+        if (_current_stage(state) == "search" and _guided_enabled(state)
+                and may_modify and any(name in cmd
+                                       for name in _FINAL_DELIVERABLE_NAMES)
+                and str(_guided_db_path().parent / "artifacts") not in cmd):
+            msg = (
+                "BLOCKED: terminal command targets a FINALIZE-stage deliverable "
+                "while guided SEARCH is active.")
+            logger.warning("kernel-sandbox: %s", msg)
+            return {"action": "block", "message": msg}
+        if (_current_stage(state) in {"finalize", "verify", "record", "done"}
+                and _guided_enabled(state) and may_modify):
+            baseline = _baseline_name(workspace)
+            if baseline and f"opt_{baseline}" in cmd:
+                msg = ("BLOCKED: terminal command targets the hash-locked "
+                       "guided-search winner.")
+                logger.warning("kernel-sandbox: %s", msg)
+                return {"action": "block", "message": msg}
 
         if re.search(r"\b(cat|head|tail|less|more|grep)\s+.*base_\S*\.py\b",
                      cmd):
@@ -521,6 +767,22 @@ def _on_pre_llm_call(
             "Produce all 5 deliverables: opt_<name>.py, profile_kernels.py, "
             "Optimizations.md, performance_report.md, and review.md."
             f"Write ONLY inside {workspace}.")
+    elif stage == "search":
+        parts.append(
+            "TASK: Follow the guided-search attempt injected for this tool-loop "
+            "iteration. Edit only opt_<name>.py, compile/test/evaluate that sticky "
+            "candidate, and submit it with guided_search_submit_candidate. Do NOT "
+            "create final deliverables or call kernel_status advance during SEARCH."
+        )
+    elif stage == "finalize":
+        winner_hash = (state.get("guided_search")
+                       or {}).get("winner_source_hash", "")
+        parts.append(
+            "TASK: Guided search is complete. The selected opt_*.py winner is "
+            f"hash-locked ({winner_hash}). Do not re-optimize it. Produce "
+            "profile_kernels.py, Optimizations.md, performance_report.md, and "
+            "review.md for this exact winner, then call kernel_status advance."
+        )
     elif stage == "verify":
         rv_avail = _remote_verify_available()
         if rv_avail:
@@ -550,6 +812,51 @@ def _on_pre_llm_call(
     logger.debug("kernel-sandbox: pre_llm_call injecting context for %s",
                  session_id)
     return {"context": ctx}
+
+
+def _inject_latest_user_context(request: dict[str, Any],
+                                context: str,
+                                *,
+                                api_mode: str = "") -> dict[str, Any]:
+    """Append current sandbox stage to the request-local user message."""
+    message_key = ("messages" if isinstance(request.get("messages"), list) else
+                   "input" if isinstance(request.get("input"), list) else None)
+    if message_key is None:
+        return request
+    messages = list(request[message_key])
+    synthetic = ({
+        "role": "user",
+        "content": [{
+            "type": "input_text",
+            "text": context
+        }]
+    } if message_key == "input" or api_mode == "codex_responses" else {
+        "role": "user",
+        "content": context
+    })
+    messages.append(synthetic)
+    effective = dict(request)
+    effective[message_key] = messages
+    return effective
+
+
+def _on_llm_execution(
+    request: dict[str, Any],
+    next_call,
+    session_id: str = "",
+    api_call_count: int = 0,
+    api_mode: str = "",
+    **_: Any,
+) -> Any:
+    rendered = _on_pre_llm_call(session_id=session_id)
+    if not rendered or not rendered.get("context"):
+        return next_call(request)
+    effective = _inject_latest_user_context(request,
+                                            str(rendered["context"]),
+                                            api_mode=api_mode)
+    if effective is request:
+        return next_call(request)
+    return next_call(effective)
 
 
 def _on_post_tool_call(
@@ -610,6 +917,8 @@ def _on_post_tool_call(
                     )
                     _save_state(workspace, state)
                     return
+            else:
+                state.pop("results_txt_errors", None)
         except Exception as exc:
             logger.warning(
                 "kernel-sandbox: results.txt validation error for %s: %s",
@@ -617,6 +926,8 @@ def _on_post_tool_call(
 
     if raw.get("test_passed") is True:
         state["verified"] = True
+        state.pop("verify_failed", None)
+        state.pop("verify_error", None)
         logger.info(
             "kernel-sandbox: remote_verify PASSED for %s - auto-set verified=True",
             session_id,
@@ -657,8 +968,11 @@ def _on_post_llm_call(
         return
 
     state = _load_state(workspace)
-    complete, missing = _check_deliverables(workspace)
     stage = _current_stage(state)
+    if stage == "search" and _guided_enabled(state):
+        complete, missing = False, ["guided-search completion"]
+    else:
+        complete, missing = _check_deliverables(workspace)
 
     state["deliverables_complete"] = complete
     state["deliverables_missing"] = missing
@@ -714,7 +1028,11 @@ def _handle_status(args: dict, **_) -> str:
     action = args.get("action", "read")
 
     if action == "read":
-        complete, missing = _check_deliverables(workspace)
+        stage = _current_stage(state)
+        if stage == "search" and _guided_enabled(state):
+            complete, missing = False, ["guided-search completion"]
+        else:
+            complete, missing = _check_deliverables(workspace)
         return json.dumps(
             {
                 "workspace": str(workspace),
@@ -725,6 +1043,7 @@ def _handle_status(args: dict, **_) -> str:
                 "results_txt_errors": state.get("results_txt_errors", []),
                 "stages_completed": state.get("stages_completed", []),
                 "turn_count": state.get("turn_count", 0),
+                "guided_search": state.get("guided_search"),
             },
             indent=2)
 
@@ -764,9 +1083,9 @@ def _handle_status(args: dict, **_) -> str:
 def register(ctx) -> None:
     ctx.register_hook("pre_tool_call", _on_pre_tool_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
-    ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     ctx.register_hook("post_llm_call", _on_post_llm_call)
     ctx.register_hook("on_session_end", _on_session_end)
+    ctx.register_middleware("llm_execution", _on_llm_execution)
 
     ctx.register_tool(
         name="kernel_status",
@@ -797,7 +1116,7 @@ def register(ctx) -> None:
                     },
                     "key": {
                         "type": "string",
-                        "enum": ["recorded", "verify_failed"],
+                        "enum": ["verified", "recorded", "verify_failed"],
                         "description": "Flag to set (only with action=set).",
                     },
                     "value": {

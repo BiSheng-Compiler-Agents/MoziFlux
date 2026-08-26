@@ -248,10 +248,8 @@ def _shape_sort_key(label: str) -> tuple[int, float, str]:
 
 # ── Plotting ──────────────────────────────────────────────────────────────────
 def _method_order(methods: list[str]) -> list[str]:
-    """Stable order: Reference, Baseline, Optimized, then anything else."""
-    priority = [
-        "Reference (PyTorch/ACL)", "Baseline Triton", "Optimized Triton"
-    ]
+    """Stable order: known METHOD_ALIASES methods first, then anything else."""
+    priority = list(dict.fromkeys(METHOD_ALIASES.values()))
     seen = set()
     out = [
         m for m in priority if m in methods and not (m in seen or seen.add(m))
@@ -326,10 +324,18 @@ def _pct_improvement(df: pd.DataFrame) -> str:
 def plot_aggregate_box(df: pd.DataFrame, out_path: Path) -> None:
     """Box plot: x = method, y = runtime (log), pooling every (kernel, shape)
     data point. Shows the overall runtime distribution per method.
-    Filters out inf/NaN runtimes (timed-out or failed kernels)."""
-    methods = _method_order(df["method"].unique().tolist())
+    Filters out methods outside METHOD_ALIASES and inf/NaN runtimes
+    (timed-out or failed kernels)."""
+    allowed_methods = list(dict.fromkeys(METHOD_ALIASES.values()))
+    plot_df = df[df["method"].isin(allowed_methods)].copy()
+    if plot_df.empty:
+        plt.close("all")
+        return
+
+    methods = _method_order(plot_df["method"].unique().tolist())
     data = [
-        df[(df["method"] == m) & np.isfinite(df["runtime"])]["runtime"].values
+        plot_df[(plot_df["method"] == m)
+                & np.isfinite(plot_df["runtime"])]["runtime"].values
         for m in methods
     ]
     n_valid = [len(d) for d in data]

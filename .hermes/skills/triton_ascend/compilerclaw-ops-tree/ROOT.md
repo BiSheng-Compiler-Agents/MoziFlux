@@ -11,6 +11,7 @@ Based on the user's **complete conversation history + current prompt**, determin
 | Kernel cannsim simulation or trace analysis only (no optimization intent) | cannsim, cannsim_remote_run, trace_core0, npubin, rt*, aclInit, RVECEX, MTE2, SCALAR, instr.bin, gen_report, simulation | Read `./kernel-ops/ROUTER.md` |
 | Kernel hardware profiling, profile_kernels.py, perf_report, do_bench, benchmark | profile_kernels, perf_report, do_bench, benchmark, latency, NPU hardware, torch_ref vs baseline | Read `./kernel-ops/ROUTER.md` |
 | Kernel code generation, tiling strategy, implement new kernel | tiling, kernel code, codegen, implement kernel, block size, grid, tl.dot, UB, BLOCK_M, persistent grid | Read `./kernel-ops/ROUTER.md` |
+| Triton-Ascend extension prefetching/preloading for mixed Cube/Vector kernels | prefetch, prefetching, preload, preloading, al.scope, bl.alloc, ping-pong, cube scope, vector scope, CV pipeline | Read `./kernel-ops/ROUTER.md` |
 | Episode recording/retrieval, optimization knowledge base, past episodes | episode_write, episode_retrieve, episode_update, episode_list, optimization episodes | Read `./kernel-ops/ROUTER.md` |
 | Full operator development workflow, end-to-end development, unsure which skill to use | full-process, end-to-end, development orchestration, operator dev | Read `./triton-operator/ROUTER.md` |
 | Static code review, code review, P0/P1/P2 bugs | code review, static analysis, review, P0, P1, mask missing, core type mismatch | Read `./triton-operator/ROUTER.md` |

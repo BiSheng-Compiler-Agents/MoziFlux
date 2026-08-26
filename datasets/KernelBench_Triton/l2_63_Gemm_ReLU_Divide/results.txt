@@ -1,0 +1,20 @@
+TEST Baseline Triton1 small: PASS max_abs=0
+TEST Baseline Triton2 small: SKIP_REFERENCE_FILE_NOT_READ max_abs=inf
+TEST Optimized Triton small: PASS max_abs=0
+TEST Baseline Triton1 irregular: PASS max_abs=0
+TEST Baseline Triton2 irregular: SKIP_REFERENCE_FILE_NOT_READ max_abs=inf
+TEST Optimized Triton irregular: PASS max_abs=0
+TEST Baseline Triton1 target: PASS max_abs=0
+TEST Baseline Triton2 target: SKIP_REFERENCE_FILE_NOT_READ max_abs=inf
+TEST Optimized Triton target: PASS max_abs=0
+TEST Optimized Triton forced_persistent: PASS max_abs=0
+UNIT_TEST PASS
+
+INFO bench_skip Baseline Triton2 small: reference_file_not_read
+INFO bench_skip Baseline Triton2 irregular: reference_file_not_read
+INFO bench_skip Baseline Triton2 target: reference_file_not_read
+gemm_relu_divide_latency:
+       label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small       0.076269          0.051078               inf          0.052672
+1  irregular       0.097526          0.078965               inf          0.080002
+2     target     105.708190        107.028905               inf        105.571867

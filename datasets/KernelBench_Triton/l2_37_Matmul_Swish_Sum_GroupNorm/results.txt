@@ -1,0 +1,43 @@
+TEST torch small_direct PASS shape=(32,512,1024,32)
+TEST baseline1 small_direct PASS max_abs=7.152557e-07
+TEST baseline2 small_direct PASS max_abs=7.152557e-07
+TEST optimized small_direct PASS max_abs=0.000000e+00
+TEST torch medium_direct PASS shape=(512,1024,2048,32)
+TEST baseline1 medium_direct PASS max_abs=7.152557e-07
+TEST baseline2 medium_direct PASS max_abs=7.152557e-07
+TEST optimized medium_direct PASS max_abs=0.000000e+00
+TEST torch irregular_direct PASS shape=(129,768,1536,48)
+TEST baseline1 irregular_direct PASS max_abs=7.152557e-07
+TEST baseline2 irregular_direct PASS max_abs=7.152557e-07
+TEST optimized irregular_direct PASS max_abs=0.000000e+00
+TEST torch largeC_direct PASS shape=(32,1024,4096,64)
+TEST baseline1 largeC_direct PASS max_abs=7.152557e-07
+TEST baseline2 largeC_direct PASS max_abs=7.152557e-07
+TEST optimized largeC_direct PASS max_abs=0.000000e+00
+TEST torch persistent_large PASS shape=(8192,1024,4096,64)
+TEST baseline1 persistent_large SKIP grid_guard
+TEST baseline2 persistent_large SKIP grid_guard
+TEST optimized persistent_large PASS max_abs=0.000000e+00
+TEST torch target PASS shape=(32768,1024,4096,64)
+TEST baseline1 target SKIP grid_guard
+TEST baseline2 target SKIP grid_guard
+TEST optimized target PASS max_abs=0.000000e+00
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l2_37_Matmul_Swish_Sum_GroupNorm_1782760139/37_Matmul_Swish_Sum_GroupNorm.py:112: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out = torch.empty_like(z)
+INFO bench baseline1 SKIP grid_guard
+INFO bench baseline2 SKIP grid_guard
+INFO bench baseline1 SKIP grid_guard
+INFO bench baseline2 SKIP grid_guard
+matmul_swish_sum_groupnorm:
+              label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      small_direct       0.234468          0.520867          0.525333          0.232915
+1     medium_direct       2.125985          8.319883          8.521790          2.114749
+2  irregular_direct       0.560840          2.841111          2.898768          0.558606
+3     largeC_direct       0.502078          1.166801          1.205967          0.515538
+4  persistent_large      56.856991               inf               inf         56.826000
+5            target     226.366318               inf               inf        226.384262
+
+/home/s00929845/kernel_verify/l2_37_Matmul_Swish_Sum_GroupNorm_1782760139/37_Matmul_Swish_Sum_GroupNorm.py:112: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  out = torch.empty_like(z)

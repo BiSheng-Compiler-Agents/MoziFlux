@@ -8,7 +8,7 @@ FROM nousresearch/hermes-agent:latest
 USER root
 
 # -----------------------------------------------------------------------------
-# 1. Install system build tools (cmake, make, g++)
+# 1a. Install system build tools (cmake, make, g++)
 #    Needed to compile the C++ host launcher for cannsim
 # -----------------------------------------------------------------------------
 RUN apt-get update && \
@@ -37,7 +37,7 @@ ENV PATH="/opt/miniconda3/bin:${PATH}"
 
 # -----------------------------------------------------------------------------
 # 3. CANN 9.0.0
-#    Download from: https://www.hiascend.com/cann/download?versionId=717
+#    Download from: https://www.hiascend.com/cann/download
 # -----------------------------------------------------------------------------
 RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
     conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
@@ -49,24 +49,25 @@ RUN conda config --add channels https://repo.huaweicloud.com/ascend/repos/conda/
 # -----------------------------------------------------------------------------
 # 4. Create the compilerclaw conda environment from environment.yml
 # -----------------------------------------------------------------------------
-COPY environment.yml /tmp/environment.yml
-
 RUN conda create -n compilerclaw python=3.11 && \
-    conda clean -afy && \
-    rm /tmp/environment.yml
+    conda clean -afy
 
 # -----------------------------------------------------------------------------
-# 5. Install triton-ascend and torch-npu (need special index URLs)
-#    Must run AFTER conda env create so the compilerclaw env exists.
+# 5. Install Triton-Ascend, torch-npu, Hermes Agent, and plugin dependencies
+#    into compilerclaw. Hermes is launched from this environment, so in-process
+#    plugin imports resolve against its site-packages.
 # -----------------------------------------------------------------------------
 RUN /opt/miniconda3/envs/compilerclaw/bin/pip install \
-    triton-ascend==3.2.1 \
-    --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple && \
+    triton-ascend \
+    --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi && \
     /opt/miniconda3/envs/compilerclaw/bin/pip install \
     torch==2.7.1+cpu \
     --index-url=https://download.pytorch.org/whl/cpu && \
     /opt/miniconda3/envs/compilerclaw/bin/pip install \
-    torch_npu==2.7.1
+    torch_npu==2.7.1.post8 && \
+    uv pip install \
+    --python /opt/miniconda3/envs/compilerclaw/bin/python \
+    hermes-agent arize-phoenix paramiko
 
 # -----------------------------------------------------------------------------
 # 6. Install entrypoint script to fix UID/GID mismatch at container start
@@ -87,7 +88,12 @@ ENV CONDA_PREFIX=/opt/miniconda3/envs/compilerclaw
 ENV HERMES_ENABLE_PROJECT_PLUGINS=true
 
 # -----------------------------------------------------------------------------
-# 9. Set working directory — project is mounted here at runtime
+# 9. Enable write to /opt/moziflux
+# -----------------------------------------------------------------------------
+ENV HERMES_WRITE_SAFE_ROOT="/opt/data:/opt/moziflux"
+
+# -----------------------------------------------------------------------------
+# 10. Set working directory — project is mounted here at runtime
 # -----------------------------------------------------------------------------
 WORKDIR /opt/moziflux
 

@@ -1,0 +1,17 @@
+TEST Baseline Triton1 small_irregular: PASS max_abs=0
+TEST Baseline Triton2 small_irregular: SKIP_UNAVAILABLE sandbox_base_read_forbidden max_abs=inf
+TEST Optimized Triton small_irregular: PASS max_abs=0
+TEST Baseline Triton1 medium_aligned: PASS max_abs=0
+TEST Baseline Triton2 medium_aligned: SKIP_UNAVAILABLE sandbox_base_read_forbidden max_abs=inf
+TEST Optimized Triton medium_aligned: PASS max_abs=0
+TEST Baseline Triton1 default: PASS max_abs=0
+TEST Baseline Triton2 default: SKIP_UNAVAILABLE sandbox_base_read_forbidden max_abs=inf
+TEST Optimized Triton default: PASS max_abs=0
+TEST Optimized Triton forced_persistent: PASS max_abs=0
+UNIT_TEST PASS
+
+l2_70_gemm_sigmoid_scaling_residualadd:
+             label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0  small_irregular       0.096954          0.058992               inf          0.069130
+1   medium_aligned       0.178521          0.086831               inf          0.154314
+2          default      16.090981         15.358143               inf         15.368969

@@ -102,6 +102,8 @@ result = remote_verify(
 
 The tool uploads files via SFTP, runs correctness then benchmark on the remote NPU machine, and downloads results back to `local_dir/remote_results/`.
 
+**Status timing:** if `kernel_status` is still in `optimize`, first finish deliverables and call `kernel_status(..., action="advance")` to enter `verify`; then run `remote_verify`. A remote run performed before the pipeline reaches `verify` may not satisfy stage validation and can require a second run.
+
 ### Step 7: Episode Recording (Stage 6 — MANDATORY)
 
 After getting remote results, record the full optimization journey:
@@ -116,6 +118,8 @@ episode_write(
     result="<before/after latency>, <vs_torch_npu>, <hardware_verified: PASS/FAIL>",
 )
 ```
+
+**Record-stage completion rule:** when `kernel_status` reports `stage="record"`, do not stop after deliverables or verification. First record the episode, then set `kernel_status(..., key="recorded", value=True)`, then call `kernel_status(..., action="advance")`, and finally read status to confirm `stage="done"`. A response that reports `record` status without advancing to `done` is incomplete.
 
 ---
 

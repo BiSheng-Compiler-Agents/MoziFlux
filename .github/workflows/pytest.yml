@@ -1,0 +1,33 @@
+name: Pytest
+
+on:
+  workflow_call:
+
+jobs:
+  pytest:
+    name: Python tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TORCH_DEVICE_BACKEND_AUTOLOAD: "0"
+      PYTHONHASHSEED: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: .github/requirements-test.txt
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            --extra-index-url https://mirrors.huaweicloud.com/ascend/repos/pypi \
+            -r .github/requirements-test.txt
+
+      - name: Run pytest
+        run: python -m pytest tests/ -q -o 'addopts='

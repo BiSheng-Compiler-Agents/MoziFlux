@@ -1,0 +1,17 @@
+TEST Baseline Triton1 direct_1x64x16x16: SKIP_UNAVAILABLE AttributeError max_abs=inf
+TEST Baseline Triton2 direct_1x64x16x16: SKIP_UNAVAILABLE max_abs=inf
+TEST Optimized Triton direct_1x64x16x16: PASS max_abs=8.9407e-08
+TEST Baseline Triton1 irregular_2x64x17x19: SKIP_UNAVAILABLE AttributeError max_abs=inf
+TEST Baseline Triton2 irregular_2x64x17x19: SKIP_UNAVAILABLE max_abs=inf
+TEST Optimized Triton irregular_2x64x17x19: PASS max_abs=1.19209e-07
+TEST Baseline Triton1 default_32x64x256x256: SKIP_UNAVAILABLE RuntimeError max_abs=inf
+TEST Baseline Triton2 default_32x64x256x256: SKIP_UNAVAILABLE max_abs=inf
+TEST Optimized Triton default_32x64x256x256: PASS max_abs=1.19209e-07
+TEST Optimized Triton forced_persistent: PASS max_abs=1.19209e-07
+UNIT_TEST PASS
+
+convtranspose2d_subtract_tanh_latency:
+                   label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0      direct_1x64x16x16       0.328616               inf               inf          0.285827
+1   irregular_2x64x17x19       0.370532               inf               inf          0.342336
+2  default_32x64x256x256     261.502228               inf               inf        245.712112

@@ -1,0 +1,23 @@
+UNIT_CHECK tiny_triton_path Baseline Triton1: PASS max_diff=5.96046e-08
+UNIT_CHECK tiny_triton_path Baseline Triton2: PASS max_diff=5.96046e-08
+UNIT_CHECK tiny_triton_path Optimized Triton: PASS max_diff=5.96046e-08
+UNIT_CHECK small_triton_path Baseline Triton1: PASS max_diff=5.96046e-08
+UNIT_CHECK small_triton_path Baseline Triton2: PASS max_diff=5.96046e-08
+UNIT_CHECK small_triton_path Optimized Triton: PASS max_diff=5.96046e-08
+UNIT_CHECK default_acl_path Baseline Triton1: INFO unavailable_or_preskipped RuntimeError
+UNIT_CHECK default_acl_path Baseline Triton2: INFO unavailable_or_preskipped RuntimeError
+UNIT_CHECK default_acl_path Optimized Triton: PASS max_diff=0
+UNIT_TEST PASS
+
+/home/s00929845/kernel_verify/l2_49_ConvTranspose3d_Softmax_Sigmoid_1782771436/49_ConvTranspose3d_Softmax_Sigmoid.py:117: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x)
+INFO Baseline Triton1 default_acl_path preskipped_or_unavailable RuntimeError
+INFO Baseline Triton2 default_acl_path preskipped_or_unavailable RuntimeError
+convtranspose3d_softmax_sigmoid:
+               label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0   tiny_triton_path       0.157085          0.217897          0.222244          0.193260
+1  small_triton_path       0.238530          0.624978          0.611228          0.561445
+2   default_acl_path      41.180523               inf               inf         41.257828
+
+/home/s00929845/kernel_verify/l2_49_ConvTranspose3d_Softmax_Sigmoid_1782771436/49_ConvTranspose3d_Softmax_Sigmoid.py:117: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x)

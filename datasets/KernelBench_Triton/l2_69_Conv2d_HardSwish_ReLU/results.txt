@@ -1,0 +1,20 @@
+TEST PyTorch / ACL small_irregular: PASS max_abs=0
+TEST Baseline Triton1 small_irregular: PASS max_abs=1.19209e-07
+TEST Baseline Triton2 small_irregular: SKIP_UNAVAILABLE sandbox_do_not_read_base max_abs=inf
+TEST Optimized Triton small_irregular: PASS max_abs=0
+TEST PyTorch / ACL medium_rect: PASS max_abs=0
+TEST Baseline Triton1 medium_rect: PASS max_abs=1.19209e-07
+TEST Baseline Triton2 medium_rect: SKIP_UNAVAILABLE sandbox_do_not_read_base max_abs=inf
+TEST Optimized Triton medium_rect: PASS max_abs=0
+TEST PyTorch / ACL default: PASS max_abs=0
+TEST Baseline Triton1 default: PASS max_abs=1.19209e-07
+TEST Baseline Triton2 default: SKIP_UNAVAILABLE sandbox_do_not_read_base max_abs=inf
+TEST Optimized Triton default: PASS max_abs=0
+TEST Optimized Triton forced_persistent: PASS max_abs=0
+UNIT_TEST PASS
+
+l2_69_conv2d_hardswish_relu:
+             label  PyTorch / ACL  Baseline Triton1  Baseline Triton2  Optimized Triton
+0  small_irregular       0.285151          0.140805               inf          0.154349
+1      medium_rect       1.157549          0.598359               inf          0.577327
+2          default      62.840015         19.460703               inf         18.281796
